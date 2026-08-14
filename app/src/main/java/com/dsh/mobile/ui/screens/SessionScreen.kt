@@ -371,6 +371,9 @@ fun SessionScreen(
     var modelDialog by remember { mutableStateOf(false) }
     var modeDialog by remember { mutableStateOf(false) }
     var modelInfo by remember { mutableStateOf<SessionModelsValue?>(null) }
+    var skillsDialog by remember { mutableStateOf(false) }
+    var skills by remember { mutableStateOf<List<DshConnection.SkillEntry>>(emptyList()) }
+    var skillsLoading by remember { mutableStateOf(false) }
     var approval by remember { mutableStateOf<DshConnection.Event.ApprovalRequested?>(null) }
     var questions by remember { mutableStateOf<List<QuestionItem>?>(null) }
     var actionError by remember { mutableStateOf<String?>(null) }
@@ -525,6 +528,16 @@ fun SessionScreen(
                 }
             },
             actions = {
+                IconButton(onClick = {
+                    skillsDialog = true
+                    skillsLoading = true
+                    scope.launch {
+                        skills = connection.skillsList(sessionId)
+                        skillsLoading = false
+                    }
+                }) {
+                    Icon(Icons.Default.MenuBook, null)
+                }
                 IconButton(onClick = {
                     modelDialog = true
                     scope.launch { modelInfo = connection.sessionModels(sessionId) }
@@ -763,6 +776,19 @@ fun SessionScreen(
                             actionError = e.message
                         }
                     }
+                },
+            )
+        }
+
+        // 技能选择
+        if (skillsDialog) {
+            SkillsDialog(
+                skills = skills,
+                loading = skillsLoading,
+                onDismiss = { skillsDialog = false },
+                onPick = { name ->
+                    input = input + "请使用 $name 技能："
+                    skillsDialog = false
                 },
             )
         }
@@ -1180,6 +1206,67 @@ private fun AccessModeDialog(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+    )
+}
+
+// ──────────────────────────── 技能选择对话框 ────────────────────────────
+
+@Composable
+private fun SkillsDialog(
+    skills: List<DshConnection.SkillEntry>,
+    loading: Boolean,
+    onDismiss: () -> Unit,
+    onPick: (String) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("选择技能") },
+        text = {
+            if (loading) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator(Modifier.size(24.dp))
+                }
+            } else if (skills.isEmpty()) {
+                Text("没有可用技能", style = MaterialTheme.typography.bodySmall)
+            } else {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    skills.forEach { s ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onPick(s.name) }
+                                .padding(vertical = 6.dp),
+                        ) {
+                            Text(
+                                s.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            if (s.description.isNotBlank()) {
+                                Text(
+                                    s.description,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
                     }
                 }
             }

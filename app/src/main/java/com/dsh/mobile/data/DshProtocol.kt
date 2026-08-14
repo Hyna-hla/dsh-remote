@@ -210,6 +210,7 @@ object DshEndpoints {
     const val SESSION_CANCEL = "session.cancel"
     const val SESSION_RENAME = "session.rename"
     const val COMMANDS_EXECUTE = "commands/execute"
+    const val SKILL_LIST = "skill.list"
     const val WORKSPACE_LIST = "workspace.list"
     const val WORKSPACE_CREATE = "workspace.create"
     const val WORKSPACE_ARCHIVE_SESSION = "workspace.archiveSession"

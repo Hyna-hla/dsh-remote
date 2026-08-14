@@ -505,6 +505,24 @@ class DshConnection {
         })
     }
 
+    data class SkillEntry(val name: String, val description: String)
+
+    /** skill.list：当前会话可用的技能列表（响应 {skills:[{name, description, whenToUse, modelInvocable}]}） */
+    suspend fun skillsList(sessionId: String): List<SkillEntry> {
+        return try {
+            val value = call(DshEndpoints.SKILL_LIST, buildJsonObject { put("sessionId", sessionId) })
+            val arr = value.jsonObject["skills"]?.jsonArray ?: return emptyList()
+            arr.mapNotNull { el ->
+                val o = el.jsonObject
+                val name = o["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                val desc = o["description"]?.jsonPrimitive?.contentOrNull ?: ""
+                SkillEntry(name, desc)
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
     /** agentPreset.list 响应宽松解析：兼容 {items:[{id,name}]} 等形态 */
     suspend fun agentPresets(): List<Pair<String, String>> {
         return try {
