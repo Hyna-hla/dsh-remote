@@ -7,6 +7,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
         android:name=".DshApplication"
@@ -34,5 +37,12 @@
             android:name=".service.DshConnectionService"
             android:foregroundServiceType="dataSync"
             android:exported="false" />
+
+        <!-- 扫码组件（zxing-android-embedded），使用 AppCompat 主题避免崩溃 -->
+        <activity
+            android:name="com.journeyapps.barcodescanner.CaptureActivity"
+            android:screenOrientation="fullSensor"
+            android:theme="@style/zxing_CaptureTheme"
+            tools:replace="android:theme,android:screenOrientation" />
     </application>
 </manifest>
