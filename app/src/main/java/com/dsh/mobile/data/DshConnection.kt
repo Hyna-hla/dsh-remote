@@ -447,10 +447,14 @@ class DshConnection {
             beforeSeq?.let { put("beforeSeq", it) }
             maxMessages?.let { put("maxMessages", it) }
         })
-        return try {
-            json.decodeFromJsonElement(HistoryValue.serializer(), value)
-        } catch (e: Exception) {
-            HistoryValue()
+        // 解码可能达数万条事件（assistant/chunk 占绝大多数），必须在后台线程做，
+        // 否则主线程卡死 → ANR/闪退
+        return withContext(Dispatchers.Default) {
+            try {
+                json.decodeFromJsonElement(HistoryValue.serializer(), value)
+            } catch (e: Exception) {
+                HistoryValue()
+            }
         }
     }
 

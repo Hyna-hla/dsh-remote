@@ -161,7 +161,7 @@ class SessionChatState(
 
     suspend fun load() {
         try {
-            val h = connection.history(sessionId, maxMessages = 30)
+            val h = connection.history(sessionId, maxMessages = 10)
             oldestSeq = h.events.firstOrNull()?.event?.seq
             hasMore = h.hasMore
             parseMeta(h.projections)
@@ -212,7 +212,7 @@ class SessionChatState(
     suspend fun loadMore() {
         val before = oldestSeq ?: return
         try {
-            val h = connection.history(sessionId, beforeSeq = before, maxMessages = 30)
+            val h = connection.history(sessionId, beforeSeq = before, maxMessages = 10)
             oldestSeq = h.events.firstOrNull()?.event?.seq
             hasMore = h.hasMore && h.events.isNotEmpty()
             val list = mutableListOf<ChatItem>()
@@ -253,6 +253,13 @@ class SessionChatState(
     }
 
     fun onSessionEvent(e: SessionEventWire) {
+        // 实时事件可能形态异常（data 非对象等），异常一律跳过，绝不能让会话页崩溃
+        try {
+            processLiveEvent(e)
+        } catch (_: Exception) {}
+    }
+
+    private fun processLiveEvent(e: SessionEventWire) {
         val cur = _items.value.toMutableList()
         when (e.type) {
             DshEventTypes.USER_MESSAGE -> {
