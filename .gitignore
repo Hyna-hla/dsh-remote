@@ -1,0 +1,24 @@
+# Gradle
+.gradle/
+build/
+!**/src/**/build/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Android
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk.idsig
+build-log.txt
+
+# Kotlin
+.kotlin/
+
+# OS
+.DS_Store
+Thumbs.db

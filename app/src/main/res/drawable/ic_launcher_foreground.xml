@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 对话气泡（DSH 品牌蓝） -->
+    <path
+        android:fillColor="#4D7CFE"
+        android:pathData="M30,32 h48 a10,10 0 0 1 10,10 v24 a10,10 0 0 1 -10,10 H46 l-14,12 v-12 h-2 a10,10 0 0 1 -10,-10 V42 a10,10 0 0 1 10,-10 z" />
+    <!-- 两条消息线 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M38,46 h32 v5 H38 z" />
+    <path
+        android:fillColor="#9DBDFF"
+        android:pathData="M38,58 h20 v5 H38 z" />
+    <!-- 右上角火花 -->
+    <path
+        android:fillColor="#7CC7FF"
+        android:pathData="M74,30 l2.6,6.4 6.4,2.6 -6.4,2.6 -2.6,6.4 -2.6,-6.4 -6.4,-2.6 6.4,-2.6 z" />
+</vector>
