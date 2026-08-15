@@ -33,9 +33,18 @@ import com.dsh.mobile.data.*
 import com.dsh.mobile.ui.components.MarkdownText
 import com.dsh.mobile.ui.theme.*
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
+
+// 流式 chunk 合并落列表的节流间隔：攒 50ms 的增量一次性更新，
+// 避免每个 token 都做一次全列表拷贝 + 重组（快流式下主线程被打满 → 卡死）
+private const val CHUNK_FLUSH_MS = 50L
+
+// 流式期间 Markdown 只渲染尾部上限，防止长回复每个增量都全量重解析（O(n²)）
+private const val STREAM_TAIL_CHARS = 8000
 
 // ──────────────────────────── 聊天条目模型与状态机 ────────────────────────────
 
@@ -150,7 +159,33 @@ class SessionChatState(
     private var streamStart: Long? = null
     private var counter = 0L
 
+    // 流式增量缓冲：chunk 先攒在这里，50ms 批量 flush 一次列表
+    private val pendingChunk = StringBuilder()
+    private var flushJob: Job? = null
+
+    // load() 完成前到达的实时事件先入队，历史页落地后重放，
+    // 防止网络加载期间 _items 被整页覆盖丢掉实时 chunk
+    private var loaded = false
+    private val preloadBuffer = mutableListOf<SessionEventWire>()
+
     private fun nextKey() = "k${counter++}"
+
+    private fun flushPendingChunk() {
+        flushJob?.cancel()
+        flushJob = null
+        if (pendingChunk.isEmpty()) return
+        val delta = pendingChunk.toString()
+        pendingChunk.clear()
+        val cur = _items.value.toMutableList()
+        val idx = cur.indexOfLast { it is ChatItem.Assistant && it.streaming }
+        if (idx >= 0) {
+            val a = cur[idx] as ChatItem.Assistant
+            cur[idx] = ChatItem.Assistant(a.key, a.text + delta, streaming = true)
+        } else {
+            cur.add(ChatItem.Assistant(nextKey(), delta, streaming = true))
+        }
+        _items.value = cur
+    }
 
     private fun parseMeta(projections: JsonElement?) {
         try {
@@ -175,7 +210,25 @@ class SessionChatState(
                     }
                     DshEventTypes.ASSISTANT_MESSAGE -> {
                         val t = assistantTextOf(e.data)
-                        if (t.isNotBlank()) list.add(ChatItem.Assistant(nextKey(), t))
+                        val idx = list.indexOfLast { it is ChatItem.Assistant && it.streaming }
+                        if (idx >= 0) {
+                            list[idx] = ChatItem.Assistant(list[idx].key, t)
+                        } else if (t.isNotBlank()) {
+                            list.add(ChatItem.Assistant(nextKey(), t))
+                        }
+                    }
+                    // 尾页可能落在进行中的回合：chunk 先攒成流式占位，assistant/message 到达后替换
+                    DshEventTypes.ASSISTANT_CHUNK -> {
+                        val d = chunkTextOf(e.data)
+                        if (d.isNotEmpty()) {
+                            val idx = list.indexOfLast { it is ChatItem.Assistant && it.streaming }
+                            if (idx >= 0) {
+                                val a = list[idx] as ChatItem.Assistant
+                                list[idx] = ChatItem.Assistant(a.key, a.text + d, streaming = true)
+                            } else {
+                                list.add(ChatItem.Assistant(nextKey(), d, streaming = true))
+                            }
+                        }
                     }
                     DshEventTypes.TOOL_CALL -> {
                         val d = e.data.jsonObject
@@ -205,6 +258,14 @@ class SessionChatState(
             _items.value = list
         } catch (e: Exception) {
             _items.value = listOf(ChatItem.Notice(nextKey(), "加载历史失败：${e.message}", true))
+        } finally {
+            // 历史页落地后重放加载期间积压的实时事件，保证内容不丢
+            loaded = true
+            if (preloadBuffer.isNotEmpty()) {
+                val pending = preloadBuffer.toList()
+                preloadBuffer.clear()
+                pending.forEach { processLiveEvent(it) }
+            }
         }
     }
 
@@ -253,6 +314,11 @@ class SessionChatState(
     }
 
     fun onSessionEvent(e: SessionEventWire) {
+        // load() 尚未完成：先入队，历史页落地后重放，避免被整页覆盖丢内容
+        if (!loaded) {
+            preloadBuffer.add(e)
+            return
+        }
         // 实时事件可能形态异常（data 非对象等），异常一律跳过，绝不能让会话页崩溃
         try {
             processLiveEvent(e)
@@ -260,6 +326,24 @@ class SessionChatState(
     }
 
     private fun processLiveEvent(e: SessionEventWire) {
+        // chunk 走批量缓冲路径：攒 CHUNK_FLUSH_MS 的增量一次性 flush，
+        // 不做每 token 一次的全列表拷贝 + 重组（快流式下主线程被打满 → 卡死）
+        if (e.type == DshEventTypes.ASSISTANT_CHUNK) {
+            if (streamStart == null) streamStart = e.time
+            val delta = chunkTextOf(e.data)
+            if (delta.isNotEmpty()) {
+                pendingChunk.append(delta)
+                if (flushJob == null) {
+                    flushJob = scope.launch {
+                        delay(CHUNK_FLUSH_MS)
+                        flushPendingChunk()
+                    }
+                }
+            }
+            return
+        }
+        // 其余事件：先落盘攒下的 chunk（保持时序），再一次性更新列表
+        flushPendingChunk()
         val cur = _items.value.toMutableList()
         when (e.type) {
             DshEventTypes.USER_MESSAGE -> {
@@ -277,19 +361,6 @@ class SessionChatState(
                     cur.add(ChatItem.Assistant(nextKey(), t, thinkSeconds = secs))
                 }
                 streamStart = null
-            }
-
-            DshEventTypes.ASSISTANT_CHUNK -> {
-                if (streamStart == null) streamStart = e.time
-                val delta = chunkTextOf(e.data)
-                if (delta.isEmpty()) return
-                val idx = cur.indexOfLast { it is ChatItem.Assistant && it.streaming }
-                if (idx >= 0) {
-                    val a = cur[idx] as ChatItem.Assistant
-                    cur[idx] = ChatItem.Assistant(a.key, a.text + delta, streaming = true)
-                } else {
-                    cur.add(ChatItem.Assistant(nextKey(), delta, streaming = true))
-                }
             }
 
             DshEventTypes.TOOL_CALL -> {
@@ -451,11 +522,15 @@ fun SessionScreen(
         }
     }
 
-    // 自动滚动到底部
-    LaunchedEffect(items.size, approval, questions) {
-        if (items.isNotEmpty()) {
-            listState.animateScrollToItem(items.size - 1)
-        }
+    // 自动滚动到底部：仅在用户本来就停在底部时跟随（不抢用户上翻阅读），
+    // 用无动画 scrollToItem；流式时按最后一条文本长度跟随增量
+    val tailSig = items.lastOrNull()?.let { if (it is ChatItem.Assistant) it.text.length else 0 } ?: 0
+    LaunchedEffect(items.size, tailSig, approval, questions) {
+        if (items.isEmpty()) return@LaunchedEffect
+        val info = listState.layoutInfo
+        val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+        val atBottom = info.totalItemsCount <= 0 || lastVisible >= info.totalItemsCount - 1
+        if (atBottom) listState.scrollToItem(items.size - 1)
     }
 
     fun send() {
@@ -856,7 +931,19 @@ private fun AssistantCard(item: ChatItem.Assistant) {
                 Spacer(Modifier.height(6.dp))
             }
             if (item.text.isNotBlank()) {
-                MarkdownText(item.text)
+                // 流式期间只渲染尾部：Markdown 解析/排版随文本增长是 O(n²)，
+                // 长回复每个增量都全量重解析会把主线程拖死
+                if (item.streaming && item.text.length > STREAM_TAIL_CHARS) {
+                    Text(
+                        "…（流式输出中，仅显示最新部分）",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    MarkdownText(item.text.takeLast(STREAM_TAIL_CHARS))
+                } else {
+                    MarkdownText(item.text)
+                }
             }
         }
     }

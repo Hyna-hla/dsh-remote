@@ -310,24 +310,26 @@ class DshConnection {
             .post(body)
             .build()
 
-        val response = withContext(Dispatchers.IO) {
-            unaryClient.newCall(request).execute()
-        }
-        response.use { resp ->
-            val text = resp.body?.string() ?: throw ApiException("空响应")
-            if (!resp.isSuccessful) {
-                throw ApiException("HTTP ${resp.code}", resp.code.toString())
+        // 响应体读取（阻塞）与 JSON 解析（大 payload 如 session.history 可达数 MB）
+        // 整体放在 IO 线程完成：调用方常在主线程（LaunchedEffect），否则打开会话卡数秒
+        return withContext(Dispatchers.IO) {
+            val response = unaryClient.newCall(request).execute()
+            response.use { resp ->
+                val text = resp.body?.string() ?: throw ApiException("空响应")
+                if (!resp.isSuccessful) {
+                    throw ApiException("HTTP ${resp.code}", resp.code.toString())
+                }
+                val parsed = try {
+                    json.decodeFromString(ServerResponse.serializer(), text)
+                } catch (e: Exception) {
+                    throw ApiException("响应解析失败: ${e.message}")
+                }
+                if (!parsed.result.ok) {
+                    val err = parsed.result.error
+                    throw ApiException(err?.message ?: "RPC 失败", err?.code)
+                }
+                parsed.result.value ?: JsonNull
             }
-            val parsed = try {
-                json.decodeFromString(ServerResponse.serializer(), text)
-            } catch (e: Exception) {
-                throw ApiException("响应解析失败: ${e.message}")
-            }
-            if (!parsed.result.ok) {
-                val err = parsed.result.error
-                throw ApiException(err?.message ?: "RPC 失败", err?.code)
-            }
-            return parsed.result.value ?: JsonNull
         }
     }
 
