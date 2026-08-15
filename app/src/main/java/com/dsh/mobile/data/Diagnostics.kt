@@ -17,8 +17,8 @@ suspend fun runDiagnostics(profile: HostProfile): List<DiagStep> = withContext(D
     val steps = mutableListOf<DiagStep>()
     val uri = runCatching { URI(profile.url) }.getOrNull()
     val host = uri?.host ?: ""
-    val port = uri?.port ?: -1
     val https = profile.url.startsWith("https://")
+    val port = uri?.port?.takeIf { it > 0 } ?: if (https) 443 else 80
 
     // 1. DNS
     steps += timed("DNS 解析") {
