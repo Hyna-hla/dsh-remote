@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { ILinkClient } from "./ilink.js";
 import { createBridge } from "./bridge.js";
+import QRCode from "qrcode";
 
 const execFileAsync = promisify(execFile);
 
@@ -50,23 +51,36 @@ const readBody = (req) =>
     });
   });
 
+// 探测结果短缓存：设置页轮询时不重复 spawn 进程，通道生成更快
+let cpolarCache = { at: 0, value: null };
+let dshPortCache = { at: 0, value: 0 };
+
 async function findCpolar() {
+  if (Date.now() - cpolarCache.at < 30000) return cpolarCache.value;
   for (const cand of CPOLAR_CANDIDATES) {
     if (cand.includes("\\") || cand.includes("/")) {
-      if (existsSync(cand)) return cand;
+      if (existsSync(cand)) {
+        cpolarCache = { at: Date.now(), value: cand };
+        return cand;
+      }
     } else {
       try {
         const { stdout } = await execFileAsync("where.exe", [cand]);
         const first = String(stdout).split(/\r?\n/)[0].trim();
-        if (first) return first;
+        if (first) {
+          cpolarCache = { at: Date.now(), value: first };
+          return first;
+        }
       } catch {}
     }
   }
+  cpolarCache = { at: Date.now(), value: null };
   return null;
 }
 
 /** 探测正在运行的桌面版 DSH web 端口（node 进程命令行匹配 dsh bin.js web） */
 async function findDshPort() {
+  if (Date.now() - dshPortCache.at < 60000) return dshPortCache.value;
   const ps =
     "$ErrorActionPreference='SilentlyContinue'; " +
     "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | " +
@@ -78,8 +92,10 @@ async function findDshPort() {
   try {
     const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-Command", ps], { timeout: 15000 });
     const port = parseInt(String(stdout).trim(), 10);
-    return Number.isFinite(port) && port > 0 ? port : 0;
+    dshPortCache = { at: Date.now(), value: Number.isFinite(port) && port > 0 ? port : 0 };
+    return dshPortCache.value;
   } catch {
+    dshPortCache = { at: Date.now(), value: 0 };
     return 0;
   }
 }
@@ -260,6 +276,30 @@ export const apply = (ctx) => {
       state.url = null;
       state.message = "";
       json(res, 200, { ok: true });
+    },
+  });
+
+  // 本地生成二维码（不出本机、无第三方依赖、秒出图）
+  webServer.register({
+    kind: "exact",
+    path: "/api/remote-access/qr",
+    handler: async (req, res) => {
+      if (req.method !== "GET") return json(res, 405, { error: "method not allowed" });
+      const u = new URL(req.url, "http://localhost");
+      const data = u.searchParams.get("data") ?? "";
+      if (!data) return json(res, 400, { error: "missing data" });
+      if (data.length > 2048) return json(res, 400, { error: "data too long" });
+      try {
+        const dataUrl = await QRCode.toDataURL(data, {
+          width: 336,
+          margin: 2,
+          errorCorrectionLevel: "M",
+          color: { dark: "#0D1B2A", light: "#FFFFFF" },
+        });
+        json(res, 200, { ok: true, dataUrl });
+      } catch (err) {
+        json(res, 500, { error: String(err?.message ?? err) });
+      }
     },
   });
 };

@@ -6,6 +6,7 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import com.dsh.mobile.DshApplication
 import com.dsh.mobile.data.DshConnection
 import com.dsh.mobile.ui.screens.*
 
@@ -25,9 +26,15 @@ fun AppNavigation(
 ) {
     val connState by connection.state.collectAsState()
 
-    // 连接成功后自动进入首页
+    // 连接成功后：优先处理通知深链（打开指定会话），否则自动进入首页
     LaunchedEffect(connState) {
         if (connState is DshConnection.State.Connected) {
+            val pending = DshApplication.pendingOpenSessionId
+            if (pending != null) {
+                DshApplication.pendingOpenSessionId = null
+                navController.navigate(Screen.Session.createRoute(pending))
+                return@LaunchedEffect
+            }
             val current = navController.currentDestination?.route
             if (current == Screen.Connect.route) {
                 navController.navigate(Screen.Home.route) {

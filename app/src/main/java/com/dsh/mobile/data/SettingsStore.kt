@@ -44,6 +44,7 @@ class SettingsStore(private val context: Context) {
         private val PANEL_GLASS_KEY = floatPreferencesKey("panel_glass")
         private val BRIGHTNESS_KEY = floatPreferencesKey("brightness")
         private val BACKGROUND_NOTIFY_KEY = booleanPreferencesKey("background_notify")
+        private val AUTO_MODEL_KEY = booleanPreferencesKey("auto_model")
         private val THEME_MODE_KEY = stringPreferencesKey("theme_mode")
         private val WORKSPACE_ID_KEY = stringPreferencesKey("workspace_id")
     }
@@ -59,9 +60,9 @@ class SettingsStore(private val context: Context) {
         prefs[DARK_MODE_KEY] ?: true
     }
 
-    /** 主题模式：dark（默认，保持现有行为）/ light / system */
+    /** 主题模式：blue（深蓝，默认）/ black（纯黑）/ warm（暖白）；旧值 dark/light/system 由 UI 层映射 */
     val themeMode: Flow<String> = context.dataStore.data.map { prefs ->
-        prefs[THEME_MODE_KEY] ?: "dark"
+        prefs[THEME_MODE_KEY] ?: "blue"
     }
 
     suspend fun setThemeMode(mode: String) {
@@ -119,5 +120,14 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setBackgroundNotify(enabled: Boolean) {
         context.dataStore.edit { it[BACKGROUND_NOTIFY_KEY] = enabled }
+    }
+
+    /** 自适应模型：按任务难度自动选择 Flash / Pro（默认开） */
+    val autoModel: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[AUTO_MODEL_KEY] ?: true
+    }
+
+    suspend fun setAutoModel(enabled: Boolean) {
+        context.dataStore.edit { it[AUTO_MODEL_KEY] = enabled }
     }
 }

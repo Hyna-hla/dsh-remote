@@ -20,10 +20,10 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
- * 前台服务：持有一条只读连接监听审批/确认事件。
- * App 在后台时，桌面端一旦请求审批（approval/requested）或问答（question/requested），
- * 立即发一条高优先级横幅通知提醒用户；点击通知回到 App。
- * App 在前台时不重复通知（会话页已有审批横幅）。
+ * 前台服务：持有一条只读连接监听事件。
+ * - 审批/问答请求 → 高优先级横幅通知（去重，点击直达对应会话）
+ * - 任务完成（会话从运行态转空闲，8 秒防抖确认）→ 普通通知
+ * App 在前台时不重复通知（会话页已有横幅）。
  */
 class DshConnectionService : Service() {
 
@@ -31,6 +31,13 @@ class DshConnectionService : Service() {
     private var watcher: DshConnection? = null
     private var watchJob: Job? = null
     private var notificationSeq = 0
+
+    /** 会话活跃状态（运行中→空闲迁移触发完成通知） */
+    private val sessionActive = mutableMapOf<String, Boolean>()
+    private val completionJobs = mutableMapOf<String, Job>()
+    /** 审批/问答去重 */
+    private val seenApprovals = mutableSetOf<String>()
+    private val seenQuestions = mutableSetOf<String>()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -42,7 +49,7 @@ class DshConnectionService : Service() {
     private fun startAsForeground() {
         val notification = Notification.Builder(this, DshApplication.CHANNEL_ID)
             .setContentTitle("DSH Remote")
-            .setContentText("后台连接已开启，审批与确认会横幅提醒")
+            .setContentText("后台连接已开启，审批/确认/完成会横幅提醒")
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setContentIntent(
                 PendingIntent.getActivity(
@@ -72,9 +79,7 @@ class DshConnectionService : Service() {
             }
             val connection = DshConnection()
             watcher = connection
-            // 事件监听
             launch { connection.events.collect { handle(it) } }
-            // 断线自动重连（10s 退避）
             launch {
                 connection.state.collect { st ->
                     if (st is DshConnection.State.Error) {
@@ -91,18 +96,61 @@ class DshConnectionService : Service() {
         if (DshApplication.isAppInForeground) return
         when (event) {
             is DshConnection.Event.ApprovalRequested -> {
-                val reason = event.reason?.let { "：$it" } ?: ""
-                postAlert("DSH 需要你的审批", "工具「${event.toolName}」请求执行权限$reason")
+                if (!seenApprovals.add(event.approvalId)) return
+                val reason = event.reason?.let { "：" + it } ?: ""
+                postAlert(
+                    "DSH 需要你的审批",
+                    "工具「" + event.toolName + "」请求执行权限" + reason,
+                    event.sessionId,
+                )
             }
+            is DshConnection.Event.ApprovalResolved -> seenApprovals.remove(event.approvalId)
+
             is DshConnection.Event.QuestionRequested -> {
-                postAlert("DSH 需要你的确认", "有 ${event.questions.size} 个问题等待回答")
+                if (!seenQuestions.add(event.sessionId)) return
+                val first = event.questions.firstOrNull()?.question?.take(60)
+                postAlert(
+                    "DSH 需要你的确认",
+                    if (first != null) "「" + first + "」等 " + event.questions.size + " 个问题等待回答"
+                    else "有 " + event.questions.size + " 个问题等待回答",
+                    event.sessionId,
+                )
             }
+            is DshConnection.Event.QuestionResolved -> seenQuestions.remove(event.sessionId)
+
+            is DshConnection.Event.SessionStatus ->
+                updateActivity(event.sessionId, event.status == "running")
+
+            is DshConnection.Event.Jobs ->
+                updateActivity(event.sessionId, event.jobs.any { it.status == "running" || it.status == "stopping" })
+
             else -> {}
         }
     }
 
-    private fun postAlert(title: String, text: String) {
+    /** 运行态跟踪：进入运行清掉完成防抖；转空闲后 8 秒确认（避免任务间空隙误报）再通知完成 */
+    private fun updateActivity(sessionId: String, active: Boolean) {
+        val prev = sessionActive[sessionId] ?: false
+        sessionActive[sessionId] = active
+        if (active) {
+            completionJobs.remove(sessionId)?.cancel()
+        } else if (prev) {
+            val job = scope.launch {
+                delay(8_000)
+                if (sessionActive[sessionId] != true) {
+                    postAlert("DSH 任务完成", "会话 " + sessionId.take(8) + " 的执行已结束", sessionId)
+                }
+            }
+            completionJobs[sessionId] = job
+        }
+    }
+
+    private fun postAlert(title: String, text: String, sessionId: String? = null) {
         val manager = getSystemService(NotificationManager::class.java)
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            if (sessionId != null) putExtra("open_session", sessionId)
+        }
         val notification = Notification.Builder(this, DshApplication.CHANNEL_APPROVALS)
             .setContentTitle(title)
             .setContentText(text)
@@ -111,10 +159,8 @@ class DshConnectionService : Service() {
             .setPriority(Notification.PRIORITY_HIGH)
             .setContentIntent(
                 PendingIntent.getActivity(
-                    this, 0,
-                    Intent(this, MainActivity::class.java).apply {
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                    },
+                    this, (1000 + sessionId.hashCode()).coerceAtLeast(0),
+                    intent,
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
                 )
             )

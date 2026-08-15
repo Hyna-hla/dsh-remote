@@ -42,5 +42,9 @@ class DshApplication : Application() {
         /** App 是否在前台（前台时审批横幅已可见，服务不再重复通知） */
         @Volatile
         var isAppInForeground = false
+
+        /** 通知点击后要打开的会话（由 MainActivity/AppNavigation 消费） */
+        @Volatile
+        var pendingOpenSessionId: String? = null
     }
 }

@@ -1,6 +1,9 @@
 package com.dsh.mobile.ui.screens
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -38,12 +41,21 @@ fun SettingsScreen(
     val scope = rememberCoroutineScope()
     var appearance by remember { mutableStateOf(AppearanceConfig()) }
     var backgroundNotify by remember { mutableStateOf(true) }
-    var themeMode by remember { mutableStateOf("dark") }
+    var themeMode by remember { mutableStateOf("blue") }
+    var autoModel by remember { mutableStateOf(true) }
+    var notifGranted by remember { mutableStateOf(true) }
+    val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { g ->
+        notifGranted = g
+    }
 
     LaunchedEffect(Unit) {
         appearance = settingsStore.appearance.first()
         backgroundNotify = settingsStore.backgroundNotify.first()
         themeMode = settingsStore.themeMode.first()
+        autoModel = settingsStore.autoModel.first()
+        notifGranted = Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(
+            context, Manifest.permission.POST_NOTIFICATIONS,
+        ) == PackageManager.PERMISSION_GRANTED
     }
 
     fun setBackgroundNotify(enabled: Boolean) {
@@ -105,9 +117,9 @@ fun SettingsScreen(
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(
-                            "dark" to "深色",
-                            "light" to "浅色",
-                            "system" to "跟随系统",
+                            "blue" to "深蓝",
+                            "black" to "纯黑",
+                            "warm" to "暖白",
                         ).forEach { (mode, label) ->
                             FilterChip(
                                 selected = themeMode == mode,
@@ -231,6 +243,32 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 4.dp),
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("自适应模型", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "按任务难度自动选 Flash / Pro（短问答→Flash，复杂任务→Pro）",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Switch(
+                            checked = autoModel,
+                            onCheckedChange = {
+                                autoModel = it
+                                scope.launch { settingsStore.setAutoModel(it) }
+                            },
+                        )
+                    }
                 }
             }
 
@@ -258,6 +296,26 @@ fun SettingsScreen(
                             checked = backgroundNotify,
                             onCheckedChange = { setBackgroundNotify(it) },
                         )
+                    }
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 4.dp),
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            if (notifGranted) "通知权限：已开启" else "通知权限：未开启（审批/确认/完成不会弹通知）",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (notifGranted) DshSuccess else MaterialTheme.colorScheme.error,
+                        )
+                        if (!notifGranted) {
+                            TextButton(onClick = { notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }) {
+                                Text("授权")
+                            }
+                        }
                     }
                 }
             }

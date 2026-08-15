@@ -137,30 +137,32 @@ window.__ModuleLoader__.load({
     // S.label2 保留兼容（供下面 CpolarCard 使用）
     S.label2 = function () { return S.label; };
 
-    // 二维码渲染：优先直接用服务器返回的图片 URL；加载失败则用 qrserver 把 URL 文本画成二维码
+    // 本地二维码：数据不出本机（宿主端 qrcode 库生成），无第三方、秒出图
+    function LocalQr(props) {
+      var [dataUrl, setDataUrl] = useState(null);
+      var [err, setErr] = useState(false);
+      useEffect(function () {
+        if (!props.data) { setDataUrl(null); setErr(false); return; }
+        var alive = true;
+        fetch("/api/remote-access/qr?data=" + encodeURIComponent(props.data))
+          .then(function (r) { return r.json(); })
+          .then(function (r) {
+            if (!alive) return;
+            if (r.ok && r.dataUrl) setDataUrl(r.dataUrl);
+            else setErr(true);
+          })
+          .catch(function () { if (alive) setErr(true); });
+        return function () { alive = false; };
+      }, [props.data]);
+      if (err) return h("div", { style: Object.assign({}, S.qr, { display: "flex", alignItems: "center", justifyContent: "center", color: "#999" }) }, "二维码生成失败");
+      if (!dataUrl) return h("div", { style: Object.assign({}, S.qr, { display: "flex", alignItems: "center", justifyContent: "center", color: "#999" }) }, "生成二维码…");
+      return h("img", { src: dataUrl, alt: "二维码", style: S.qr });
+    }
+
     function WxQr(props) {
       var wx = props.wx;
-      var [failed, setFailed] = useState(false);
-      var [regenKey, setRegenKey] = useState(0);
-
-      useEffect(function () {
-        setFailed(false);
-        setRegenKey(function (k) { return k + 1; });
-      }, [wx.qrUrl, wx.qrData]);
-
       if (!wx.qrUrl && !wx.qrData) return h("div", { style: S.sub }, "正在生成二维码…（几秒后刷新）");
-      if (failed || !wx.qrUrl) {
-        return h("img", {
-          key: "qrgen-" + regenKey,
-          src: "https://api.qrserver.com/v1/create-qr-code/?size=168x168&margin=8&data=" + encodeURIComponent(wx.qrData || ""),
-          alt: "微信登录二维码", style: S.qr,
-        });
-      }
-      return h("img", {
-        key: "qrurl-" + regenKey,
-        src: wx.qrUrl, alt: "微信登录二维码", style: S.qr,
-        onError: function () { setFailed(true); },
-      });
+      return h(LocalQr, { data: wx.qrData || wx.qrUrl });
     }
 
     function CpolarCard() {
@@ -218,19 +220,15 @@ window.__ModuleLoader__.load({
                 h("div", { style: S.label2() }, "○ 未开启"),
           url ? h("div", { style: { marginTop: 8 } },
             h("div", { style: S.label2() }, "手机端连接地址："),
-            h("div", { style: S.url }, url)) : null,
+            h("a", { href: url, target: "_blank", rel: "noreferrer", style: S.url }, url)) : null,
           info.port ? h("div", { style: { marginTop: 4 } }, h("span", { style: S.mono }, "目标端口: " + info.port)) : null,
           info.cpolarFound === false ? h("div", { style: { marginTop: 6 } }, h("span", { style: S.err }, "⚠ 未检测到 cpolar（E:\\coplar\\cpolar.exe）")) : null,
           info.dshPort ? h("div", { style: { marginTop: 4 } }, h("span", { style: S.mono }, "检测到 DSH 桌面实例端口: " + info.dshPort)) : null
         ),
 
-        url && !qrFailed ? h("div", { style: S.card },
-          h("div", { style: S.label2() }, "手机扫码获取地址（相机扫码后复制链接）："),
-          h("img", {
-            src: "https://api.qrserver.com/v1/create-qr-code/?size=168x168&margin=8&data=" + encodeURIComponent(url),
-            alt: "qr", style: S.qr,
-            onError: function () { setQrFailed(true); },
-          })) : null,
+        url ? h("div", { style: S.card },
+          h("div", { style: S.label2() }, "手机扫码获取地址（本机生成二维码，数据不经过第三方）："),
+          h(LocalQr, { data: url })) : null,
 
         h("div", { style: S.row },
           running ? null : h("button", { style: S.btnPrimary, disabled: busy, onClick: start }, busy ? "生成中…" : "生成地址"),

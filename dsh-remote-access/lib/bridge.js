@@ -36,6 +36,10 @@ export function createBridge(ctx, { ilink, log = () => {} }) {
   let lastUser = null;
   let sessionError = "";
   let disposed = false;
+  let turnTools = []; // 当前回合的工具名（去重后汇总，避免刷屏）
+  let turnHasText = false;
+  let toolNotified = false;
+  let greeted = false;
 
   function loadCfg() {
     try {
@@ -116,7 +120,10 @@ export function createBridge(ctx, { ilink, log = () => {} }) {
   function sendNow(text) {
     const user = lastUser;
     if (!user || !ilink.isOnline()) return Promise.resolve();
-    return ilink.sendText(user, text).catch((err) => log("bridge: send failed", err.message));
+    return ilink.sendText(user, text).catch((err) => {
+      log("bridge: send failed, retrying", err.message);
+      return ilink.sendText(user, text).catch((err2) => log("bridge: resend failed", err2.message));
+    });
   }
 
   function scheduleFlush() {
@@ -210,6 +217,20 @@ export function createBridge(ctx, { ilink, log = () => {} }) {
       return;
     }
 
+    if (text === "/帮助" || text === "/help") {
+      sendNow(
+        [
+          "📖 微信遥控命令：",
+          "· 直接发文字 → 与 DSH 对话",
+          "· 发图片 → 给 DSH 看图",
+          "· 审批请求 → 回复「同意 xxxxxxxx」或「拒绝 xxxxxxxx」",
+          "· /状态 → 查看连接状态",
+          "· /断开 → 断开连接",
+        ].join("\n")
+      );
+      return;
+    }
+
     if (voice && !text) {
       if (voice.text) {
         await setTyping(true);
@@ -257,10 +278,14 @@ export function createBridge(ctx, { ilink, log = () => {} }) {
       case "turn/start":
         reply.buf = "";
         reply.active = true;
+        turnTools = [];
+        turnHasText = false;
+        toolNotified = false;
         break;
       case "assistant/chunk": {
         const chunk = event.data.chunk;
         if (chunk.type === "text-delta" && chunk.text) {
+          turnHasText = true;
           reply.buf += chunk.text;
           if (reply.buf.length >= FLUSH_SOFT_LIMIT) flushNow();
           else scheduleFlush();
@@ -269,14 +294,23 @@ export function createBridge(ctx, { ilink, log = () => {} }) {
         break;
       }
       case "tool/call":
-        sendNow(`🔧 ${event.data.name}`);
+        turnTools.push(event.data.name || "工具");
+        if (!toolNotified) {
+          toolNotified = true;
+          sendNow("🔧 正在执行任务…");
+        }
         break;
       case "turn/end": {
         flushNow();
         reply.active = false;
         const reason = event.data.reason;
         if (reason?.kind === "error") {
-          sendNow(`⚠ 回合出错: ${reason.error?.message ?? "未知错误"}`);
+          sendNow("⚠ 回合出错: " + (reason.error?.message ?? "未知错误"));
+        } else if (turnTools.length > 0 && !turnHasText) {
+          // 无文字输出的纯工具回合：汇总一次，避免逐条刷屏
+          const uniq = [...new Set(turnTools)];
+          const head = uniq.slice(0, 8);
+          sendNow("🔧 已执行: " + head.join("、") + (uniq.length > head.length ? " 等 " + uniq.length + " 项" : ""));
         }
         setTyping(false);
         break;
@@ -339,6 +373,14 @@ export function createBridge(ctx, { ilink, log = () => {} }) {
           if (cfg.allowlist.length === 0 && st.boundUserId) {
             cfg.allowlist = [st.boundUserId];
             saveCfg();
+          }
+          // 上线后主动问候一次（含快捷命令提示）
+          if (!greeted && st.boundUserId) {
+            greeted = true;
+            ilink.sendText(
+              st.boundUserId,
+              "✅ 微信遥控已连接。发文字即可对话，发图片给 DSH 看图；审批请求回复「同意/拒绝 xxxxxxxx」；发 /帮助 查看命令。",
+            ).catch(() => {});
           }
         }
       };

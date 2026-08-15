@@ -40,6 +40,13 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
 
+/** 判定「复杂任务」的关键词（命中即用 Pro） */
+private val COMPLEX_TASK_KEYWORDS = listOf(
+    "分析", "审查", "评审", "优化", "重构", "架构", "方案", "设计", "实现",
+    "排查", "修复", "翻译", "总结", "规划", "复杂", "深度", "代码", "算法",
+    "论文", "报告", "长文", "测试", "对比", "评估", "调研", "梳理",
+)
+
 // 流式 chunk 合并落列表的节流间隔：攒 50ms 的增量一次性更新，
 // 避免每个 token 都做一次全列表拷贝 + 重组（快流式下主线程被打满 → 卡死）
 private const val CHUNK_FLUSH_MS = 50L
@@ -475,6 +482,7 @@ fun SessionScreen(
     var questions by remember { mutableStateOf<List<QuestionItem>?>(null) }
     var actionError by remember { mutableStateOf<String?>(null) }
     var workspaceLabel by remember { mutableStateOf<String?>(null) }
+    var autoModelEnabled by remember { mutableStateOf(true) }
     val listState = rememberLazyListState()
 
     val context = LocalContext.current
@@ -508,6 +516,10 @@ fun SessionScreen(
             val ws = connection.workspaceList().items
                 .firstOrNull { it.sessionIds.contains(sessionId) }
             workspaceLabel = ws?.let { it.title.ifBlank { it.path } }
+        }
+        // 自适应模型开关（全局设置，可在此会话发送时生效）
+        runCatching {
+            autoModelEnabled = SettingsStore(context).autoModel.first()
         }
     }
 
@@ -559,6 +571,28 @@ fun SessionScreen(
         if (atBottom) listState.scrollToItem(items.size - 1)
     }
 
+    /** 自适应模型：短问答→flash，复杂/长文本→pro；模型列表不含对应档位时保持现状 */
+    suspend fun applyAutoModel(text: String) {
+        val info = modelInfo ?: connection.sessionModels(sessionId)?.also { modelInfo = it }
+        if (info == null) return
+        val cur = info.current
+        val groups = runCatching { info.groups?.jsonArray }.getOrNull() ?: return
+        val group = groups.firstOrNull {
+            it.jsonObject["id"]?.jsonPrimitive?.contentOrNull == cur.provider
+        } ?: return
+        val models = runCatching { group.jsonObject.get("models")?.jsonArray }.getOrNull() ?: return
+        val ids = models.mapNotNull { it.jsonObject["id"]?.jsonPrimitive?.contentOrNull }
+        val complex = text.length > 200 || COMPLEX_TASK_KEYWORDS.any { text.contains(it) }
+        val target = if (complex) {
+            ids.firstOrNull { it.contains("pro", ignoreCase = true) } ?: return
+        } else {
+            ids.firstOrNull { it.contains("flash", ignoreCase = true) } ?: return
+        }
+        if (target != cur.model) {
+            connection.selectModel(sessionId, cur.provider, target, null)
+        }
+    }
+
     fun send() {
         val text = input.trim()
         if ((text.isBlank() && pendingImages.isEmpty()) || sending) return
@@ -566,6 +600,10 @@ fun SessionScreen(
         actionError = null
         scope.launch {
             try {
+                // 自适应模型：按任务难度先切 Flash/Pro 再发送
+                if (autoModelEnabled && text.isNotBlank()) {
+                    runCatching { applyAutoModel(text) }
+                }
                 connection.prompt(
                     sessionId,
                     text,
