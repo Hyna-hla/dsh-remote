@@ -4,7 +4,6 @@ import android.content.Context
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 private val Context.dataStore by preferencesDataStore("dsh-mobile-settings")
@@ -85,22 +84,21 @@ class SettingsStore(private val context: Context) {
         prefs[ACTIVE_PROFILE_KEY]
     }
 
-    private suspend fun writeProfiles(profiles: List<HostProfile>) {
+    suspend fun upsertProfile(profile: HostProfile) {
         context.dataStore.edit { prefs ->
-            applyLegacyMigration(prefs) // 顺带清理旧 key（幂等）
-            prefs[PROFILE_LIST_KEY] = ProfileCodec.encode(profiles)
+            applyLegacyMigration(prefs)
+            val current = ProfileCodec.decode(prefs[PROFILE_LIST_KEY] ?: "")
+            prefs[PROFILE_LIST_KEY] = ProfileCodec.encode(current.filterNot { it.id == profile.id } + profile)
         }
     }
 
-    suspend fun upsertProfile(profile: HostProfile) {
-        val current = profiles.first()
-        writeProfiles(current.filterNot { it.id == profile.id } + profile)
-    }
-
     suspend fun deleteProfile(id: String) {
-        val current = profiles.first()
-        writeProfiles(current.filterNot { it.id == id })
-        if (activeProfileId.first() == id) setActiveProfile(null)
+        context.dataStore.edit { prefs ->
+            applyLegacyMigration(prefs)
+            val current = ProfileCodec.decode(prefs[PROFILE_LIST_KEY] ?: "")
+            prefs[PROFILE_LIST_KEY] = ProfileCodec.encode(current.filterNot { it.id == id })
+            if (prefs[ACTIVE_PROFILE_KEY] == id) prefs.remove(ACTIVE_PROFILE_KEY)
+        }
     }
 
     suspend fun setActiveProfile(id: String?) {
@@ -111,13 +109,16 @@ class SettingsStore(private val context: Context) {
     }
 
     suspend fun markAttempt(profileId: String, errorCode: ConnectionErrorCode?, hostVersion: String?) {
-        val current = profiles.first()
-        writeProfiles(current.map { p ->
-            if (p.id == profileId) p.copy(
-                lastUsedAt = System.currentTimeMillis(),
-                lastErrorCode = errorCode?.name,
-            ) else p
-        })
+        context.dataStore.edit { prefs ->
+            applyLegacyMigration(prefs)
+            val current = ProfileCodec.decode(prefs[PROFILE_LIST_KEY] ?: "")
+            prefs[PROFILE_LIST_KEY] = ProfileCodec.encode(current.map { p ->
+                if (p.id == profileId) p.copy(
+                    lastUsedAt = System.currentTimeMillis(),
+                    lastErrorCode = errorCode?.name,
+                ) else p
+            })
+        }
     }
 
     val darkMode: Flow<Boolean> = context.dataStore.data.map { prefs ->

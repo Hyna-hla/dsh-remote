@@ -60,4 +60,27 @@ class SettingsStoreMigrationTest {
         assertEquals("p1", profiles[0].id) // 不覆盖已有配置
         assertFalse(p.contains(urlKey))
     }
+
+    @Test
+    fun migrationSurvivesSubsequentUpsert() {
+        val prefs = mutablePreferencesOf(
+            urlKey to "http://legacy:8787",
+        )
+        // 第一步：迁移生成 profile 并设为活跃
+        applyLegacyMigration(prefs)
+        val migratedId = prefs[stringPreferencesKey("active_profile_id")]
+
+        // 第二步：模拟 upsert 的 edit 内序列（迁移→重读→写回）
+        applyLegacyMigration(prefs)
+        val current = ProfileCodec.decode(prefs[stringPreferencesKey("connection_profiles")] ?: "")
+        val newProfile = HostProfile(id = "new-1", remark = "新主机", url = "http://new:1")
+        prefs[stringPreferencesKey("connection_profiles")] = ProfileCodec.encode(
+            current.filterNot { it.id == newProfile.id } + newProfile,
+        )
+
+        val finalProfiles = ProfileCodec.decode(prefs[stringPreferencesKey("connection_profiles")] ?: "")
+        assertEquals(2, finalProfiles.size)
+        assertTrue(finalProfiles.any { it.id == migratedId && it.url == "http://legacy:8787" })
+        assertTrue(finalProfiles.any { it.id == "new-1" })
+    }
 }
