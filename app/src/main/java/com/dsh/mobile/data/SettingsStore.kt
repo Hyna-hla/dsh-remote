@@ -30,6 +30,8 @@ class SettingsStore(private val context: Context) {
         private val BG_OPACITY_KEY = floatPreferencesKey("bg_opacity")
         private val BRIGHTNESS_KEY = floatPreferencesKey("brightness")
         private val BACKGROUND_NOTIFY_KEY = booleanPreferencesKey("background_notify")
+        private val THEME_MODE_KEY = stringPreferencesKey("theme_mode")
+        private val WORKSPACE_ID_KEY = stringPreferencesKey("workspace_id")
     }
 
     val connectionConfig: Flow<ConnectionConfig> = context.dataStore.data.map { prefs ->
@@ -41,6 +43,24 @@ class SettingsStore(private val context: Context) {
 
     val darkMode: Flow<Boolean> = context.dataStore.data.map { prefs ->
         prefs[DARK_MODE_KEY] ?: true
+    }
+
+    /** 主题模式：dark（默认，保持现有行为）/ light / system */
+    val themeMode: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[THEME_MODE_KEY] ?: "dark"
+    }
+
+    suspend fun setThemeMode(mode: String) {
+        context.dataStore.edit { it[THEME_MODE_KEY] = mode }
+    }
+
+    /** 新对话默认工作区（空 = 用 DSH 默认工作区） */
+    val workspaceId: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[WORKSPACE_ID_KEY] ?: ""
+    }
+
+    suspend fun setWorkspaceId(id: String) {
+        context.dataStore.edit { it[WORKSPACE_ID_KEY] = id }
     }
 
     suspend fun saveConnection(config: ConnectionConfig) {

@@ -25,6 +25,7 @@ import com.dsh.mobile.data.SettingsStore
 import com.dsh.mobile.service.DshConnectionService
 import com.dsh.mobile.ui.theme.DshBrand
 import com.dsh.mobile.ui.theme.DshSuccess
+import com.dsh.mobile.ui.theme.DshShape
 import com.journeyapps.barcodescanner.CaptureActivity
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -137,7 +138,7 @@ fun ConnectScreen(connection: DshConnection) {
             Spacer(Modifier.height(72.dp))
 
             Surface(
-                shape = MaterialTheme.shapes.large,
+                shape = DshShape.card,
                 color = MaterialTheme.colorScheme.surface,
                 modifier = Modifier.size(84.dp),
             ) {
@@ -195,6 +196,7 @@ fun ConnectScreen(connection: DshConnection) {
                     .fillMaxWidth()
                     .height(54.dp),
                 enabled = url.isNotBlank() && !isLoading,
+                shape = DshShape.pill,
             ) {
                 if (isLoading) {
                     CircularProgressIndicator(

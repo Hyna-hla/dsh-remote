@@ -38,10 +38,12 @@ fun SettingsScreen(
     val scope = rememberCoroutineScope()
     var appearance by remember { mutableStateOf(AppearanceConfig()) }
     var backgroundNotify by remember { mutableStateOf(true) }
+    var themeMode by remember { mutableStateOf("dark") }
 
     LaunchedEffect(Unit) {
         appearance = settingsStore.appearance.first()
         backgroundNotify = settingsStore.backgroundNotify.first()
+        themeMode = settingsStore.themeMode.first()
     }
 
     fun setBackgroundNotify(enabled: Boolean) {
@@ -96,6 +98,31 @@ fun SettingsScreen(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    Text(
+                        "主题模式",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(
+                            "dark" to "深色",
+                            "light" to "浅色",
+                            "system" to "跟随系统",
+                        ).forEach { (mode, label) ->
+                            FilterChip(
+                                selected = themeMode == mode,
+                                onClick = {
+                                    themeMode = mode
+                                    scope.launch { settingsStore.setThemeMode(mode) }
+                                },
+                                label = { Text(label) },
+                            )
+                        }
+                    }
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 4.dp),
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                    )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = { bgPicker.launch(arrayOf("image/*")) }) {
                             Icon(Icons.Default.Image, null, Modifier.size(16.dp))

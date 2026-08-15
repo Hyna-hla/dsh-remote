@@ -7,6 +7,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -28,6 +29,8 @@ import com.dsh.mobile.data.*
 import com.dsh.mobile.ui.theme.DshBrand
 import com.dsh.mobile.ui.theme.DshSuccess
 import com.dsh.mobile.ui.theme.DshWarn
+import com.dsh.mobile.ui.theme.DshShape
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
 import java.text.SimpleDateFormat
@@ -55,6 +58,16 @@ fun HomeScreen(
     var listError by remember { mutableStateOf<String?>(null) }
     var pendingImages by remember { mutableStateOf<List<DshConnection.ImagePart>>(emptyList()) }
     val context = LocalContext.current
+    val settingsStore = remember { SettingsStore(context) }
+
+    // —— 新对话工作区选择 ——
+    var selectedWorkspaceId by remember { mutableStateOf("") }
+    var workspaceSheet by remember { mutableStateOf(false) }
+    var newWsPath by remember { mutableStateOf("") }
+    var newWsTitle by remember { mutableStateOf("") }
+    var wsBusy by remember { mutableStateOf(false) }
+    var wsError by remember { mutableStateOf<String?>(null) }
+
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
@@ -102,6 +115,7 @@ fun HomeScreen(
     LaunchedEffect(Unit) {
         refreshSessions()
         refreshArchived()
+        selectedWorkspaceId = settingsStore.workspaceId.first()
         presets = try {
             val p = connection.agentPresets()
             if (p.isNotEmpty()) p else listOf("cordis" to "Cordis")
@@ -133,7 +147,10 @@ fun HomeScreen(
         sendError = null
         scope.launch {
             try {
-                val sid = connection.createSession(agentPreset = preset)
+                val sid = connection.createSession(
+                    agentPreset = preset,
+                    workspaceId = selectedWorkspaceId.ifBlank { null },
+                )
                 connection.prompt(sid, text, images = pendingImages)
                 input = ""
                 pendingImages = emptyList()
@@ -194,7 +211,38 @@ fun HomeScreen(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(12.dp))
+
+                // —— 工作区选择 chip（新对话创建在该工作区，对齐 Web 的 Session Intent hero）——
+                val wsSelected = workspaces.firstOrNull { it.workspaceId == selectedWorkspaceId }
+                val wsLabel = when {
+                    selectedWorkspaceId.isBlank() -> "默认工作区"
+                    wsSelected != null -> wsSelected.title.ifBlank { wsSelected.path }
+                    else -> "工作区 ${selectedWorkspaceId.take(8)}"
+                }
+                AssistChip(
+                    onClick = { workspaceSheet = true },
+                    label = {
+                        Text(
+                            wsLabel,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Default.Folder,
+                            null,
+                            Modifier.size(16.dp),
+                            tint = DshBrand,
+                        )
+                    },
+                    trailingIcon = {
+                        Icon(Icons.Default.ArrowDropDown, null, Modifier.size(16.dp))
+                    },
+                )
+                Spacer(Modifier.height(10.dp))
 
                 // 待发送图片
                 if (pendingImages.isNotEmpty()) {
@@ -361,8 +409,7 @@ fun HomeScreen(
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp),
                 ) {
                     items(sessions, key = { "s_" + it.sessionId }) { s ->
                         SessionCard(
@@ -428,6 +475,194 @@ fun HomeScreen(
                     },
                 )
             }
+
+            // 工作区选择面板（对齐 Web WorkspacePicker：默认 / 已有工作区 / 新建）
+            if (workspaceSheet) {
+                ModalBottomSheet(onDismissRequest = { workspaceSheet = false }) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp),
+                    ) {
+                        Text(
+                            "新对话工作区",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "新对话将创建在所选工作区（PC 端目录）下，切换后自动记住。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(14.dp))
+
+                        // 默认工作区
+                        WorkspaceRow(
+                            icon = Icons.Default.Home,
+                            title = "默认工作区",
+                            subtitle = "跟随 DSH 的默认目录",
+                            selected = selectedWorkspaceId.isBlank(),
+                            onClick = {
+                                selectedWorkspaceId = ""
+                                scope.launch { settingsStore.setWorkspaceId("") }
+                                workspaceSheet = false
+                            },
+                        )
+
+                        // 已有工作区
+                        workspaces.forEach { ws ->
+                            WorkspaceRow(
+                                icon = Icons.Default.Folder,
+                                title = ws.title.ifBlank { ws.path },
+                                subtitle = ws.path,
+                                selected = selectedWorkspaceId == ws.workspaceId,
+                                onClick = {
+                                    selectedWorkspaceId = ws.workspaceId
+                                    scope.launch { settingsStore.setWorkspaceId(ws.workspaceId) }
+                                    workspaceSheet = false
+                                },
+                            )
+                        }
+
+                        HorizontalDivider(
+                            modifier = Modifier.padding(vertical = 10.dp),
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+                        )
+
+                        // 新建工作区：输入 PC 端目录绝对路径
+                        Text(
+                            "新建工作区",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = newWsPath,
+                            onValueChange = { newWsPath = it; wsError = null },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("PC 端目录绝对路径，如 E:\\AI搓的小东西") },
+                            label = { Text("目录路径（必须已存在）") },
+                            singleLine = true,
+                            shape = DshShape.small,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = newWsTitle,
+                            onValueChange = { newWsTitle = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("可选：显示名称") },
+                            label = { Text("标题") },
+                            singleLine = true,
+                            shape = DshShape.small,
+                        )
+                        wsError?.let {
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                it,
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        Button(
+                            onClick = {
+                                val path = newWsPath.trim()
+                                if (path.isEmpty()) {
+                                    wsError = "请填写 PC 端目录路径"
+                                    return@Button
+                                }
+                                if (wsBusy) return@Button
+                                wsBusy = true
+                                scope.launch {
+                                    try {
+                                        connection.createWorkspace(
+                                            path,
+                                            newWsTitle.trim().ifBlank { null },
+                                        )
+                                        newWsPath = ""
+                                        newWsTitle = ""
+                                        refreshArchived()
+                                        workspaceSheet = false
+                                    } catch (e: Exception) {
+                                        wsError = e.message
+                                    } finally {
+                                        wsBusy = false
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = DshShape.small,
+                        ) {
+                            if (wsBusy) {
+                                CircularProgressIndicator(
+                                    Modifier.size(16.dp),
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                    strokeWidth = 2.dp,
+                                )
+                            } else {
+                                Icon(Icons.Default.Add, null, Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("创建并选中")
+                            }
+                        }
+                        Spacer(Modifier.height(28.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 工作区选择行（选中态勾选 + 两行文本） */
+@Composable
+private fun WorkspaceRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            icon,
+            null,
+            Modifier.size(20.dp),
+            tint = if (selected) DshBrand else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = if (selected) DshBrand else MaterialTheme.colorScheme.onSurface,
+            )
+            if (subtitle.isNotBlank()) {
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (selected) {
+            Icon(
+                Icons.Default.CheckCircle,
+                null,
+                Modifier.size(20.dp),
+                tint = DshBrand,
+            )
         }
     }
 }
@@ -450,36 +685,53 @@ private fun SessionCard(
         SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(session.updatedAt))
     }
 
-    Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
-        Column(Modifier.padding(14.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Twitter 风格圆形首字头像
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .background(DshBrand.copy(alpha = 0.14f), CircleShape),
+                contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    title,
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
+                    title.take(1).uppercase(),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = DshBrand,
                 )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier
-                            .size(8.dp)
-                            .background(
-                                if (session.running) DshBrand else MaterialTheme.colorScheme.outline,
-                                CircleShape,
-                            ),
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
                     )
+                    Spacer(Modifier.width(8.dp))
+                    if (session.running) {
+                        Box(
+                            Modifier
+                                .size(8.dp)
+                                .background(DshBrand, CircleShape),
+                        )
+                    }
                     Spacer(Modifier.width(6.dp))
                     Text(
                         time,
@@ -487,26 +739,32 @@ private fun SessionCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-            }
-            if (preview.isNotBlank()) {
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    preview,
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (!model.isNullOrBlank()) {
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    model,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = DshWarn,
-                )
+                if (preview.isNotBlank()) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        preview,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (!model.isNullOrBlank()) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        model,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = DshWarn,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
+            thickness = 0.5.dp,
+        )
     }
 }
 

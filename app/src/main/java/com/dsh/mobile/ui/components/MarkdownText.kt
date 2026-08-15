@@ -21,6 +21,26 @@ import androidx.compose.ui.unit.sp
 import com.dsh.mobile.ui.theme.DshBrandSoft
 import com.dsh.mobile.ui.theme.DshSurfaceHigh
 
+/**
+ * 进程级解析缓存（LRU）：LazyColumn 条目滚出组合后 remember 缓存随之销毁，
+ * 滚回时同样的大段 Markdown 会重新解析。用带哈希校验的全局缓存兜住重复解析。
+ */
+private object MarkdownCache {
+    private const val MAX_ENTRIES = 64
+    private val map = object : LinkedHashMap<String, List<MdBlock>>(MAX_ENTRIES, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<MdBlock>>): Boolean =
+            size > MAX_ENTRIES
+    }
+
+    @Synchronized
+    fun get(text: String): List<MdBlock>? = map[text]
+
+    @Synchronized
+    fun put(text: String, blocks: List<MdBlock>) {
+        if (text.length <= 64 * 1024) map[text] = blocks
+    }
+}
+
 /** 轻量 Markdown 渲染：标题 / 加粗 / 行内代码 / 代码块 / 无序列表 / 段落 */
 @Composable
 fun MarkdownText(
@@ -28,7 +48,9 @@ fun MarkdownText(
     modifier: Modifier = Modifier,
     maxLines: Int = Int.MAX_VALUE,
 ) {
-    val blocks = remember(text) { parseMarkdownBlocks(text) }
+    val blocks = remember(text) {
+        MarkdownCache.get(text) ?: parseMarkdownBlocks(text).also { MarkdownCache.put(text, it) }
+    }
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         blocks.forEach { block ->
             when (block) {

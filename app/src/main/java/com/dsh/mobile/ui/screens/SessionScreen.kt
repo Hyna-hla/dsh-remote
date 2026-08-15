@@ -5,6 +5,7 @@ import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
@@ -429,7 +430,7 @@ class SessionChatState(
 
 // ──────────────────────────── 会话屏 ────────────────────────────
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun SessionScreen(
     sessionId: String,
@@ -455,6 +456,7 @@ fun SessionScreen(
     var approval by remember { mutableStateOf<DshConnection.Event.ApprovalRequested?>(null) }
     var questions by remember { mutableStateOf<List<QuestionItem>?>(null) }
     var actionError by remember { mutableStateOf<String?>(null) }
+    var workspaceLabel by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
 
     val context = LocalContext.current
@@ -483,6 +485,12 @@ fun SessionScreen(
 
     LaunchedEffect(sessionId) {
         state.load()
+        // 会话所属工作区（只读展示，切换入口在首页新对话）
+        runCatching {
+            val ws = connection.workspaceList().items
+                .firstOrNull { it.sessionIds.contains(sessionId) }
+            workspaceLabel = ws?.let { it.title.ifBlank { it.path } }
+        }
     }
 
     // 实时事件
@@ -602,6 +610,15 @@ fun SessionScreen(
                         style = MaterialTheme.typography.labelSmall,
                         color = if (running) DshBrand else MaterialTheme.colorScheme.outline,
                     )
+                    workspaceLabel?.let { ws ->
+                        Text(
+                            ws,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             },
             navigationIcon = {
@@ -654,11 +671,14 @@ fun SessionScreen(
                 }
             }
             items(items, key = { it.key }) { item ->
-                when (item) {
-                    is ChatItem.User -> UserBubble(item.text)
-                    is ChatItem.Assistant -> AssistantCard(item)
-                    is ChatItem.Tool -> ToolCard(item)
-                    is ChatItem.Notice -> NoticeRow(item)
+                // 新条目渐入：新消息平滑出现，不跳变（Telegram 式轻量动效）
+                androidx.compose.runtime.key(item.key) {
+                    when (item) {
+                        is ChatItem.User -> UserBubble(item.text, Modifier.animateItem())
+                        is ChatItem.Assistant -> AssistantCard(item, Modifier.animateItem())
+                        is ChatItem.Tool -> ToolCard(item, Modifier.animateItem())
+                        is ChatItem.Notice -> NoticeRow(item, Modifier.animateItem())
+                    }
                 }
             }
         }
@@ -676,7 +696,7 @@ fun SessionScreen(
         approval?.let { a ->
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                color = Color(0xFF3A3018),
+                color = MaterialTheme.colorScheme.surfaceVariant,
                 border = BorderStroke(1.dp, DshWarn.copy(alpha = 0.5f)),
             ) {
                 Column(Modifier.padding(12.dp)) {
@@ -880,30 +900,37 @@ fun SessionScreen(
 // ──────────────────────────── 条目渲染 ────────────────────────────
 
 @Composable
-private fun UserBubble(text: String) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+private fun UserBubble(text: String, modifier: Modifier = Modifier) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .then(modifier),
+        horizontalArrangement = Arrangement.End,
+    ) {
         Surface(
-            shape = RoundedCornerShape(16.dp, 4.dp, 16.dp, 16.dp),
-            color = Color(0xFF1B3A6B),
+            shape = DshShape.userBubble,
+            color = MaterialTheme.colorScheme.primaryContainer,
             modifier = Modifier.widthIn(max = 320.dp),
         ) {
             Text(
                 text,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                 style = MaterialTheme.typography.bodyMedium,
-                color = Color(0xFFDCE7FB),
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
             )
         }
     }
 }
 
 @Composable
-private fun AssistantCard(item: ChatItem.Assistant) {
+private fun AssistantCard(item: ChatItem.Assistant, modifier: Modifier = Modifier) {
     Surface(
-        shape = RoundedCornerShape(4.dp, 16.dp, 16.dp, 16.dp),
+        shape = DshShape.assistantBubble,
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(modifier),
     ) {
         Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
             item.thinkSeconds?.let { secs ->
@@ -950,15 +977,17 @@ private fun AssistantCard(item: ChatItem.Assistant) {
 }
 
 @Composable
-private fun ToolCard(item: ChatItem.Tool) {
+private fun ToolCard(item: ChatItem.Tool, modifier: Modifier = Modifier) {
     var expanded by remember(item.key) { mutableStateOf(false) }
     val done = item.status == "done"
     val failed = item.status == "error"
 
     Surface(
-        shape = RoundedCornerShape(12.dp),
+        shape = DshShape.small,
         color = MaterialTheme.colorScheme.surfaceVariant,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(modifier),
         onClick = { if (item.result != null) expanded = !expanded },
     ) {
         Column(Modifier.padding(10.dp)) {
@@ -1045,10 +1074,11 @@ private fun ToolCard(item: ChatItem.Tool) {
 }
 
 @Composable
-private fun NoticeRow(item: ChatItem.Notice) {
+private fun NoticeRow(item: ChatItem.Notice, modifier: Modifier = Modifier) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .then(modifier)
             .background(
                 if (item.isError) MaterialTheme.colorScheme.errorContainer
                 else MaterialTheme.colorScheme.surfaceVariant,

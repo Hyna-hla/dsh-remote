@@ -7,6 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -44,9 +45,15 @@ class MainActivity : ComponentActivity() {
         val app = application as DshApplication
 
         setContent {
-            DshTheme {
-                val context = LocalContext.current
-                val settingsStore = remember { SettingsStore(context) }
+            val settingsStore = remember { SettingsStore(this) }
+            val themeMode by settingsStore.themeMode.collectAsState(initial = "dark")
+            val systemDark = isSystemInDarkTheme()
+            val darkTheme = when (themeMode) {
+                "light" -> false
+                "system" -> systemDark
+                else -> true
+            }
+            DshTheme(darkTheme = darkTheme) {
                 val appearance by settingsStore.appearance.collectAsState(initial = AppearanceConfig())
 
                 Box(Modifier.fillMaxSize()) {

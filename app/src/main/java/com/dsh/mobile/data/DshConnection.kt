@@ -22,6 +22,13 @@ class ApiException(message: String, val code: String? = null) : Exception(messag
  */
 class DshConnection {
 
+    companion object {
+        /** 事件流重连初始退避 */
+        private const val INITIAL_BACKOFF_MS = 3_000L
+        /** 事件流重连退避封顶（指数退避：3→6→12→24→30s） */
+        private const val MAX_BACKOFF_MS = 30_000L
+    }
+
     sealed class State {
         data object Disconnected : State()
         data class Connecting(val baseUrl: String) : State()
@@ -134,26 +141,31 @@ class DshConnection {
         pendingQuestionRpc.clear()
     }
 
-    /** 事件流循环（WebSocket 优先，SSE 兜底，自动重连） */
+    /** 事件流循环（WebSocket 优先，SSE 兜底，指数退避自动重连）
+     *  连接成功后立即重置退避：3s → 6s → 12s → 24s → 30s（封顶）。 */
     private fun streamLoop(name: String, path: String) {
         scope.launch {
+            var backoffMs = INITIAL_BACKOFF_MS
             while (isActive) {
                 var lastError = "流结束"
                 try {
                     openWsStream(path)
+                    backoffMs = INITIAL_BACKOFF_MS
                 } catch (e: Exception) {
                     lastError = e.message ?: "ws 失败"
                     // 回退：部分 dsh web 服务器用 SSE 承载该流
                     try {
                         readSse(path)
+                        backoffMs = INITIAL_BACKOFF_MS
                     } catch (e2: Exception) {
                         lastError = "ws/see 均失败: ${e2.message}"
                     }
                 }
                 if (!isActive) break
                 if (_state.value is State.Connected) {
-                    _events.tryEmit(Event.StreamError("$name 流中断（$lastError），3 秒后重连"))
-                    delay(3000)
+                    _events.tryEmit(Event.StreamError("$name 流中断（$lastError），${backoffMs / 1000} 秒后重连"))
+                    delay(backoffMs)
+                    backoffMs = (backoffMs * 2).coerceAtMost(MAX_BACKOFF_MS)
                 } else break
             }
         }
@@ -496,6 +508,14 @@ class DshConnection {
         } catch (e: Exception) {
             WorkspaceListValue()
         }
+    }
+
+    /** 新建工作区：path 必须是 PC 端已存在的目录绝对路径（如 E:\AI搓的小东西） */
+    suspend fun createWorkspace(path: String, title: String? = null) {
+        call(DshEndpoints.WORKSPACE_CREATE, buildJsonObject {
+            put("path", path)
+            title?.let { put("title", it) }
+        })
     }
 
     /** 归档会话（从会话列表移除，进入已归档区） */
