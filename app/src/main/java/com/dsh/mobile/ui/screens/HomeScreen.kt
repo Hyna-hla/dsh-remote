@@ -274,14 +274,24 @@ fun HomeScreen(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                // 品牌渐变装饰条（官方 hero 区的点睛细节）
+                // 品牌装饰：STANDARD 用渐变条；CODEX 用终端字符分隔线
                 Spacer(Modifier.height(10.dp))
-                Box(
-                    Modifier
-                        .width(36.dp)
-                        .height(3.dp)
-                        .background(brandGradient(), DshShape.small),
-                )
+                if (DshThemeStyle == ThemeStyle.CODEX) {
+                    Text(
+                        "─".repeat(26),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = DshBrand,
+                        maxLines = 1,
+                        overflow = TextOverflow.Clip,
+                    )
+                } else {
+                    Box(
+                        Modifier
+                            .width(36.dp)
+                            .height(3.dp)
+                            .background(brandGradient(), DshShape.small),
+                    )
+                }
                 Spacer(Modifier.height(10.dp))
 
                 // —— 工作区选择 chip（新对话创建在该工作区，对齐 Web 的 Session Intent hero）——
@@ -342,33 +352,17 @@ fun HomeScreen(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Column(Modifier.padding(12.dp)) {
-                        OutlinedTextField(
-                            value = input,
-                            onValueChange = { input = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("描述你的任务，例如：审查最近改动并给出改进建议") },
-                            minLines = 3,
-                            maxLines = 6,
-                            shape = RoundedCornerShape(12.dp),
-                            keyboardOptions = KeyboardOptions.Default,
-                        )
-                        sendError?.let {
-                            Text(
-                                it,
-                                color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier.padding(top = 6.dp),
-                            )
-                        }
-                        Spacer(Modifier.height(10.dp))
+                        // 卡片头行：任务标签 + 预设选择（对齐 Web 端 hero 卡结构）
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            // 图片附件
-                            IconButton(onClick = { imagePicker.launch("image/*") }) {
-                                Icon(Icons.Default.AttachFile, null)
-                            }
+                            Text(
+                                if (DshThemeStyle == ThemeStyle.CODEX) "❯ 新任务" else "新任务",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = DshBrand,
+                            )
+                            Spacer(Modifier.weight(1f))
                             // 预设选择（限宽：预设名过长时发送键不被挤出屏幕）
                             Box {
                                 AssistChip(
@@ -405,6 +399,39 @@ fun HomeScreen(
                                         )
                                     }
                                 }
+                            }
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        OutlinedTextField(
+                            value = input,
+                            onValueChange = { input = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = {
+                                Text(
+                                    if (DshThemeStyle == ThemeStyle.CODEX) "> 输入任务指令…" else "描述你的任务，例如：审查最近改动并给出改进建议",
+                                )
+                            },
+                            minLines = 3,
+                            maxLines = 6,
+                            shape = RoundedCornerShape(12.dp),
+                            keyboardOptions = KeyboardOptions.Default,
+                        )
+                        sendError?.let {
+                            Text(
+                                it,
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(top = 6.dp),
+                            )
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            // 图片附件
+                            IconButton(onClick = { imagePicker.launch("image/*") }) {
+                                Icon(Icons.Default.AttachFile, null)
                             }
                             Spacer(Modifier.weight(1f))
                             Button(

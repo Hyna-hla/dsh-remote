@@ -13,7 +13,7 @@
 - **审批与问答**：审批横幅（允许一次/拒绝）、问答题卡片（单选/多选）
 - **自适应模型**：设置里可开「自适应模型」（默认开）——短问答自动走 Flash，复杂任务（长文本或命中"分析/重构/审查"等关键词）自动切 Pro，发送前完成切换
 - **模型与权限**：会话内切换模型 / 思考程度（reasoningEffort）、审查严格度（只读 / 工作区可写 / 完全访问）
-- **可拓展主题**：内置 DeepSeek 经典深蓝 / 纯黑（AMOLED）/ 暖白（护眼米白）+ 16 套 SKIN 皮肤 + **Codex CLI 终端风**（全局等宽字体/方角/`❯` 提示符）；支持导入**自定义主题包**（zip，含 theme.json + 可选预览图），同名导入即**热替换更新**（无需重启），设置页见缩略图/版本/删除；单文件 theme.json 也可直接导入
+- **可拓展主题**：内置 4 套有真实观感差异的主题——DeepSeek 经典深蓝（默认）/ 纯黑（AMOLED）/ 暖白（护眼米白）/ **Codex CLI 终端风**（全局等宽字体 + 方角 + `❯` 提示符 + `─` 分隔线，完全不同的界面语言）；支持导入**自定义主题包**（zip，含 theme.json + 可选预览图），同名导入即**热替换更新**（无需重启），设置页见缩略图/版本/删除；单文件 theme.json 也可直接导入
 - **背景图与面板**：设置 → 外观可选本地背景图 + 四档一键预设（通透玻璃/电影质感/纯净原图/柔和梦境）；图像不透明度/模糊/饱和度/蒙层浓度独立可调，**面板通透**玻璃化（对齐桌面 dsh-beautify 模板）；屏幕亮度 = 夜间模式
 - **图片消息**：📎 选择图片（PNG/JPEG/WebP/GIF ≤4MB）随消息发送，新对话与历史会话均支持
 - **技能选择**：📚 技能列表（skill.list），点选自动插入"请使用 X 技能"到输入框
@@ -21,6 +21,10 @@
 
 ## 更新日志
 
+- **v1.0.25**：真正的 UI 布局重构——
+  - **布局对齐 DSH Web UI**：新任务输入卡增加「新任务」头行（任务标签 + 预设选择收进卡片头部，底部只留附件与发送）；助手消息加**品牌左侧色条**（官方 Web 视觉锚点，流式时软化）；工具调用卡片状态改为**文字徽章**（完成/失败/运行中），参数等宽展示
+  - **Codex CLI 完整终端 UI**：`❯ codex` 问候 + `─` 字符分隔线、输入卡 `❯ 新任务` 标签、会话输入栏 `❯` 提示符、工具参数 `$` 前缀、`thinking…` 状态、全局等宽字体 + 方角形状体系——切换主题即可看到完全不同的界面语言
+  - **精简主题**：移除 16 套"只换颜色"的皮肤，只保留 4 套有真实观感差异的主题（深蓝/纯黑/暖白/Codex CLI）；已选旧皮肤的用户自动回落深蓝
 - **v1.0.24**：更新通道修复——
   - **安装不再失效**：点击安装改为多策略——系统安装器双 intent（`ACTION_INSTALL_PACKAGE` → `ACTION_VIEW`，先探测可响应者）+ **PackageInstaller 会话安装兜底**（同签名自更新直接装，无需「未知来源」授权），解决部分 ROM / Android 15+ 点击安装无反应的问题；失败时显示具体原因
   - **镜像下载（国内免代理）**：检查更新 API 与 APK 下载都走 GitHub 加速镜像（ghfast.top → gh-proxy.com → ghproxy.net → 直连兜底），每个源 25s 硬超时、失败自动切换下一个，不开代理也能检查/下载更新
@@ -59,10 +63,10 @@
 
 ## 安装（APK）
 
-- 仓库内提供 R8 精简版：[release/DSH-Remote-v1.0.24-min.apk](release/DSH-Remote-v1.0.24-min.apk)（已签名，约 4.6MB，可直接安装）
-- **debug 主包（约 62MB，与历次安装包一致）**：因 GitHub 单文件 >50MB 限制不进仓库，本地留档于 `release/DSH-Remote-v1.0.24.apk`（构建产物亦在 `app/build/outputs/apk/debug/`）；分发走 GitHub Release 附件或 Google Play
+- 仓库内提供 R8 精简版：[release/DSH-Remote-v1.0.25-min.apk](release/DSH-Remote-v1.0.25-min.apk)（已签名，约 4.6MB，可直接安装）
+- **debug 主包（约 62MB，与历次安装包一致）**：因 GitHub 单文件 >50MB 限制不进仓库，本地留档于 `release/DSH-Remote-v1.0.25.apk`（构建产物亦在 `app/build/outputs/apk/debug/`）；分发走 GitHub Release 附件或 Google Play
 - 传到手机 → 允许「未知来源」安装 → 填服务器地址 → 连接
-- Google Play 上架包（已签名 AAB）：[release/DSH-Remote-v1.0.24.aab](release/DSH-Remote-v1.0.24.aab)；上架清单见 [docs/play-listing.md](docs/play-listing.md)
+- Google Play 上架包（已签名 AAB）：[release/DSH-Remote-v1.0.25.aab](release/DSH-Remote-v1.0.25.aab)；上架清单见 [docs/play-listing.md](docs/play-listing.md)
 - 自定义主题包格式与示例：[docs/theme-package-format.md](docs/theme-package-format.md)、[docs/aurora.dshTheme.zip](docs/aurora.dshTheme.zip)
 
 ## PC 端使用

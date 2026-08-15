@@ -1096,6 +1096,14 @@ fun SessionScreen(
                 IconButton(onClick = { imagePicker.launch("image/*") }) {
                     Icon(Icons.Default.AttachFile, null)
                 }
+                if (DshThemeStyle == ThemeStyle.CODEX) {
+                    Text(
+                        "❯",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = DshBrand,
+                        modifier = Modifier.padding(end = 4.dp),
+                    )
+                }
                 OutlinedTextField(
                     value = input,
                     onValueChange = { input = it },
@@ -1104,7 +1112,9 @@ fun SessionScreen(
                     modifier = Modifier
                         .width(0.dp)
                         .weight(1f),
-                    placeholder = { Text("给智能体发消息…") },
+                    placeholder = {
+                        Text(if (DshThemeStyle == ThemeStyle.CODEX) "> 消息…" else "给智能体发消息…")
+                    },
                     maxLines = 4,
                     shape = RoundedCornerShape(22.dp),
                 )
@@ -1348,44 +1358,53 @@ private fun AssistantCard(item: ChatItem.Assistant, modifier: Modifier = Modifie
             )
             .then(modifier),
     ) {
-        Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-            item.thinkSeconds?.let { secs ->
-                Text(
-                    "⚡ 已思考 $secs 秒",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = DshWarn,
-                )
-                Spacer(Modifier.height(4.dp))
-            }
-            if (item.streaming) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.height(IntrinsicSize.Min)) {
+            // 品牌左侧色条：官方 Web 助手消息的视觉锚点（流式时用品牌软色）
+            Box(
+                Modifier
+                    .width(3.dp)
+                    .fillMaxHeight()
+                    .background(if (item.streaming) DshBrandSoft else DshBrand),
+            )
+            Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                item.thinkSeconds?.let { secs ->
                     Text(
-                        "正在思考…",
+                        if (DshThemeStyle == ThemeStyle.CODEX) "⚡ think ${secs}s" else "⚡ 已思考 $secs 秒",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    CircularProgressIndicator(
-                        Modifier.size(12.dp),
-                        strokeWidth = 1.5.dp,
-                        color = DshBrand,
-                    )
-                }
-                Spacer(Modifier.height(6.dp))
-            }
-            if (item.text.isNotBlank()) {
-                // 流式期间只渲染尾部：Markdown 解析/排版随文本增长是 O(n²)，
-                // 长回复每个增量都全量重解析会把主线程拖死
-                if (item.streaming && item.text.length > STREAM_TAIL_CHARS) {
-                    Text(
-                        "…（流式输出中，仅显示最新部分）",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = DshWarn,
                     )
                     Spacer(Modifier.height(4.dp))
-                    MarkdownText(item.text.takeLast(STREAM_TAIL_CHARS))
-                } else {
-                    MarkdownText(item.text)
+                }
+                if (item.streaming) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            if (DshThemeStyle == ThemeStyle.CODEX) "thinking…" else "正在思考…",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        CircularProgressIndicator(
+                            Modifier.size(12.dp),
+                            strokeWidth = 1.5.dp,
+                            color = DshBrand,
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
+                }
+                if (item.text.isNotBlank()) {
+                    // 流式期间只渲染尾部：Markdown 解析/排版随文本增长是 O(n²)，
+                    // 长回复每个增量都全量重解析会把主线程拖死
+                    if (item.streaming && item.text.length > STREAM_TAIL_CHARS) {
+                        Text(
+                            "…（流式输出中，仅显示最新部分）",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        MarkdownText(item.text.takeLast(STREAM_TAIL_CHARS))
+                    } else {
+                        MarkdownText(item.text)
+                    }
                 }
             }
         }
@@ -1435,8 +1454,8 @@ private fun ToolCard(item: ChatItem.Tool, modifier: Modifier = Modifier) {
                     overflow = TextOverflow.Ellipsis,
                 )
                 when {
-                    failed -> Icon(Icons.Default.ErrorOutline, null, Modifier.size(16.dp), tint = DshError)
-                    done -> Icon(Icons.Default.CheckCircle, null, Modifier.size(16.dp), tint = DshSuccess)
+                    failed -> ToolStatusBadge("失败", DshError)
+                    done -> ToolStatusBadge("完成", DshSuccess)
                     else -> CircularProgressIndicator(
                         Modifier.size(14.dp),
                         strokeWidth = 1.5.dp,
@@ -1456,7 +1475,7 @@ private fun ToolCard(item: ChatItem.Tool, modifier: Modifier = Modifier) {
             if (item.args.isNotBlank()) {
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    item.args.take(160),
+                    (if (DshThemeStyle == ThemeStyle.CODEX) "$ " else "") + item.args.take(160),
                     style = MaterialTheme.typography.labelSmall,
                     fontFamily = FontFamily.Monospace,
                     fontSize = 11.sp,
@@ -1486,6 +1505,22 @@ private fun ToolCard(item: ChatItem.Tool, modifier: Modifier = Modifier) {
                 }
             }
         }
+    }
+}
+
+/** 工具状态文字徽章（对齐 Web 端状态 chip 观感） */
+@Composable
+private fun ToolStatusBadge(text: String, color: Color) {
+    Surface(
+        shape = if (DshThemeStyle == ThemeStyle.CODEX) RoundedCornerShape(2.dp) else RoundedCornerShape(5.dp),
+        color = color.copy(alpha = 0.14f),
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelSmall,
+            color = color,
+            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+        )
     }
 }
 
