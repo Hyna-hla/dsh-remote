@@ -26,7 +26,10 @@ object VersionPolicy {
     /** 解析失败返回 null；Triple 按数值比较 */
     private fun parse(s: String): Triple<Int, Int, Int>? {
         val m = SEMVER.find(s.trim()) ?: return null
-        return Triple(m.groupValues[1].toInt(), m.groupValues[2].toInt(), m.groupValues[3].toInt())
+        val major = m.groupValues[1].toIntOrNull() ?: return null
+        val minor = m.groupValues[2].toIntOrNull() ?: return null
+        val patch = m.groupValues[3].toIntOrNull() ?: return null
+        return Triple(major, minor, patch)
     }
 
     private fun Triple<Int, Int, Int>.atLeast(other: Triple<Int, Int, Int>): Boolean =

@@ -38,6 +38,11 @@ class ConnectionPolicyTest {
         assertEquals(VersionVerdict.OK, VersionPolicy.evaluate("0.1.0", min = "0.1.0"))
     }
 
+    @Test
+    fun versionOverflowComponentIsUnknown() {
+        assertEquals(VersionVerdict.UNKNOWN, VersionPolicy.evaluate("99999999999999999999.0.0"))
+    }
+
     // ---- RetryPolicy ----
     @Test
     fun authAndVersionMismatchStopRetrying() {
