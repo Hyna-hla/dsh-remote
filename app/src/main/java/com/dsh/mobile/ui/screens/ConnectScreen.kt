@@ -7,6 +7,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -16,6 +17,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -29,6 +31,7 @@ import com.dsh.mobile.service.DshConnectionService
 import com.dsh.mobile.ui.theme.DshBrand
 import com.dsh.mobile.ui.theme.DshSuccess
 import com.dsh.mobile.ui.theme.DshShape
+import com.dsh.mobile.ui.theme.brandGradient
 import com.journeyapps.barcodescanner.CaptureActivity
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -197,9 +200,14 @@ fun ConnectScreen(connection: DshConnection) {
                 onClick = { doConnect() },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(54.dp),
+                    .height(54.dp)
+                    .background(brandGradient(), DshShape.pill),
                 enabled = url.isNotBlank() && !isLoading,
                 shape = DshShape.pill,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.Transparent,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                ),
             ) {
                 if (isLoading) {
                     CircularProgressIndicator(

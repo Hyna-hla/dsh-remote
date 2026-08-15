@@ -30,6 +30,13 @@ data class ThemeColors(
     val error: Color,
 )
 
+/**
+ * 主题风格：决定排版与装饰语言，而不只是颜色。
+ * - STANDARD：官方 DSH 风格排版（精调字号/字重/行高/字距）+ 圆润卡片
+ * - CODEX：Codex CLI 终端风格（全局等宽字体 + 方角 + 终端装饰）
+ */
+enum class ThemeStyle { STANDARD, CODEX }
+
 data class ThemeDef(
     val id: String,
     val name: String,
@@ -37,6 +44,8 @@ data class ThemeDef(
     val colors: ThemeColors,
     /** 主题包版本（可选，用于热更新识别） */
     val version: String? = null,
+    /** 排版/装饰风格（默认 STANDARD；自定义 JSON 主题不受影响） */
+    val style: ThemeStyle = ThemeStyle.STANDARD,
 )
 
 @Serializable
@@ -76,6 +85,19 @@ object ThemeRegistry {
             textPrimary = Color(0xFF2E2A24), textSecondary = Color(0xFF7B7265), border = Color(0xFFE6DCC9),
             success = Color(0xFF1F9D71), warn = Color(0xFFB07C10), error = Color(0xFFC74F4F),
         ),
+    )
+
+    /** Codex CLI 终端风格：黑底 + 橙棕主色 + 全局等宽字体 + 方角（模拟 OpenAI Codex CLI 终端观感） */
+    val codex = ThemeDef(
+        "codex", "Codex CLI", light = false,
+        ThemeColors(
+            background = Color(0xFF0B0D0E), surface = Color(0xFF151718), surfaceHigh = Color(0xFF1D2021),
+            brand = Color(0xFFCC7B5B), brandSoft = Color(0xFFE09A7C),
+            textPrimary = Color(0xFFF0F0EC), textSecondary = Color(0xFFA9A9A3), border = Color(0xFF2B2E2F),
+            success = Color(0xFF6FBF8F), warn = Color(0xFFD8B46E), error = Color(0xFFE06C6C),
+        ),
+        version = "1.0",
+        style = ThemeStyle.CODEX,
     )
 
 

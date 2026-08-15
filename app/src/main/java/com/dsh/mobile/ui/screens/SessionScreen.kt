@@ -1015,7 +1015,13 @@ fun SessionScreen(
                         }
                         Button(
                             onClick = { answerApproval("allowed-once") },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .background(brandGradient(), DshShape.small),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color.Transparent,
+                                contentColor = MaterialTheme.colorScheme.onPrimary,
+                            ),
                         ) {
                             Text("允许一次")
                         }
@@ -1093,7 +1099,11 @@ fun SessionScreen(
                 OutlinedTextField(
                     value = input,
                     onValueChange = { input = it },
-                    modifier = Modifier.weight(1f),
+                    // width(0)+weight(1f)：消除 OutlinedTextField 默认最小宽度（约 280dp）对
+                    // 右侧按钮的挤压——长文本/窄屏/大字体下发送键不再被推出屏幕
+                    modifier = Modifier
+                        .width(0.dp)
+                        .weight(1f),
                     placeholder = { Text("给智能体发消息…") },
                     maxLines = 4,
                     shape = RoundedCornerShape(22.dp),
@@ -1102,8 +1112,17 @@ fun SessionScreen(
                 FilterChip(
                     selected = steerMode,
                     onClick = { steerMode = !steerMode },
-                    label = { Text("⚡ 插话") },
-                    modifier = Modifier.align(Alignment.CenterVertically),
+                    label = {
+                        Text(
+                            "⚡ 插话",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    },
+                    modifier = Modifier
+                        .align(Alignment.CenterVertically)
+                        .widthIn(max = 92.dp),
                 )
                 if (running) {
                     FilledIconButton(
@@ -1118,8 +1137,14 @@ fun SessionScreen(
                 } else {
                     FilledIconButton(
                         onClick = { send() },
-                        modifier = Modifier.size(46.dp),
+                        modifier = Modifier
+                            .size(46.dp)
+                            .background(brandGradient(), CircleShape),
                         enabled = (input.isNotBlank() || pendingImages.isNotEmpty()) && !sending,
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = Color.Transparent,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                        ),
                     ) {
                         if (sending) {
                             CircularProgressIndicator(
@@ -1574,8 +1599,14 @@ private fun QuestionCard(
                     }
                     onSubmit(answers)
                 },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .background(brandGradient(), DshShape.small),
                 enabled = questions.all { q -> (selections[q.id] ?: emptyList()).isNotEmpty() },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.Transparent,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                ),
             ) {
                 Text("提交")
             }

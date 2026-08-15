@@ -3,8 +3,13 @@ package com.dsh.mobile.ui.theme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 // ── 语义色（随主题切换，组件内直接用）───────────────────────────────────────
 object DshPalette {
@@ -59,16 +64,88 @@ fun applyPalette(theme: ThemeDef, bgActive: Boolean = false, glass: Float = 0f) 
     DshBrandSoft = DshPalette.brandSoft; DshBorder = DshPalette.border
     DshSuccess = DshPalette.success; DshWarn = DshPalette.warn
     DshError = DshPalette.error
+    DshThemeStyle = theme.style
+    applyShapeStyle(theme.style)
 }
 
-// ── Telegram / Twitter 风格常量 ─────────────────────────────────────────────
+// ── Telegram / Twitter 风格常量（随主题风格切换：STANDARD 圆润 / CODEX 方角）──
 object DshShape {
-    val bubble = RoundedCornerShape(18.dp)
-    val userBubble = RoundedCornerShape(18.dp, 6.dp, 18.dp, 18.dp)
-    val assistantBubble = RoundedCornerShape(6.dp, 18.dp, 18.dp, 18.dp)
-    val pill = RoundedCornerShape(24.dp)
-    val card = RoundedCornerShape(14.dp)
-    val small = RoundedCornerShape(10.dp)
+    var bubble = RoundedCornerShape(18.dp)
+    var userBubble = RoundedCornerShape(18.dp, 6.dp, 18.dp, 18.dp)
+    var assistantBubble = RoundedCornerShape(6.dp, 18.dp, 18.dp, 18.dp)
+    var pill = RoundedCornerShape(24.dp)
+    var card = RoundedCornerShape(14.dp)
+    var small = RoundedCornerShape(10.dp)
+}
+
+/** 当前主题风格（组件装饰按它分支：等宽/方角/终端细节） */
+var DshThemeStyle = ThemeStyle.STANDARD; private set
+
+/** 品牌渐变（主按钮/强调装饰用）：brand → brandSoft，随主题色走 */
+fun brandGradient(): Brush = Brush.linearGradient(listOf(DshPalette.brand, DshPalette.brandSoft))
+
+private fun applyShapeStyle(style: ThemeStyle) {
+    when (style) {
+        ThemeStyle.STANDARD -> {
+            DshShape.bubble = RoundedCornerShape(18.dp)
+            DshShape.userBubble = RoundedCornerShape(18.dp, 6.dp, 18.dp, 18.dp)
+            DshShape.assistantBubble = RoundedCornerShape(6.dp, 18.dp, 18.dp, 18.dp)
+            DshShape.pill = RoundedCornerShape(24.dp)
+            DshShape.card = RoundedCornerShape(14.dp)
+            DshShape.small = RoundedCornerShape(10.dp)
+        }
+        ThemeStyle.CODEX -> {
+            // 终端风：方角 + 极小小圆角
+            val sq = RoundedCornerShape(3.dp)
+            DshShape.bubble = sq
+            DshShape.userBubble = sq
+            DshShape.assistantBubble = sq
+            DshShape.pill = RoundedCornerShape(6.dp)
+            DshShape.card = RoundedCornerShape(6.dp)
+            DshShape.small = RoundedCornerShape(4.dp)
+        }
+    }
+}
+
+/**
+ * 排版体系（不再用默认 Typography()）：
+ * - STANDARD：官方 DSH 风格——标题收紧字距加粗、正文 15sp/22sp 行高、标签小字加字距
+ * - CODEX：全等宽终端排版——字号整体偏小、行高紧凑、代码感
+ */
+private fun dshTypography(style: ThemeStyle): Typography {
+    val base = if (style == ThemeStyle.CODEX) FontFamily.Monospace else FontFamily.Default
+    return Typography(
+        displayLarge = TextStyle(fontFamily = base, fontSize = 34.sp, fontWeight = FontWeight.Bold, lineHeight = 40.sp, letterSpacing = (-0.5).sp),
+        headlineLarge = TextStyle(fontFamily = base, fontSize = 27.sp, fontWeight = FontWeight.Bold, lineHeight = 33.sp, letterSpacing = (-0.3).sp),
+        headlineMedium = TextStyle(fontFamily = base, fontSize = 23.sp, fontWeight = FontWeight.Bold, lineHeight = 29.sp, letterSpacing = (-0.2).sp),
+        headlineSmall = TextStyle(fontFamily = base, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, lineHeight = 25.sp),
+        titleLarge = TextStyle(fontFamily = base, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, lineHeight = 24.sp),
+        titleMedium = TextStyle(fontFamily = base, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, lineHeight = 22.sp),
+        titleSmall = TextStyle(fontFamily = base, fontSize = 14.sp, fontWeight = FontWeight.Medium, lineHeight = 20.sp, letterSpacing = 0.1.sp),
+        bodyLarge = TextStyle(fontFamily = base, fontSize = 16.sp, fontWeight = FontWeight.Normal, lineHeight = 24.sp),
+        bodyMedium = TextStyle(fontFamily = base, fontSize = 15.sp, fontWeight = FontWeight.Normal, lineHeight = 22.sp),
+        bodySmall = TextStyle(fontFamily = base, fontSize = 12.5.sp, fontWeight = FontWeight.Normal, lineHeight = 18.sp),
+        labelLarge = TextStyle(fontFamily = base, fontSize = 14.sp, fontWeight = FontWeight.Medium, lineHeight = 20.sp),
+        labelMedium = TextStyle(fontFamily = base, fontSize = 12.sp, fontWeight = FontWeight.Medium, lineHeight = 16.sp, letterSpacing = 0.3.sp),
+        labelSmall = TextStyle(fontFamily = base, fontSize = 11.sp, fontWeight = FontWeight.Medium, lineHeight = 15.sp, letterSpacing = 0.4.sp),
+    )
+}
+
+private fun dshShapes(style: ThemeStyle): Shapes = when (style) {
+    ThemeStyle.STANDARD -> Shapes(
+        extraSmall = RoundedCornerShape(6.dp),
+        small = RoundedCornerShape(10.dp),
+        medium = RoundedCornerShape(14.dp),
+        large = RoundedCornerShape(18.dp),
+        extraLarge = RoundedCornerShape(24.dp),
+    )
+    ThemeStyle.CODEX -> Shapes(
+        extraSmall = RoundedCornerShape(2.dp),
+        small = RoundedCornerShape(4.dp),
+        medium = RoundedCornerShape(6.dp),
+        large = RoundedCornerShape(8.dp),
+        extraLarge = RoundedCornerShape(10.dp),
+    )
 }
 
 private fun dshColorScheme(theme: ThemeDef, bgActive: Boolean = false, glass: Float = 0f): ColorScheme {
@@ -112,7 +189,8 @@ fun DshTheme(
     applyPalette(theme, bgActive, glass)
     MaterialTheme(
         colorScheme = dshColorScheme(theme, bgActive, glass),
-        typography = Typography(),
+        typography = dshTypography(theme.style),
+        shapes = dshShapes(theme.style),
         content = content,
     )
 }

@@ -6,6 +6,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -21,6 +22,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -28,9 +30,16 @@ import androidx.compose.ui.unit.dp
 import com.dsh.mobile.data.*
 import com.dsh.mobile.ui.theme.DshBrand
 import com.dsh.mobile.ui.theme.DshSuccess
-import com.dsh.mobile.ui.theme.DshWarn
 import com.dsh.mobile.ui.theme.DshShape
+import com.dsh.mobile.ui.theme.DshThemeStyle
+import com.dsh.mobile.ui.theme.ThemeStyle
+import com.dsh.mobile.ui.theme.brandGradient
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -243,17 +252,37 @@ fun HomeScreen(
                     .padding(horizontal = 16.dp, vertical = 8.dp),
             ) {
                 Spacer(Modifier.height(8.dp))
-                Text(
-                    "你好 👋",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
-                )
+                // 问候区：STANDARD 用官方风格大标题；CODEX 用终端提示符风格
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (DshThemeStyle == ThemeStyle.CODEX) {
+                        Text(
+                            "❯",
+                            style = MaterialTheme.typography.headlineLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = DshBrand,
+                        )
+                        Spacer(Modifier.width(10.dp))
+                    }
+                    Text(
+                        if (DshThemeStyle == ThemeStyle.CODEX) "新任务" else "你好 👋",
+                        style = MaterialTheme.typography.headlineLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
                 Text(
                     "今天想交给智能体什么任务？",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Spacer(Modifier.height(12.dp))
+                // 品牌渐变装饰条（官方 hero 区的点睛细节）
+                Spacer(Modifier.height(10.dp))
+                Box(
+                    Modifier
+                        .width(36.dp)
+                        .height(3.dp)
+                        .background(brandGradient(), DshShape.small),
+                )
+                Spacer(Modifier.height(10.dp))
 
                 // —— 工作区选择 chip（新对话创建在该工作区，对齐 Web 的 Session Intent hero）——
                 val wsSelected = workspaces.firstOrNull { it.workspaceId == selectedWorkspaceId }
@@ -308,7 +337,8 @@ fun HomeScreen(
                 Surface(
                     shape = RoundedCornerShape(18.dp),
                     color = MaterialTheme.colorScheme.surface,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                    // 品牌淡色描边：卡片有设计感但不抢内容
+                    border = BorderStroke(1.dp, DshBrand.copy(alpha = if (DshThemeStyle == ThemeStyle.CODEX) 0.45f else 0.22f)),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Column(Modifier.padding(12.dp)) {
@@ -318,7 +348,7 @@ fun HomeScreen(
                             modifier = Modifier.fillMaxWidth(),
                             placeholder = { Text("描述你的任务，例如：审查最近改动并给出改进建议") },
                             minLines = 3,
-                            maxLines = 8,
+                            maxLines = 6,
                             shape = RoundedCornerShape(12.dp),
                             keyboardOptions = KeyboardOptions.Default,
                         )
@@ -339,15 +369,17 @@ fun HomeScreen(
                             IconButton(onClick = { imagePicker.launch("image/*") }) {
                                 Icon(Icons.Default.AttachFile, null)
                             }
-                            // 预设选择
+                            // 预设选择（限宽：预设名过长时发送键不被挤出屏幕）
                             Box {
                                 AssistChip(
                                     onClick = { presetMenu = true },
+                                    modifier = Modifier.widthIn(max = 150.dp),
                                     label = {
                                         Text(
                                             presets.firstOrNull { it.first == preset }?.second ?: preset,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
+                                            style = MaterialTheme.typography.labelMedium,
                                         )
                                     },
                                     leadingIcon = {
@@ -379,6 +411,11 @@ fun HomeScreen(
                                 onClick = { send() },
                                 enabled = (input.isNotBlank() || pendingImages.isNotEmpty()) && !sending,
                                 shape = RoundedCornerShape(14.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color.Transparent,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                                ),
+                                modifier = Modifier.background(brandGradient(), RoundedCornerShape(14.dp)),
                             ) {
                                 if (sending) {
                                     CircularProgressIndicator(
@@ -434,13 +471,20 @@ fun HomeScreen(
                     contentAlignment = Alignment.Center,
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            Icons.Default.Inbox,
-                            null,
-                            Modifier.size(48.dp),
-                            tint = MaterialTheme.colorScheme.outline,
-                        )
-                        Spacer(Modifier.height(10.dp))
+                        // 官方风格空态：品牌底圆 + 鲸鱼 logo
+                        Box(
+                            modifier = Modifier
+                                .size(72.dp)
+                                .background(DshBrand.copy(alpha = 0.12f), CircleShape),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Image(
+                                painter = androidx.compose.ui.res.painterResource(com.dsh.mobile.R.drawable.ic_launcher_foreground),
+                                contentDescription = null,
+                                modifier = Modifier.size(40.dp),
+                            )
+                        }
+                        Spacer(Modifier.height(12.dp))
                         Text(
                             "还没有会话，从上面的输入框开始第一个任务吧",
                             style = MaterialTheme.typography.bodySmall,
@@ -726,6 +770,20 @@ private fun SessionCard(
     val time = remember(session.updatedAt) {
         SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(session.updatedAt))
     }
+    // 运行态脉冲呼吸（官方状态灯的"活着"感）
+    val pulse by if (session.running) {
+        val t = rememberInfiniteTransition(label = "run")
+        t.animateFloat(
+            initialValue = 1f, targetValue = 0.25f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(800),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "pulse",
+        )
+    } else {
+        remember { mutableStateOf(1f) }
+    }
 
     Column(
         modifier = Modifier
@@ -738,11 +796,15 @@ private fun SessionCard(
                 .padding(horizontal = 4.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Twitter 风格圆形首字头像
+            // Twitter 风格圆形首字头像（Codex 风格下改方形终端块）
             Box(
                 modifier = Modifier
                     .size(42.dp)
-                    .background(DshBrand.copy(alpha = 0.14f), CircleShape),
+                    .background(
+                        if (DshThemeStyle == ThemeStyle.CODEX) DshBrand.copy(alpha = 0.18f)
+                        else DshBrand.copy(alpha = 0.14f),
+                        if (DshThemeStyle == ThemeStyle.CODEX) RoundedCornerShape(6.dp) else CircleShape,
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -771,7 +833,7 @@ private fun SessionCard(
                         Box(
                             Modifier
                                 .size(8.dp)
-                                .background(DshBrand, CircleShape),
+                                .background(DshBrand.copy(alpha = pulse), CircleShape),
                         )
                     }
                     Spacer(Modifier.width(6.dp))
@@ -782,24 +844,31 @@ private fun SessionCard(
                     )
                 }
                 if (preview.isNotBlank()) {
-                    Spacer(Modifier.height(2.dp))
+                    Spacer(Modifier.height(3.dp))
                     Text(
                         preview,
                         style = MaterialTheme.typography.bodySmall,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 if (!model.isNullOrBlank()) {
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        model,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = DshWarn,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Spacer(Modifier.height(4.dp))
+                    // 模型徽章：品牌淡底小圆角 chip（Codex 风 = 终端方角 + 等宽）
+                    Surface(
+                        shape = if (DshThemeStyle == ThemeStyle.CODEX) RoundedCornerShape(3.dp) else RoundedCornerShape(6.dp),
+                        color = DshBrand.copy(alpha = 0.13f),
+                    ) {
+                        Text(
+                            model,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = DshBrand,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                        )
+                    }
                 }
             }
         }
