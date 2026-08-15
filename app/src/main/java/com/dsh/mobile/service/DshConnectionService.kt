@@ -18,6 +18,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -93,35 +94,51 @@ class DshConnectionService : Service() {
         if (watchJob != null) return
         watchJob = scope.launch {
             val settings = SettingsStore(this@DshConnectionService)
-            val config = settings.connectionConfig.first()
-            val notifyEnabled = settings.backgroundNotify.first()
-            if (!notifyEnabled || config.serverUrl.isBlank()) {
+            if (!settings.backgroundNotify.first()) {
                 stopSelf()
                 return@launch
             }
-            val connection = DshConnection(this@DshConnectionService)
-            watcher = connection
-            launch { connection.events.collect { handle(it) } }
-            // 连接状态同步到常驻通知；连接层自身负责失败自动重连，这里只做展示
-            launch {
-                connection.state.collect { st ->
-                    val text = when (st) {
-                        is DshConnection.State.Connected -> "已连接 " + st.baseUrl
-                        is DshConnection.State.Connecting -> "连接中…"
-                        is DshConnection.State.Error -> st.message
-                        else -> "后台连接已开启"
+            // 跟随活跃主机：切换即重启 watcher（单活跃语义）
+            settings.activeProfileId
+                .distinctUntilChanged()
+                .collect { activeId ->
+                    watcher?.disconnect()
+                    watcher = null
+                    seenApprovals.clear()
+                    seenQuestions.clear()
+                    sessionActive.clear()
+                    completionJobs.values.forEach { it.cancel() }
+                    completionJobs.clear()
+
+                    val profile = if (activeId == null) null else
+                        settings.profiles.first().firstOrNull { it.id == activeId }
+                    if (profile == null || profile.url.isBlank()) {
+                        updateForegroundText("未选择活跃主机")
+                        return@collect
                     }
-                    updateForegroundText(text)
+                    val connection = DshConnection(this@DshConnectionService)
+                    watcher = connection
+                    launch { connection.events.collect { handle(it) } }
+                    launch {
+                        connection.state.collect { st ->
+                            val text = when (st) {
+                                is DshConnection.State.Connected -> "已连接 " + st.baseUrl
+                                is DshConnection.State.Connecting -> "连接中…"
+                                is DshConnection.State.Error ->
+                                    if (st.code != null) "连接失败（${st.code.name}），自动重连中" else st.message
+                                else -> "后台连接已开启"
+                            }
+                            updateForegroundText(text)
+                        }
+                    }
+                    connection.connect(profile) { info ->
+                        if (info.errorCode != null) {
+                            scope.launch {
+                                settings.markAttempt(info.profileId, info.errorCode, info.hostVersion)
+                            }
+                        }
+                    }
                 }
-            }
-            connection.connect(
-                HostProfile(
-                    id = "legacy-0",
-                    remark = "旧连接",
-                    url = config.serverUrl,
-                    autoConnect = true,
-                ),
-            )
         }
     }
 
