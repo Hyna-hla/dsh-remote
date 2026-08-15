@@ -32,4 +32,10 @@ class OkHttpClientFactoryTest {
         assertNull(parseCaCertificate("not a pem".toByteArray()))
         assertNull(parseCaCertificate(byteArrayOf(0, 1, 2, 3)))
     }
+
+    @Test
+    fun mergedCaContextGarbageReturnsNull() {
+        assertNull(OkHttpClientFactory.mergedCaContext("not a pem".toByteArray()))
+        assertNull(OkHttpClientFactory.mergedCaContext(byteArrayOf()))
+    }
 }

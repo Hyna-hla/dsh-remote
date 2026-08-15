@@ -83,7 +83,8 @@ object OkHttpClientFactory {
             builder.sslSocketFactory(ctx.socketFactory, trustAllX509())
             builder.hostnameVerifier { _, _ -> true }
         } else if (ca != null) {
-            val ctx = mergedCaContext(ca)
+            val bytes = runCatching { java.io.File(ca).readBytes() }.getOrNull()
+            val ctx = bytes?.let { mergedCaContext(it) }
             if (ctx != null) builder.sslSocketFactory(ctx.socketFactory, compositeX509()!!)
         }
         buildProxy(profile.proxy)?.let { builder.proxy(it) }
@@ -99,10 +100,9 @@ object OkHttpClientFactory {
         override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
     }
 
-    /** 系统链 + 导入 CA 合成；CA 文件读取失败返回 null（回退系统默认） */
-    private fun mergedCaContext(caUri: String): SSLContext? = runCatching {
-        val bytes = java.io.File(caUri).readBytes()
-        val ca = parseCaCertificate(bytes) ?: return null
+    /** 系统链 + 导入 CA 合成；CA 无法解析返回 null（回退系统默认） */
+    internal fun mergedCaContext(caBytes: ByteArray): SSLContext? = runCatching {
+        val ca = parseCaCertificate(caBytes) ?: return null
         val imported = KeyStore.getInstance(KeyStore.getDefaultType()).apply {
             load(null, null)
             setCertificateEntry("imported-ca", ca)
@@ -111,10 +111,10 @@ object OkHttpClientFactory {
             .apply { init(imported) }.trustManagers.filterIsInstance<X509TrustManager>().first()
         val systemTmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
             .apply { init(null as KeyStore?) }.trustManagers.filterIsInstance<X509TrustManager>().first()
+        val composite = CompositeTrustManager(systemTmf, importedTmf)
         val ctx = SSLContext.getInstance("TLS")
-        ctx.init(null, null, null)
-        // 返回 ctx 同时挂 CompositeTrustManager（build 处使用）
-        lastComposite = CompositeTrustManager(systemTmf, importedTmf)
+        ctx.init(null, arrayOf<TrustManager>(composite), SecureRandom())
+        lastComposite = composite
         ctx
     }.getOrNull()
 
