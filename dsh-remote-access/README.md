@@ -17,12 +17,19 @@ cpolar 公网隧道降级为「网页版」备选。
   - 命令：/状态 查看连接信息、/断开 断开、/帮助 命令说明
   - 默认仅绑定扫码的微信号（白名单，防止朋友发消息误触发）
 - **网页版隧道（备选）**：cpolar 公网隧道（https，网络层端到端加密）
+  - **一键安装 cpolar**：无需手动下载 —— 首次使用点「一键安装」，插件自动从 cpolar 官网拉取并解压到
+    `$DSH_HOME/remote-access/cpolar/`（含下载/解压进度），仍兼容旧的 `E:\coplar\cpolar.exe` 与系统 PATH
+  - **注册引导 + authtoken**：一键打开 cpolar 注册页 / token 页，粘贴 token 即保存（等价 `cpolar authtoken`），
+    自动识别 `~/.cpolar/cpolar.yml` 判断登录态与账号邮箱
   - 二维码由插件**本机生成**（Node qrcode 库，数据不出本机、不依赖第三方 API、秒出图）
   - cpolar 二进制与 DSH 端口探测带 30s/60s 缓存，设置页轮询与「生成地址」更快
   - 地址可直接点击、一键复制
 
 ## 更新日志
 
+- **v1.2.0**：cpolar 一键供应 —— 插件内自动下载/解压 cpolar（无需手动安装）、注册引导 + authtoken
+  保存、登录态识别（`~/.cpolar/cpolar.yml`）；路由注册改挂 `ctx.effect`（热重载不再残留路由，
+  `dev_reload_package` 可直接热更新）
 - **v1.1.2**：本地二维码生成（移除 api.qrserver.com 外链，数据不出本机）；cpolar/DSH 端口探测缓存；
   微信桥工具调用同回合去重汇总（不再逐条刷屏）；登录成功主动问候；发送失败自动重试；新增 /帮助 命令
 - **v1.1.1**：修复「apiProxy 服务不可用」——DSH 升级后 api-gateway 挂载晚于 webServer，
@@ -59,6 +66,7 @@ cpolar 公网隧道降级为「网页版」备选。
 
 - lib/ilink.js — 微信 iLink Bot API 客户端（扫码登录、长轮询、发送、typing、AES 媒体上传下载）
 - lib/bridge.js — 微信 ↔ DSH 桥（会话注入、流式回传、审批应答、白名单、工具聚合、重试）
-- lib/index.js — 插件宿主入口（HTTP 路由、本地二维码端点、cpolar、探测缓存）
-- lib/client.js — 设置页 UI（微信卡片 + cpolar 卡片，本地二维码渲染）
+- lib/cpolar.js — cpolar 供应模块（一键下载/解压、注册引导、authtoken、隧道进程与状态）
+- lib/index.js — 插件宿主入口（HTTP 路由、本地二维码端点、cpolar 接口、探测缓存）
+- lib/client.js — 设置页 UI（微信卡片 + cpolar 卡片，含安装向导与登录向导）
 - protocol-spec.md — 协议精确报文规范（源码出处齐全）

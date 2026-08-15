@@ -27,6 +27,32 @@ class DshConnection {
         private const val INITIAL_BACKOFF_MS = 3_000L
         /** 事件流重连退避封顶（指数退避：3→6→12→24→30s） */
         private const val MAX_BACKOFF_MS = 30_000L
+
+        /**
+         * 进程级共享 OkHttpClient：App 主连接与后台 watcher 各建一个 DshConnection，
+         * 每次新建 client 都会额外开线程池/连接池（浪费且容易 OOM）。
+         * 单例复用连接池，dns/连接复用跨连接实例生效。
+         */
+        private val sharedUnaryClient: OkHttpClient by lazy {
+            OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(60, TimeUnit.SECONDS)
+                .writeTimeout(15, TimeUnit.SECONDS)
+                .build()
+        }
+
+        /**
+         * SSE 流用独立 client：readTimeout=0（无超时），靠服务端 keepalive/断线触发重连。
+         * pingInterval 只对 WebSocket 生效：对 events.mux 的 WS 通道发应用层 ping，
+         * 避免 TCP 半开连接静默挂死而不触发 onFailure（SSE 不受影响）。
+         */
+        private val sharedStreamClient: OkHttpClient by lazy {
+            OkHttpClient.Builder()
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(0, TimeUnit.MILLISECONDS)
+                .pingInterval(20, TimeUnit.SECONDS)
+                .build()
+        }
     }
 
     sealed class State {
@@ -66,17 +92,9 @@ class DshConnection {
         encodeDefaults = true
     }
 
-    private val unaryClient = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .writeTimeout(15, TimeUnit.SECONDS)
-        .build()
+    private val unaryClient = sharedUnaryClient
 
-    // SSE 流用独立 client：readTimeout=0（无超时），靠服务端 keepalive/断线触发重连
-    private val streamClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(0, TimeUnit.MILLISECONDS)
-        .build()
+    private val streamClient = sharedStreamClient
 
     private val _state = MutableStateFlow<State>(State.Disconnected)
     val state: StateFlow<State> = _state.asStateFlow()
@@ -107,18 +125,31 @@ class DshConnection {
         baseUrl = normalized
         _state.value = State.Connecting(normalized)
         scope.launch {
-            // 先探测连通性（host.describe）
-            val ok = try {
-                call(DshEndpoints.HOST_DESCRIBE)
-                true
-            } catch (e: Exception) {
-                _state.value = State.Error(e.message ?: "连接失败")
-                false
-            }
-            if (ok) {
-                _state.value = State.Connected(normalized)
-                streamLoop("mux", "/api/events.mux")
-                streamLoop("host", "/api/events.host")
+            // 先探测连通性（host.describe）；失败按指数退避自动重连，
+            // 不再停在 Error 死等用户手动重试（移动端弱网/切网场景必须自动恢复）
+            var backoffMs = INITIAL_BACKOFF_MS
+            while (isActive) {
+                val ok = try {
+                    call(DshEndpoints.HOST_DESCRIBE)
+                    true
+                } catch (e: Exception) {
+                    false
+                }
+                if (!isActive) break
+                if (ok) {
+                    _state.value = State.Connected(normalized)
+                    streamLoop("mux", "/api/events.mux")
+                    streamLoop("host", "/api/events.host")
+                    break
+                }
+                // 首次失败立刻把错误暴露给 UI，之后按退避自动重试
+                val msg = "连接失败，${backoffMs / 1000} 秒后自动重连"
+                _events.tryEmit(Event.StreamError(msg))
+                _state.value = State.Error(msg)
+                delay(backoffMs)
+                backoffMs = (backoffMs * 2).coerceAtMost(MAX_BACKOFF_MS)
+                if (!isActive) break
+                _state.value = State.Connecting(normalized)
             }
         }
     }

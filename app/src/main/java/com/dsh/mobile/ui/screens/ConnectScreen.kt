@@ -261,8 +261,13 @@ fun ConnectScreen(connection: DshConnection) {
                 }
             }
             Spacer(Modifier.height(28.dp))
+            val versionName = remember {
+                runCatching {
+                    context.packageManager.getPackageInfo(context.packageName, 0).versionName
+                }.getOrNull() ?: "?"
+            }
             Text(
-                "DSH Remote v1.0.18 · 非官方客户端 · 数据只存你的手机与你的服务器",
+                "DSH Remote v$versionName · 非官方客户端 · 数据只存你的手机与你的服务器",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             )

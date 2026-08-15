@@ -7,6 +7,13 @@ import java.io.File
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 
+/** 用户消息图片内容块（与 UI 的 UserImage 互转） */
+@Serializable
+data class CachedImage(
+    val mediaType: String,
+    val base64: String,
+)
+
 /** 会话历史缓存的单条条目（与 UI 的 ChatItem 互转） */
 @Serializable
 data class CachedItem(
@@ -21,6 +28,12 @@ data class CachedItem(
     val streaming: Boolean = false,
     /** 服务端消息序号：缓存与网络首屏合并去重用（旧缓存无此字段，默认为 null） */
     val seq: Long? = null,
+    /**
+     * 用户消息图片：只在内存热缓存里保留完整 base64；磁盘写盘前剥离
+     * （磁盘只留 hasImages 占位，冷启动重进先占位、网络刷新后补齐，控制缓存体积）。
+     */
+    val images: List<CachedImage> = emptyList(),
+    val hasImages: Boolean = false,
 )
 
 @Serializable
@@ -87,10 +100,12 @@ class HistoryCache(context: Context) {
 
     fun saveHistory(sessionId: String, items: List<CachedItem>) {
         if (items.isEmpty()) return
-        // 内存即时生效（返回再进零解码），磁盘延迟由调用方防抖控制
+        // 内存即时生效（返回再进零解码，含图片 base64），磁盘延迟由调用方防抖控制
         HistoryMemoryCache.putHistory(sessionId, items)
-        // 温缓存只留最近 120 条，避免膨胀
-        val capped = items.takeLast(120)
+        // 温缓存只留最近 120 条，避免膨胀；图片 base64 剥离（磁盘只留占位标记）
+        val capped = items.takeLast(120).map {
+            if (it.images.isNotEmpty()) it.copy(images = emptyList(), hasImages = true) else it
+        }
         runCatching {
             historyDir.mkdirs()
             val payload = json.encodeToString(
@@ -100,6 +115,22 @@ class HistoryCache(context: Context) {
             GZIPOutputStream(historyFile(sessionId).outputStream()).use {
                 it.write(payload.toByteArray(Charsets.UTF_8))
             }
+        }
+    }
+
+    /**
+     * 清理过期缓存：会话历史超过 ttlDays 删除（gzip 解压后内容通常很快失效），
+     * 会话列表超过 listTtlDays 删除。损坏文件（解码失败）也一并清除。
+     */
+    fun prune(ttlDays: Int = 7, listTtlDays: Int = 1) {
+        runCatching {
+            val now = System.currentTimeMillis()
+            val historyTtl = ttlDays * 24L * 3600 * 1000
+            val listTtl = listTtlDays * 24L * 3600 * 1000
+            historyDir.listFiles()?.forEach { f ->
+                if (f.isFile && (now - f.lastModified() > historyTtl)) f.delete()
+            }
+            if (listFile.isFile && (now - listFile.lastModified() > listTtl)) listFile.delete()
         }
     }
 

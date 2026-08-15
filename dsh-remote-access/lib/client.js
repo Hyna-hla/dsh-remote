@@ -167,16 +167,57 @@ window.__ModuleLoader__.load({
 
     function CpolarCard() {
       var [info, setInfo] = useState(null);
+      var [cp, setCp] = useState(null);
       var [busy, setBusy] = useState(false);
       var [copied, setCopied] = useState(false);
-      var [qrFailed, setQrFailed] = useState(false);
+      var [token, setToken] = useState("");
 
       function refresh() {
         fetchJson("/api/remote-access/status")
           .then(setInfo)
           .catch(function () { setInfo({ status: "error", message: "无法连接插件后端（重启 DSH 后生效）" }); });
       }
-      useEffect(function () { refresh(); }, []);
+      function refreshCp() {
+        fetchJson("/api/remote-access/cpolar/status")
+          .then(setCp)
+          .catch(function () { setCp({ installStatus: "error", installMessage: "无法连接插件后端（重启 DSH 后生效）" }); });
+      }
+      useEffect(function () {
+        refresh();
+        refreshCp();
+      }, []);
+
+      // 安装进行中 → 轮询进度
+      var installing = !!(cp && (cp.installStatus === "downloading" || cp.installStatus === "extracting"));
+      useEffect(function () {
+        if (!installing) return;
+        var t = setInterval(refreshCp, 1500);
+        return function () { clearInterval(t); };
+      }, [installing]);
+
+      function installCpolar() {
+        setBusy(true);
+        fetchJson("/api/remote-access/cpolar/install", { method: "POST" })
+          .then(refreshCp)
+          .catch(function (e) { setCp({ installStatus: "error", installMessage: String(e) }); })
+          .finally(function () { setBusy(false); });
+      }
+
+      function saveToken() {
+        if (!token || !token.trim()) return;
+        setBusy(true);
+        fetchJson("/api/remote-access/cpolar/authtoken", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: token.trim() }),
+        })
+          .then(function (r) {
+            if (r.ok) { setToken(""); refreshCp(); }
+            else setCp({ installStatus: "error", installMessage: r.error || "保存失败" });
+          })
+          .catch(function (e) { setCp({ installStatus: "error", installMessage: String(e) }); })
+          .finally(function () { setBusy(false); });
+      }
 
       function start() {
         setBusy(true);
@@ -210,38 +251,85 @@ window.__ModuleLoader__.load({
 
       var url = info.url;
       var running = info.status === "online" || info.status === "starting";
+      var installed = !!(cp && cp.installed);
+      var authed = !!(cp && cp.authed);
+      var installFailed = !!(cp && cp.installStatus === "error");
+
+      // —— cpolar 环境卡（一键安装 / 注册 / token）——
+      var envCard = h("div", { style: S.card },
+        h("div", { style: S.row },
+          h("div", { style: S.label2() }, "cpolar 环境："),
+          installed
+            ? h("span", { style: Object.assign({}, S.badge, { background: "rgba(52,199,89,.15)", color: "var(--dsw-alias-state-success-primary)" }) }, "已安装" + (cp.version ? " · " + cp.version : ""))
+            : h("span", { style: Object.assign({}, S.badge, { background: "rgba(255,149,0,.15)", color: "var(--dsw-alias-state-warning-primary)" }) }, "未安装")
+        ),
+
+        // 未安装 → 一键安装（含进度）
+        !installed ? h("div", { style: { marginTop: 8 } },
+          installing
+            ? h("div", null,
+                h("div", { style: S.label2() }, (cp.installMessage || "安装中…") + " " + (typeof cp.installProgress === "number" ? cp.installProgress + "%" : "")),
+                h("div", { style: { marginTop: 6, height: 6, borderRadius: 3, background: "var(--dsw-alias-border-l1)", overflow: "hidden" } },
+                  h("div", { style: { height: "100%", width: (cp.installProgress || 0) + "%", background: "var(--dsw-alias-brand-primary)", transition: "width .4s" } })))
+            : installFailed
+              ? h("div", { style: { marginTop: 6 } },
+                  h("div", { style: S.err }, "✘ " + (cp.installMessage || "安装失败")),
+                  h("div", { style: Object.assign({}, S.row, { marginTop: 6 }) },
+                    h("button", { style: S.btnPrimary, disabled: busy, onClick: installCpolar }, "重试安装")))
+              : h("div", null,
+                  h("div", { style: S.label2() }, "首次使用自动从 cpolar 官网下载安装（约几十 MB，无需手动装）："),
+                  h("button", { style: Object.assign({}, S.btnPrimary, { marginTop: 6 }), disabled: busy, onClick: installCpolar }, busy ? "安装中…" : "一键安装 cpolar")))
+          : null,
+
+        // 已安装但未登录 → 注册 + 保存 token
+        installed && !authed ? h("div", { style: { marginTop: 8 } },
+          h("div", { style: S.warn }, "⚠ 尚未登录。免费注册后在 cpolar 后台「验证」页复制 authtoken，粘贴保存："),
+          h("div", { style: Object.assign({}, S.row, { marginTop: 6 }) },
+            h("input", { style: Object.assign({}, S.input, { width: 220 }), placeholder: "粘贴 authtoken", value: token, onChange: function (e) { setToken(e.target.value); } }),
+            h("button", { style: S.btnPrimary, disabled: busy || !token.trim(), onClick: saveToken }, busy ? "保存中…" : "保存 token"),
+            h("button", { style: S.btn, onClick: function () { window.open(cp.registerUrl, "_blank"); } }, "注册账号"),
+            h("button", { style: S.btn, onClick: function () { window.open(cp.tokenUrl, "_blank"); } }, "去取 token")),
+          h("div", { style: Object.assign({}, S.sub, { marginTop: 4 }) }, "注册页：" + cp.registerUrl)) : null,
+
+        // 已安装 + 已登录
+        installed && authed ? h("div", { style: { marginTop: 6 } },
+          h("div", { style: S.ok }, "✔ 已登录" + (cp.email ? "：" + cp.email : ""))) : null
+      );
+
+      // —— 隧道卡 ——
+      var tunnelCard = h("div", { style: S.card },
+        h("div", { style: S.label2() }, "当前状态："),
+        info.status === "online" ? h("div", { style: S.ok }, "✔ 在线 — 隧道运行中") :
+          info.status === "starting" ? h("div", { style: S.label2() }, "⏳ 正在建立隧道…") :
+            info.status === "error" ? h("div", { style: S.err }, "✘ " + (info.message || "失败")) :
+              h("div", { style: S.label2() }, "○ 未开启"),
+        url ? h("div", { style: { marginTop: 8 } },
+          h("div", { style: S.label2() }, "手机端连接地址："),
+          h("a", { href: url, target: "_blank", rel: "noreferrer", style: S.url }, url)) : null,
+        info.port ? h("div", { style: { marginTop: 4 } }, h("span", { style: S.mono }, "目标端口: " + info.port)) : null,
+        info.dshPort ? h("div", { style: { marginTop: 4 } }, h("span", { style: S.mono }, "检测到 DSH 桌面实例端口: " + info.dshPort)) : null
+      );
 
       return h("div", { style: S.root },
-        h("div", { style: S.card },
-          h("div", { style: S.label2() }, "当前状态："),
-          info.status === "online" ? h("div", { style: S.ok }, "✔ 在线 — 隧道运行中") :
-            info.status === "starting" ? h("div", { style: S.label2() }, "⏳ 正在建立隧道…") :
-              info.status === "error" ? h("div", { style: S.err }, "✘ " + (info.message || "失败")) :
-                h("div", { style: S.label2() }, "○ 未开启"),
-          url ? h("div", { style: { marginTop: 8 } },
-            h("div", { style: S.label2() }, "手机端连接地址："),
-            h("a", { href: url, target: "_blank", rel: "noreferrer", style: S.url }, url)) : null,
-          info.port ? h("div", { style: { marginTop: 4 } }, h("span", { style: S.mono }, "目标端口: " + info.port)) : null,
-          info.cpolarFound === false ? h("div", { style: { marginTop: 6 } }, h("span", { style: S.err }, "⚠ 未检测到 cpolar（E:\\coplar\\cpolar.exe）")) : null,
-          info.dshPort ? h("div", { style: { marginTop: 4 } }, h("span", { style: S.mono }, "检测到 DSH 桌面实例端口: " + info.dshPort)) : null
-        ),
+        envCard,
 
         url ? h("div", { style: S.card },
           h("div", { style: S.label2() }, "手机扫码获取地址（本机生成二维码，数据不经过第三方）："),
           h(LocalQr, { data: url })) : null,
 
-        h("div", { style: S.row },
-          running ? null : h("button", { style: S.btnPrimary, disabled: busy, onClick: start }, busy ? "生成中…" : "生成地址"),
-          running ? h("button", { style: S.btn, disabled: busy, onClick: stop }, busy ? "停止中…" : "停止隧道") : null,
-          url ? h("button", { style: S.btn, onClick: copy }, copied ? "已复制 ✔" : "复制地址") : null,
-          h("button", { style: S.btn, onClick: refresh }, "刷新")
-        ),
-
-        h("div", { style: { marginTop: 4 } },
-          h("div", { style: S.label2() },
-            "使用说明：1) 点「生成地址」；2) 手机打开 DSH Remote，把地址粘贴到服务器地址；3) 免费版地址每次生成都会变，重新生成后需重新填写。"),
-          h("div", { style: S.label2() }, "（本插件为个人自用，非官方功能。）")
-        )
+        installed ? h("div", null,
+          tunnelCard,
+          h("div", { style: S.row, marginTop: 10 },
+            running ? null : h("button", { style: S.btnPrimary, disabled: busy || !authed, onClick: start }, busy ? "生成中…" : authed ? "生成地址" : "请先登录"),
+            running ? h("button", { style: S.btn, disabled: busy, onClick: stop }, busy ? "停止中…" : "停止隧道") : null,
+            url ? h("button", { style: S.btn, onClick: copy }, copied ? "已复制 ✔" : "复制地址") : null,
+            h("button", { style: S.btn, onClick: refresh }, "刷新")
+          ),
+          h("div", { style: { marginTop: 4 } },
+            h("div", { style: S.label2() },
+              "使用说明：1) 点「生成地址」；2) 手机打开 DSH Remote，把地址粘贴到服务器地址；3) 免费版地址每次生成都会变，重新生成后需重新填写。"),
+            h("div", { style: S.label2() }, "（本插件为个人自用，非官方功能。）")
+          )) : null
       );
     }
 

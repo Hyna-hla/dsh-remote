@@ -1,5 +1,6 @@
 package com.dsh.mobile.data
 
+import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
@@ -39,6 +40,8 @@ object UpdateChecker {
     private const val REPO = "Hyna-hla/harness-remote"
     private const val API_LATEST = "https://api.github.com/repos/$REPO/releases/latest"
     private const val USER_AGENT = "DSH-Remote-Updater/1.0"
+    /** 启动自动检查的最小间隔（24h），避免每次打开都打 GitHub */
+    private const val AUTO_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000L
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -71,6 +74,16 @@ object UpdateChecker {
                 json.decodeFromString<ReleaseInfo>(resp.body?.string() ?: return@use null)
             }
         }.getOrNull()
+    }
+
+    /** 启动自动检查：距上次检查超过 1 天才真正请求 GitHub（省电省流量） */
+    suspend fun autoCheck(context: Context): ReleaseInfo? {
+        val prefs = context.getSharedPreferences("dsh_update", Context.MODE_PRIVATE)
+        val last = prefs.getLong("last_auto_check", 0L)
+        val now = System.currentTimeMillis()
+        if (now - last < AUTO_CHECK_INTERVAL_MS) return null
+        prefs.edit().putLong("last_auto_check", now).apply()
+        return checkLatest()
     }
 
     /**

@@ -1,13 +1,18 @@
 package com.dsh.mobile.ui.screens
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Base64
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
@@ -23,8 +28,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -58,12 +68,20 @@ private const val STREAM_TAIL_CHARS = 8000
 
 // ──────────────────────────── 聊天条目模型与状态机 ────────────────────────────
 
+/** 用户消息里的图片内容块（mediaType + base64 data，DSH 协议 image 块） */
+data class UserImage(val mediaType: String, val base64: String)
+
 sealed interface ChatItem {
     val key: String
     /** 服务端消息序号：缓存/网络首屏合并去重、排序用 */
     val seq: Long?
 
-    data class User(override val key: String, val text: String, override val seq: Long? = null) : ChatItem
+    data class User(
+        override val key: String,
+        val text: String,
+        override val seq: Long? = null,
+        val images: List<UserImage> = emptyList(),
+    ) : ChatItem
     data class Assistant(
         override val key: String,
         val text: String,
@@ -85,9 +103,13 @@ sealed interface ChatItem {
     data class Notice(override val key: String, val text: String, val isError: Boolean = false, override val seq: Long? = null) : ChatItem
 }
 
-/** 缓存互转：UI 条目 ↔ gzip 磁盘条目 */
+/** 缓存互转：UI 条目 ↔ gzip 磁盘条目（磁盘只存 hasImages 占位，不存 base64） */
 private fun ChatItem.toCached(): CachedItem = when (this) {
-    is ChatItem.User -> CachedItem(kind = "user", text = text, seq = seq)
+    is ChatItem.User -> CachedItem(
+        kind = "user", text = text, seq = seq,
+        images = images.map { CachedImage(it.mediaType, it.base64) },
+        hasImages = images.isNotEmpty(),
+    )
     is ChatItem.Assistant -> CachedItem(
         kind = "assistant", text = text, thinkSeconds = thinkSeconds, streaming = streaming, seq = seq,
     )
@@ -98,24 +120,42 @@ private fun ChatItem.toCached(): CachedItem = when (this) {
 }
 
 private fun CachedItem.toChatItem(key: String): ChatItem = when (kind) {
-    "user" -> ChatItem.User(key, text, seq = seq)
+    "user" -> ChatItem.User(
+        key, text, seq = seq,
+        images = images.map { UserImage(it.mediaType, it.base64) },
+    )
     "assistant" -> ChatItem.Assistant(key, text, streaming = streaming, thinkSeconds = thinkSeconds, seq = seq)
     "tool" -> ChatItem.Tool(key, callId = key, name = name, args = args, status = status, result = result, isError = isError, seq = seq)
     else -> ChatItem.Notice(key, text, isError = isError, seq = seq)
 }
 
-private fun textBlocks(content: JsonElement?): String {
-    val arr = content as? JsonArray ?: return ""
-    return arr.mapNotNull { el ->
+private data class UserContent(val text: String, val images: List<UserImage>)
+
+/** 解析用户消息内容块：text 块拼文字，image 块取 mediaType + base64（供 UI 渲染） */
+private fun userContentOf(content: JsonElement?): UserContent {
+    val arr = content as? JsonArray ?: return UserContent("", emptyList())
+    val text = StringBuilder()
+    val images = mutableListOf<UserImage>()
+    arr.forEach { el ->
         val o = el.jsonObject
         when {
-            o["text"] is JsonPrimitive && (o["text"] as JsonPrimitive).isString ->
-                (o["text"] as JsonPrimitive).content
-            o["type"]?.jsonPrimitive?.contentOrNull == "text" && o["value"] is JsonPrimitive ->
-                (o["value"] as JsonPrimitive).content
-            else -> null
+            o["type"]?.jsonPrimitive?.contentOrNull == "image" -> {
+                val mediaType = o["mediaType"]?.jsonPrimitive?.contentOrNull ?: "image/png"
+                val data = o["data"]?.jsonPrimitive?.contentOrNull
+                    ?: o["base64"]?.jsonPrimitive?.contentOrNull
+                if (!data.isNullOrBlank()) images.add(UserImage(mediaType, data))
+            }
+            o["text"] is JsonPrimitive && (o["text"] as JsonPrimitive).isString -> {
+                if (text.isNotEmpty()) text.append("\n")
+                text.append((o["text"] as JsonPrimitive).content)
+            }
+            o["type"]?.jsonPrimitive?.contentOrNull == "text" && o["value"] is JsonPrimitive -> {
+                if (text.isNotEmpty()) text.append("\n")
+                text.append((o["value"] as JsonPrimitive).content)
+            }
         }
-    }.joinToString("\n")
+    }
+    return UserContent(text.toString(), images)
 }
 
 private fun assistantTextOf(data: JsonElement): String {
@@ -282,8 +322,10 @@ class SessionChatState(
                     when (e.type) {
                         DshEventTypes.USER_MESSAGE -> {
                             flushChunks()
-                            val t = textBlocks(e.data.jsonObject["content"])
-                            if (t.isNotBlank()) list.add(ChatItem.User(nextKey(), t, seq = e.seq))
+                            val uc = userContentOf(e.data.jsonObject["content"])
+                            if (uc.text.isNotBlank() || uc.images.isNotEmpty()) {
+                                list.add(ChatItem.User(nextKey(), uc.text, seq = e.seq, images = uc.images))
+                            }
                         }
                         DshEventTypes.ASSISTANT_MESSAGE -> {
                             // 完整消息到达：丢弃已收集的 chunk（其内容已包含在消息全文里）
@@ -369,54 +411,83 @@ class SessionChatState(
         return cached.filter { item -> val s = item.seq; s == null || s < netMinSeq } + net
     }
 
-    /** 加载更早的消息（按 seq 前插） */
+    /** 解析历史页（loadMore/loadAll 用：更早历史为完整消息，无需 chunk 合并） */
+    private fun parseHistoryPage(h: HistoryValue): List<ChatItem> {
+        val out = mutableListOf<ChatItem>()
+        h.events.forEach { entry ->
+            val e = entry.event
+            when (e.type) {
+                DshEventTypes.USER_MESSAGE -> {
+                    val uc = userContentOf(e.data.jsonObject["content"])
+                    if (uc.text.isNotBlank() || uc.images.isNotEmpty()) {
+                        out.add(ChatItem.User(nextKey(), uc.text, seq = e.seq, images = uc.images))
+                    }
+                }
+                DshEventTypes.ASSISTANT_MESSAGE -> {
+                    val t = assistantTextOf(e.data)
+                    if (t.isNotBlank()) out.add(ChatItem.Assistant(nextKey(), t, seq = e.seq))
+                }
+                // 更早历史中的 chunk 已被完整 assistant/message 覆盖，忽略
+                DshEventTypes.TOOL_CALL -> {
+                    val d = e.data.jsonObject
+                    out.add(
+                        ChatItem.Tool(
+                            key = nextKey(),
+                            callId = d["callId"]?.jsonPrimitive?.contentOrNull ?: "",
+                            name = d["name"]?.jsonPrimitive?.contentOrNull ?: "tool",
+                            args = d["arguments"]?.jsonPrimitive?.contentOrNull ?: "",
+                            seq = e.seq,
+                        )
+                    )
+                }
+                DshEventTypes.TOOL_RESULT -> attachResult(out, e.data)
+                "permission/preset" -> {
+                    e.data.jsonObject["preset"]?.jsonPrimitive?.contentOrNull?.let { currentMode.value = it }
+                }
+                DshEventTypes.SESSION_TITLE -> {
+                    e.data.jsonObject["title"]?.jsonPrimitive?.contentOrNull?.let { title.value = it }
+                }
+                DshEventTypes.AGENT_ERROR -> {
+                    val msg = e.data.jsonObject["error"]?.toString() ?: "智能体出错"
+                    out.add(ChatItem.Notice(nextKey(), msg, true, seq = e.seq))
+                }
+                else -> {}
+            }
+        }
+        return out
+    }
+
+    /** 加载更早的消息（按 seq 前插；每页 15 条，减少点击次数） */
     suspend fun loadMore() {
         val before = oldestSeq ?: return
         try {
-            val h = connection.history(sessionId, beforeSeq = before, maxMessages = 5)
+            val h = connection.history(sessionId, beforeSeq = before, maxMessages = 15)
             oldestSeq = h.events.firstOrNull()?.event?.seq
             hasMore = h.hasMore && h.events.isNotEmpty()
-            // 解析与拼接移出主线程
-            val list = withContext(Dispatchers.Default) {
-                val out = mutableListOf<ChatItem>()
-                h.events.forEach { entry ->
-                    val e = entry.event
-                    when (e.type) {
-                        DshEventTypes.USER_MESSAGE -> {
-                            val t = textBlocks(e.data.jsonObject["content"])
-                            if (t.isNotBlank()) out.add(ChatItem.User(nextKey(), t, seq = e.seq))
-                        }
-                        DshEventTypes.ASSISTANT_MESSAGE -> {
-                            val t = assistantTextOf(e.data)
-                            if (t.isNotBlank()) out.add(ChatItem.Assistant(nextKey(), t, seq = e.seq))
-                        }
-                        DshEventTypes.TOOL_CALL -> {
-                            val d = e.data.jsonObject
-                            out.add(
-                                ChatItem.Tool(
-                                    key = nextKey(),
-                                    callId = d["callId"]?.jsonPrimitive?.contentOrNull ?: "",
-                                    name = d["name"]?.jsonPrimitive?.contentOrNull ?: "tool",
-                                    args = d["arguments"]?.jsonPrimitive?.contentOrNull ?: "",
-                                    seq = e.seq,
-                                )
-                            )
-                        }
-                        DshEventTypes.TOOL_RESULT -> attachResult(out, e.data)
-                        "permission/preset" -> {
-                            e.data.jsonObject["preset"]?.jsonPrimitive?.contentOrNull?.let { currentMode.value = it }
-                        }
-                        DshEventTypes.SESSION_TITLE -> {
-                            e.data.jsonObject["title"]?.jsonPrimitive?.contentOrNull?.let { title.value = it }
-                        }
-                        else -> {}
-                    }
-                }
-                out
-            }
+            val list = withContext(Dispatchers.Default) { parseHistoryPage(h) }
             if (list.isNotEmpty()) _items.value = list + _items.value
             withContext(Dispatchers.Default) { cache.saveHistory(sessionId, _items.value.map { it.toCached() }) }
         } catch (_: Exception) {}
+    }
+
+    /** 加载全部历史：循环翻页直到服务端 hasMore=false（每页 50 条） */
+    suspend fun loadAll() {
+        var guard = 0
+        while (hasMore && oldestSeq != null && guard < 500) {
+            val before = oldestSeq
+            try {
+                val h = connection.history(sessionId, beforeSeq = before, maxMessages = 50)
+                if (h.events.isEmpty()) { hasMore = false; break }
+                oldestSeq = h.events.firstOrNull()?.event?.seq
+                // 防呆：序号没前进说明服务端重复返回同一页，停止避免死循环
+                if (oldestSeq != null && oldestSeq == before) { hasMore = false; break }
+                hasMore = h.hasMore
+                val list = withContext(Dispatchers.Default) { parseHistoryPage(h) }
+                if (list.isNotEmpty()) _items.value = list + _items.value
+                guard++
+            } catch (_: Exception) { break }
+        }
+        withContext(Dispatchers.Default) { cache.saveHistory(sessionId, _items.value.map { it.toCached() }) }
     }
 
     fun onSessionEvent(e: SessionEventWire) {
@@ -453,8 +524,10 @@ class SessionChatState(
         val cur = _items.value.toMutableList()
         when (e.type) {
             DshEventTypes.USER_MESSAGE -> {
-                val t = textBlocks(e.data.jsonObject["content"])
-                if (t.isNotBlank()) cur.add(ChatItem.User(nextKey(), t, seq = e.seq))
+                val uc = userContentOf(e.data.jsonObject["content"])
+                if (uc.text.isNotBlank() || uc.images.isNotEmpty()) {
+                    cur.add(ChatItem.User(nextKey(), uc.text, seq = e.seq, images = uc.images))
+                }
             }
 
             DshEventTypes.ASSISTANT_MESSAGE -> {
@@ -566,7 +639,13 @@ fun SessionScreen(
     var actionError by remember { mutableStateOf<String?>(null) }
     var workspaceLabel by remember { mutableStateOf<String?>(null) }
     var autoModelEnabled by remember { mutableStateOf(true) }
+    var streamNotice by remember { mutableStateOf<String?>(null) }
+    var loadingMore by remember { mutableStateOf(false) }
+    var loadingAll by remember { mutableStateOf(false) }
+    var renameDialog by remember { mutableStateOf(false) }
+    var renameText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
+    val clipboard = LocalClipboardManager.current
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -637,7 +716,23 @@ fun SessionScreen(
                         runCatching { ev.value.jsonObject }.getOrNull()?.let { state.imageLimits.value = it }
                     }
 
+                is DshConnection.Event.StreamError -> streamNotice = ev.message
+
+                is DshConnection.Event.Reconnected -> streamNotice = null
+
                 else -> {}
+            }
+        }
+    }
+
+    // 滚动到顶自动加载更早的消息（每加载一页顶部索引后移，需再次滚到顶才继续；
+    // 与「加载更早」按钮并存，按钮兜底手动加载）
+    LaunchedEffect(listState.firstVisibleItemIndex) {
+        if (state.hasMore && listState.firstVisibleItemIndex <= 0 && items.isNotEmpty() && !loadingMore) {
+            loadingMore = true
+            scope.launch {
+                state.loadMore()
+                loadingMore = false
             }
         }
     }
@@ -742,6 +837,10 @@ fun SessionScreen(
                         title ?: "会话 ${sessionId.take(8)}",
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.clickable {
+                            renameText = title ?: ""
+                            renameDialog = true
+                        },
                     )
                     Text(
                         if (running) "运行中…" else "空闲",
@@ -792,6 +891,34 @@ fun SessionScreen(
             },
         )
 
+        // 连接中断提示条（事件流断开/首连失败时显示，重连成功后消失）
+        streamNotice?.let { notice ->
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.errorContainer,
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Default.WifiOff,
+                        null,
+                        Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.error,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        notice,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+
         LazyColumn(
             modifier = Modifier
                 .weight(1f)
@@ -802,17 +929,41 @@ fun SessionScreen(
         ) {
             if (state.hasMore) {
                 item(key = "load_more") {
-                    TextButton(
-                        onClick = { scope.launch { state.loadMore() } },
+                    Column(
                         modifier = Modifier.fillMaxWidth(),
-                    ) { Text("加载更早的消息") }
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        TextButton(
+                            onClick = { scope.launch { state.loadMore() } },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("加载更早的消息") }
+                        TextButton(
+                            onClick = {
+                                loadingAll = true
+                                scope.launch {
+                                    state.loadAll()
+                                    loadingAll = false
+                                }
+                            },
+                            enabled = !loadingAll,
+                        ) {
+                            if (loadingAll) {
+                                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 1.5.dp)
+                                Spacer(Modifier.width(6.dp))
+                                Text("正在加载全部历史…")
+                            } else {
+                                Text("加载全部历史")
+                            }
+                        }
+                    }
                 }
             }
             items(items, key = { it.key }) { item ->
                 // 新条目渐入：新消息平滑出现，不跳变（Telegram 式轻量动效）
                 androidx.compose.runtime.key(item.key) {
                     when (item) {
-                        is ChatItem.User -> UserBubble(item.text, Modifier.animateItem())
+                        is ChatItem.User -> UserBubble(item, Modifier.animateItem())
                         is ChatItem.Assistant -> AssistantCard(item, Modifier.animateItem())
                         is ChatItem.Tool -> ToolCard(item, Modifier.animateItem())
                         is ChatItem.Notice -> NoticeRow(item, Modifier.animateItem())
@@ -1032,13 +1183,50 @@ fun SessionScreen(
                 },
             )
         }
+
+        // 重命名会话（点标题触发）
+        if (renameDialog) {
+            AlertDialog(
+                onDismissRequest = { renameDialog = false },
+                title = { Text("重命名会话") },
+                text = {
+                    OutlinedTextField(
+                        value = renameText,
+                        onValueChange = { renameText = it },
+                        singleLine = true,
+                        label = { Text("会话标题") },
+                        shape = DshShape.small,
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val name = renameText.trim()
+                            renameDialog = false
+                            if (name.isNotEmpty()) {
+                                scope.launch {
+                                    runCatching { connection.rename(sessionId, name) }
+                                        .onSuccess { state.title.value = name }
+                                }
+                            }
+                        },
+                    ) { Text("保存") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { renameDialog = false }) { Text("取消") }
+                },
+            )
+        }
     }
 }
 
 // ──────────────────────────── 条目渲染 ────────────────────────────
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun UserBubble(text: String, modifier: Modifier = Modifier) {
+private fun UserBubble(item: ChatItem.User, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     Row(
         Modifier
             .fillMaxWidth()
@@ -1048,26 +1236,91 @@ private fun UserBubble(text: String, modifier: Modifier = Modifier) {
         Surface(
             shape = DshShape.userBubble,
             color = MaterialTheme.colorScheme.primaryContainer,
-            modifier = Modifier.widthIn(max = 320.dp),
+            modifier = Modifier
+                .widthIn(max = 320.dp)
+                .combinedClickable(
+                    onClick = {},
+                    onLongClick = {
+                        if (item.text.isNotBlank()) {
+                            clipboard.setText(AnnotatedString(item.text))
+                            Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                ),
         ) {
-            Text(
-                text,
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
+            Column(
+                Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                item.images.forEach { img ->
+                    val bitmap = remember(img.base64) { decodeUserImage(context, img) }
+                    if (bitmap != null) {
+                        Image(
+                            bitmap = bitmap.asImageBitmap(),
+                            contentDescription = "图片",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp)),
+                            contentScale = ContentScale.FillWidth,
+                        )
+                    } else {
+                        Text(
+                            "（图片）",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
+                        )
+                    }
+                }
+                if (item.text.isNotBlank()) {
+                    Text(
+                        item.text,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                }
+            }
         }
     }
 }
 
+/** base64 图片按屏幕宽度采样解码（大图不爆内存；GIF 取首帧） */
+private fun decodeUserImage(context: android.content.Context, img: UserImage): Bitmap? {
+    return try {
+        val bytes = Base64.decode(img.base64, Base64.NO_WRAP)
+        if (bytes.isEmpty()) return null
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        val maxW = context.resources.displayMetrics.widthPixels
+        var sample = 1
+        while (bounds.outWidth / sample > maxW || bounds.outHeight / sample > maxW * 2) sample *= 2
+        val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+    } catch (_: Exception) {
+        null
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun AssistantCard(item: ChatItem.Assistant, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     Surface(
         shape = DshShape.assistantBubble,
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)),
         modifier = Modifier
             .fillMaxWidth()
+            .combinedClickable(
+                onClick = {},
+                onLongClick = {
+                    if (item.text.isNotBlank()) {
+                        clipboard.setText(AnnotatedString(item.text))
+                        Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
+                    }
+                },
+            )
             .then(modifier),
     ) {
         Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
