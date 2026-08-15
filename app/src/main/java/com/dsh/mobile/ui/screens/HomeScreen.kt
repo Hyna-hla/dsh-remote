@@ -1672,8 +1672,13 @@ private fun DeepLookHomeLayout(
     val chevronTint = if (darkVariant) MaterialTheme.colorScheme.onSurfaceVariant else Color(0xFFB4B4B8)
     val dashTint = if (darkVariant) MaterialTheme.colorScheme.outline else Color(0xFFC9C9CD)
     var tab by remember { mutableStateOf("new") } // new | sessions
-    val wsLabel = workspaces.firstOrNull { it.workspaceId == selectedWorkspaceId }
-        ?.let { it.title.ifBlank { it.path } } ?: "标准模式"
+    // 默认工作区（未选择）显示「默认工作区」，与工作区选择面板口径一致
+    val wsLabel = when {
+        selectedWorkspaceId.isBlank() -> "默认工作区"
+        else -> workspaces.firstOrNull { it.workspaceId == selectedWorkspaceId }
+            ?.let { it.title.ifBlank { it.path } }
+            ?: "工作区 ${selectedWorkspaceId.take(8)}"
+    }
 
     Column(
         Modifier

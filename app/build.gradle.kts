@@ -22,8 +22,8 @@ android {
         applicationId = "com.dsh.mobile"
         minSdk = 29
         targetSdk = 36
-        versionCode = 34
-        versionName = "1.1.7"
+        versionCode = 35
+        versionName = "1.1.8"
 
         vectorDrawables {
             useSupportLibrary = true
@@ -88,4 +88,5 @@ dependencies {
     implementation(libs.zxing.android.embedded)
     implementation(libs.androidx.appcompat)
     debugImplementation(libs.androidx.ui.tooling)
+    testImplementation(libs.junit)
 }
