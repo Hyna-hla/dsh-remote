@@ -26,6 +26,7 @@ import com.dsh.mobile.R
 import androidx.core.content.ContextCompat
 import com.dsh.mobile.data.ConnectionConfig
 import com.dsh.mobile.data.DshConnection
+import com.dsh.mobile.data.HostProfile
 import com.dsh.mobile.data.SettingsStore
 import com.dsh.mobile.service.DshConnectionService
 import com.dsh.mobile.ui.theme.DshBrand
@@ -33,6 +34,7 @@ import com.dsh.mobile.ui.theme.DshSuccess
 import com.dsh.mobile.ui.theme.DshShape
 import com.dsh.mobile.ui.theme.brandGradient
 import com.journeyapps.barcodescanner.CaptureActivity
+import java.util.UUID
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -78,7 +80,14 @@ fun ConnectScreen(connection: DshConnection) {
                 scope.launch {
                     settingsStore.saveConnection(ConnectionConfig(serverUrl = scanned, autoConnect = true))
                 }
-                connection.connect(scanned)
+                connection.connect(
+                    HostProfile(
+                        id = "legacy-" + UUID.randomUUID().toString(),
+                        remark = "旧连接",
+                        url = scanned,
+                        autoConnect = true,
+                    ),
+                )
                 onConnectedActions()
             }
         }
@@ -104,7 +113,14 @@ fun ConnectScreen(connection: DshConnection) {
         if (config.serverUrl.isNotEmpty()) {
             url = config.serverUrl
             if (config.autoConnect) {
-                connection.connect(config.serverUrl)
+                connection.connect(
+                    HostProfile(
+                        id = "legacy-" + UUID.randomUUID().toString(),
+                        remark = "旧连接",
+                        url = config.serverUrl,
+                        autoConnect = true,
+                    ),
+                )
                 onConnectedActions()
             }
         }
@@ -129,7 +145,14 @@ fun ConnectScreen(connection: DshConnection) {
         scope.launch {
             settingsStore.saveConnection(ConnectionConfig(serverUrl = u, autoConnect = true))
         }
-        connection.connect(u)
+        connection.connect(
+            HostProfile(
+                id = "legacy-" + UUID.randomUUID().toString(),
+                remark = "旧连接",
+                url = u,
+                autoConnect = true,
+            ),
+        )
         onConnectedActions()
     }
 

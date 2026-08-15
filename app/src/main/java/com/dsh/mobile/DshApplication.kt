@@ -10,7 +10,7 @@ import com.dsh.mobile.data.UpdateChecker
 
 class DshApplication : Application() {
 
-    val connection = DshConnection()
+    val connection = DshConnection(this)
 
     override fun onCreate() {
         super.onCreate()

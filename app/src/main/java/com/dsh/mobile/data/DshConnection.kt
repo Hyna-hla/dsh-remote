@@ -1,5 +1,8 @@
 package com.dsh.mobile.data
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.*
@@ -8,7 +11,6 @@ import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.UUID
-import java.util.concurrent.TimeUnit
 
 class ApiException(message: String, val code: String? = null) : Exception(message)
 
@@ -20,47 +22,20 @@ class ApiException(message: String, val code: String? = null) : Exception(messag
  *           payload = MuxFrame（session/event、approval/requested、question/requested…）
  * - 应答: POST /api/respond  body = client-response {type, rpcId, result}
  */
-class DshConnection {
-
-    companion object {
-        /** 事件流重连初始退避 */
-        private const val INITIAL_BACKOFF_MS = 3_000L
-        /** 事件流重连退避封顶（指数退避：3→6→12→24→30s） */
-        private const val MAX_BACKOFF_MS = 30_000L
-
-        /**
-         * 进程级共享 OkHttpClient：App 主连接与后台 watcher 各建一个 DshConnection，
-         * 每次新建 client 都会额外开线程池/连接池（浪费且容易 OOM）。
-         * 单例复用连接池，dns/连接复用跨连接实例生效。
-         */
-        private val sharedUnaryClient: OkHttpClient by lazy {
-            OkHttpClient.Builder()
-                .connectTimeout(10, TimeUnit.SECONDS)
-                .readTimeout(60, TimeUnit.SECONDS)
-                .writeTimeout(15, TimeUnit.SECONDS)
-                .build()
-        }
-
-        /**
-         * SSE 流用独立 client：readTimeout=0（无超时），靠服务端 keepalive/断线触发重连。
-         * pingInterval 只对 WebSocket 生效：对 events.mux 的 WS 通道发应用层 ping，
-         * 避免 TCP 半开连接静默挂死而不触发 onFailure（SSE 不受影响）。
-         */
-        private val sharedStreamClient: OkHttpClient by lazy {
-            OkHttpClient.Builder()
-                .connectTimeout(15, TimeUnit.SECONDS)
-                .readTimeout(0, TimeUnit.MILLISECONDS)
-                .pingInterval(20, TimeUnit.SECONDS)
-                .build()
-        }
-    }
+class DshConnection(private val appContext: Context? = null) {
 
     sealed class State {
         data object Disconnected : State()
         data class Connecting(val baseUrl: String) : State()
-        data class Connected(val baseUrl: String) : State()
-        data class Error(val message: String) : State()
+        data class Connected(val baseUrl: String, val hostVersion: String? = null) : State()
+        data class Error(val message: String, val code: ConnectionErrorCode?, val profileId: String?) : State()
     }
+
+    data class AttemptInfo(
+        val profileId: String,
+        val errorCode: ConnectionErrorCode?,
+        val hostVersion: String?,
+    )
 
     /** 领域事件（解析后的 mux/host 帧） */
     sealed class Event {
@@ -92,9 +67,12 @@ class DshConnection {
         encodeDefaults = true
     }
 
-    private val unaryClient = sharedUnaryClient
-
-    private val streamClient = sharedStreamClient
+    private var profileId: String? = null
+    private var currentProfile: HostProfile? = null
+    private var unaryClient: OkHttpClient = OkHttpClient()
+    private var streamClient: OkHttpClient = OkHttpClient()
+    private var onAttempt: ((AttemptInfo) -> Unit)? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     private val _state = MutableStateFlow<State>(State.Disconnected)
     val state: StateFlow<State> = _state.asStateFlow()
@@ -118,40 +96,87 @@ class DshConnection {
     // ────────────────────────── 连接管理 ──────────────────────────
 
     @Synchronized
-    fun connect(url: String) {
-        val normalized = normalizeBaseUrl(url)
+    fun connect(profile: HostProfile, onAttempt: ((AttemptInfo) -> Unit)? = null) {
+        val normalized = normalizeBaseUrl(profile.url)
         if (_state.value is State.Connected && baseUrl == normalized) return
         disconnectInternal()
+        profileId = profile.id
+        currentProfile = profile
+        this.onAttempt = onAttempt
         baseUrl = normalized
+        val (unary, stream) = OkHttpClientFactory.build(profile)
+        unaryClient = unary
+        streamClient = stream
         _state.value = State.Connecting(normalized)
+        registerNetworkCallback()
         scope.launch {
-            // 先探测连通性（host.describe）；失败按指数退避自动重连，
-            // 不再停在 Error 死等用户手动重试（移动端弱网/切网场景必须自动恢复）
-            var backoffMs = INITIAL_BACKOFF_MS
+            var attempt = 0
             while (isActive) {
-                val ok = try {
-                    call(DshEndpoints.HOST_DESCRIBE)
-                    true
+                val result = try {
+                    val value = call(DshEndpoints.HOST_DESCRIBE)
+                    val version = runCatching {
+                        value.jsonObject["version"]?.jsonPrimitive?.contentOrNull
+                    }.getOrNull()
+                    ConnectionResult.Ok(version)
                 } catch (e: Exception) {
-                    false
+                    val code = classifyConnectError(e)
+                    ConnectionResult.Fail(e, code)
                 }
                 if (!isActive) break
-                if (ok) {
-                    _state.value = State.Connected(normalized)
-                    streamLoop("mux", "/api/events.mux")
-                    streamLoop("host", "/api/events.host")
-                    break
+                when (result) {
+                    is ConnectionResult.Ok -> {
+                        val verdict = VersionPolicy.evaluate(result.version)
+                        if (verdict == VersionVerdict.MISMATCH) {
+                            failPermanently(ConnectionErrorCode.VERSION_MISMATCH, "版本不兼容（远端 ${result.version}）")
+                            break
+                        }
+                        onAttempt?.invoke(AttemptInfo(profile.id, null, result.version))
+                        _state.value = State.Connected(normalized, result.version)
+                        streamLoop("mux", "/api/events.mux")
+                        streamLoop("host", "/api/events.host")
+                        break
+                    }
+                    is ConnectionResult.Fail -> {
+                        if (!RetryPolicy.isRecoverable(result.code)) {
+                            failPermanently(result.code, result.e.message ?: result.code.name)
+                            break
+                        }
+                        val backoff = RetryPolicy.nextBackoff(result.code, attempt) ?: break
+                        onAttempt?.invoke(AttemptInfo(profile.id, result.code, null))
+                        val msg = "连接失败（${result.code.name}），${backoff / 1000} 秒后自动重连"
+                        _events.tryEmit(Event.StreamError(msg))
+                        _state.value = State.Error(msg, result.code, profile.id)
+                        delay(backoff)
+                        if (!isActive) break
+                        _state.value = State.Connecting(normalized)
+                        attempt++
+                    }
                 }
-                // 首次失败立刻把错误暴露给 UI，之后按退避自动重试
-                val msg = "连接失败，${backoffMs / 1000} 秒后自动重连"
-                _events.tryEmit(Event.StreamError(msg))
-                _state.value = State.Error(msg)
-                delay(backoffMs)
-                backoffMs = (backoffMs * 2).coerceAtMost(MAX_BACKOFF_MS)
-                if (!isActive) break
-                _state.value = State.Connecting(normalized)
             }
         }
+    }
+
+    private sealed class ConnectionResult {
+        data class Ok(val version: String?) : ConnectionResult()
+        data class Fail(val e: Exception, val code: ConnectionErrorCode) : ConnectionResult()
+    }
+
+    private fun classifyConnectError(e: Exception): ConnectionErrorCode {
+        val code = when (e) {
+            is ApiException -> e.code?.toIntOrNull()
+                ?.let { ErrorClassifier.fromHttpStatus(it) }
+                ?: ConnectionErrorCode.PROTOCOL_ERROR
+            else -> ErrorClassifier.fromException(e, connectPhase = true, hasProxy = currentProfileHasProxy())
+        }
+        return code
+    }
+
+    private fun currentProfileHasProxy(): Boolean = currentProfile?.proxy != null
+
+    private fun failPermanently(code: ConnectionErrorCode, detail: String) {
+        onAttempt?.invoke(AttemptInfo(profileId ?: "", code, null))
+        _events.tryEmit(Event.StreamError("$detail（已停止自动重连）"))
+        _state.value = State.Error("$detail（已停止自动重连）", code, profileId)
     }
 
     private fun normalizeBaseUrl(raw: String): String {
@@ -166,28 +191,67 @@ class DshConnection {
     fun disconnect() = disconnectInternal()
 
     private fun disconnectInternal() {
+        unregisterNetworkCallback()
         scope.coroutineContext.cancelChildren()
         _state.value = State.Disconnected
+        currentProfile = null
+        profileId?.let { OkHttpClientFactory.release(it) }
         pendingApprovalRpc.clear()
         pendingQuestionRpc.clear()
+    }
+
+    private fun registerNetworkCallback() {
+        val context = appContext ?: return
+        val cm = context.getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
+            as? ConnectivityManager ?: return
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                // 新网络可用：若处于重连等待中，立即重置退避重试
+                scope.launch { retryNow() }
+            }
+        }
+        networkCallback = cb
+        cm.registerDefaultNetworkCallback(cb)
+    }
+
+    private fun unregisterNetworkCallback() {
+        val context = appContext ?: return
+        val cm = context.getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
+            as? ConnectivityManager ?: return
+        networkCallback?.let { runCatching { cm.unregisterNetworkCallback(it) } }
+        networkCallback = null
+    }
+
+    @Volatile private var retryNowPending = false
+    private suspend fun retryNow() {
+        if (retryNowPending) return
+        retryNowPending = true
+        // 取消当前连接协程的子任务（探测/延迟），由 connect 循环重建
+        scope.coroutineContext.cancelChildren()
+        delay(300)
+        retryNowPending = false
+        currentProfile?.let { p ->
+            if (_state.value is State.Error) connect(p, onAttempt)
+        }
     }
 
     /** 事件流循环（WebSocket 优先，SSE 兜底，指数退避自动重连）
      *  连接成功后立即重置退避：3s → 6s → 12s → 24s → 30s（封顶）。 */
     private fun streamLoop(name: String, path: String) {
         scope.launch {
-            var backoffMs = INITIAL_BACKOFF_MS
+            // 事件流重连退避（指数退避 3→6→12→24→30s 封顶）
+            var backoffMs = 3_000L
             while (isActive) {
                 var lastError = "流结束"
                 try {
                     openWsStream(path)
-                    backoffMs = INITIAL_BACKOFF_MS
+                    backoffMs = 3_000L
                 } catch (e: Exception) {
                     lastError = e.message ?: "ws 失败"
                     // 回退：部分 dsh web 服务器用 SSE 承载该流
                     try {
                         readSse(path)
-                        backoffMs = INITIAL_BACKOFF_MS
+                        backoffMs = 3_000L
                     } catch (e2: Exception) {
                         lastError = "ws/see 均失败: ${e2.message}"
                     }
@@ -196,7 +260,7 @@ class DshConnection {
                 if (_state.value is State.Connected) {
                     _events.tryEmit(Event.StreamError("$name 流中断（$lastError），${backoffMs / 1000} 秒后重连"))
                     delay(backoffMs)
-                    backoffMs = (backoffMs * 2).coerceAtMost(MAX_BACKOFF_MS)
+                    backoffMs = (backoffMs * 2).coerceAtMost(30_000L)
                 } else break
             }
         }

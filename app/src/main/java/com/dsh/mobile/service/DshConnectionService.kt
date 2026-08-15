@@ -9,6 +9,7 @@ import android.os.IBinder
 import com.dsh.mobile.DshApplication
 import com.dsh.mobile.MainActivity
 import com.dsh.mobile.data.DshConnection
+import com.dsh.mobile.data.HostProfile
 import com.dsh.mobile.data.SettingsStore
 import com.dsh.mobile.data.TokenUsageWatcher
 import kotlinx.coroutines.CoroutineScope
@@ -98,7 +99,7 @@ class DshConnectionService : Service() {
                 stopSelf()
                 return@launch
             }
-            val connection = DshConnection()
+            val connection = DshConnection(this@DshConnectionService)
             watcher = connection
             launch { connection.events.collect { handle(it) } }
             // 连接状态同步到常驻通知；连接层自身负责失败自动重连，这里只做展示
@@ -113,7 +114,14 @@ class DshConnectionService : Service() {
                     updateForegroundText(text)
                 }
             }
-            connection.connect(config.serverUrl)
+            connection.connect(
+                HostProfile(
+                    id = "legacy-0",
+                    remark = "旧连接",
+                    url = config.serverUrl,
+                    autoConnect = true,
+                ),
+            )
         }
     }
 
