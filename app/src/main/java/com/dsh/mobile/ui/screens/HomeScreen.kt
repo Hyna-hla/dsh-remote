@@ -1,5 +1,9 @@
 package com.dsh.mobile.ui.screens
 
+import android.net.Uri
+import android.util.Base64
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -16,6 +20,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -48,6 +53,30 @@ fun HomeScreen(
     var workspaces by remember { mutableStateOf<List<WorkspaceView>>(emptyList()) }
     var archiveTarget by remember { mutableStateOf<SessionSummary?>(null) }
     var listError by remember { mutableStateOf<String?>(null) }
+    var pendingImages by remember { mutableStateOf<List<DshConnection.ImagePart>>(emptyList()) }
+    val context = LocalContext.current
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            try {
+                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: return@launch
+                if (bytes.size > 4 * 1024 * 1024) {
+                    sendError = "图片超过 4MB"
+                    return@launch
+                }
+                val type = context.contentResolver.getType(uri) ?: "image/png"
+                if (type !in listOf("image/png", "image/jpeg", "image/webp", "image/gif")) {
+                    sendError = "不支持的图片格式: $type"
+                    return@launch
+                }
+                val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                pendingImages = pendingImages + DshConnection.ImagePart(type, b64)
+            } catch (e: Exception) {
+                sendError = e.message
+            }
+        }
+    }
 
     val connState by connection.state.collectAsState()
 
@@ -79,6 +108,9 @@ fun HomeScreen(
         } catch (_: Exception) {
             listOf("cordis" to "Cordis")
         }
+        if (presets.none { it.first == preset }) {
+            preset = presets.firstOrNull()?.first ?: preset
+        }
     }
 
     // 事件驱动的列表刷新
@@ -96,14 +128,15 @@ fun HomeScreen(
 
     fun send() {
         val text = input.trim()
-        if (text.isBlank() || sending) return
+        if ((text.isBlank() && pendingImages.isEmpty()) || sending) return
         sending = true
         sendError = null
         scope.launch {
             try {
                 val sid = connection.createSession(agentPreset = preset)
-                connection.prompt(sid, text)
+                connection.prompt(sid, text, images = pendingImages)
                 input = ""
+                pendingImages = emptyList()
                 onSessionClick(sid)
             } catch (e: Exception) {
                 sendError = e.message
@@ -163,6 +196,25 @@ fun HomeScreen(
                 )
                 Spacer(Modifier.height(14.dp))
 
+                // 待发送图片
+                if (pendingImages.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        pendingImages.forEachIndexed { i, _ ->
+                            AssistChip(
+                                onClick = { pendingImages = pendingImages.filterIndexed { j, _ -> j != i } },
+                                label = { Text("图片 ${i + 1}") },
+                                trailingIcon = {
+                                    Icon(Icons.Default.Close, null, Modifier.size(14.dp))
+                                },
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                }
+
                 Surface(
                     shape = RoundedCornerShape(18.dp),
                     color = MaterialTheme.colorScheme.surface,
@@ -193,6 +245,10 @@ fun HomeScreen(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
+                            // 图片附件
+                            IconButton(onClick = { imagePicker.launch("image/*") }) {
+                                Icon(Icons.Default.AttachFile, null)
+                            }
                             // 预设选择
                             Box {
                                 AssistChip(
@@ -231,7 +287,7 @@ fun HomeScreen(
                             Spacer(Modifier.weight(1f))
                             Button(
                                 onClick = { send() },
-                                enabled = input.isNotBlank() && !sending,
+                                enabled = (input.isNotBlank() || pendingImages.isNotEmpty()) && !sending,
                                 shape = RoundedCornerShape(14.dp),
                             ) {
                                 if (sending) {

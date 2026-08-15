@@ -527,11 +527,13 @@ class DshConnection {
         }
     }
 
-    /** agentPreset.list 响应宽松解析：兼容 {items:[{id,name}]} 等形态 */
+    /** agentPreset.list 响应：{presets:[{id, name, trust, isDefault, description}]} */
     suspend fun agentPresets(): List<Pair<String, String>> {
         return try {
             val value = call(DshEndpoints.AGENT_PRESET_LIST)
-            val arr = value.jsonObject["items"]?.jsonArray ?: value.jsonArray
+            val arr = value.jsonObject["presets"]?.jsonArray
+                ?: value.jsonObject["items"]?.jsonArray
+                ?: return emptyList()
             arr.mapNotNull { el ->
                 val o = el.jsonObject
                 val id = o["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
