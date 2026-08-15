@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 private val Context.dataStore by preferencesDataStore("dsh-mobile-settings")
@@ -65,6 +66,8 @@ class SettingsStore(private val context: Context) {
         private val PRO_BALANCE_KEY = longPreferencesKey("pro_balance")
         private val PRO_CONSUMED_KEY = longPreferencesKey("pro_consumed")
         private val PRO_SINCE_KEY = longPreferencesKey("pro_since")
+        private val PROFILE_LIST_KEY = stringPreferencesKey("connection_profiles")
+        private val ACTIVE_PROFILE_KEY = stringPreferencesKey("active_profile_id")
     }
 
     val connectionConfig: Flow<ConnectionConfig> = context.dataStore.data.map { prefs ->
@@ -72,6 +75,49 @@ class SettingsStore(private val context: Context) {
             serverUrl = prefs[URL_KEY] ?: "",
             autoConnect = prefs[AUTO_KEY] ?: true,
         )
+    }
+
+    val profiles: Flow<List<HostProfile>> = context.dataStore.data.map { prefs ->
+        ProfileCodec.decode(prefs[PROFILE_LIST_KEY] ?: "")
+    }
+
+    val activeProfileId: Flow<String?> = context.dataStore.data.map { prefs ->
+        prefs[ACTIVE_PROFILE_KEY]
+    }
+
+    private suspend fun writeProfiles(profiles: List<HostProfile>) {
+        context.dataStore.edit { prefs ->
+            applyLegacyMigration(prefs) // 顺带清理旧 key（幂等）
+            prefs[PROFILE_LIST_KEY] = ProfileCodec.encode(profiles)
+        }
+    }
+
+    suspend fun upsertProfile(profile: HostProfile) {
+        val current = profiles.first()
+        writeProfiles(current.filterNot { it.id == profile.id } + profile)
+    }
+
+    suspend fun deleteProfile(id: String) {
+        val current = profiles.first()
+        writeProfiles(current.filterNot { it.id == id })
+        if (activeProfileId.first() == id) setActiveProfile(null)
+    }
+
+    suspend fun setActiveProfile(id: String?) {
+        context.dataStore.edit { prefs ->
+            if (id == null) prefs.remove(ACTIVE_PROFILE_KEY)
+            else prefs[ACTIVE_PROFILE_KEY] = id
+        }
+    }
+
+    suspend fun markAttempt(profileId: String, errorCode: ConnectionErrorCode?, hostVersion: String?) {
+        val current = profiles.first()
+        writeProfiles(current.map { p ->
+            if (p.id == profileId) p.copy(
+                lastUsedAt = System.currentTimeMillis(),
+                lastErrorCode = errorCode?.name,
+            ) else p
+        })
     }
 
     val darkMode: Flow<Boolean> = context.dataStore.data.map { prefs ->
@@ -187,4 +233,27 @@ class SettingsStore(private val context: Context) {
     suspend fun setAutoModel(enabled: Boolean) {
         context.dataStore.edit { it[AUTO_MODEL_KEY] = enabled }
     }
+}
+
+/**
+ * 旧版单地址（server_url / auto_connect）→ 新 profiles 的一次性迁移。
+ * 返回是否发生了变更。幂等：旧 key 不存在时返回 false。
+ */
+internal fun applyLegacyMigration(prefs: MutablePreferences): Boolean {
+    val url = prefs[stringPreferencesKey("server_url")] ?: return false
+    val auto = prefs[booleanPreferencesKey("auto_connect")] ?: true
+    val existing = ProfileCodec.decode(prefs[stringPreferencesKey("connection_profiles")] ?: "")
+    if (existing.isEmpty() && url.isNotBlank()) {
+        val profile = HostProfile(
+            id = java.util.UUID.randomUUID().toString(),
+            remark = "旧连接",
+            url = url,
+            autoConnect = auto,
+        )
+        prefs[stringPreferencesKey("connection_profiles")] = ProfileCodec.encode(listOf(profile))
+        prefs[stringPreferencesKey("active_profile_id")] = profile.id
+    }
+    prefs.remove(stringPreferencesKey("server_url"))
+    prefs.remove(booleanPreferencesKey("auto_connect"))
+    return true
 }
