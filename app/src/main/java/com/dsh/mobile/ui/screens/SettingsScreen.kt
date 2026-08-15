@@ -135,8 +135,39 @@ fun SettingsScreen(
                             }
                         }
                     }
+
+                    // 一键预设（对齐桌面端）
                     Text(
-                        "背景透明度：${(appearance.bgOpacity * 100).toInt()}%",
+                        "一键预设",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(
+                            BgPreset("通透玻璃", 80f, 4f, 0.2f, 1.1f),
+                            BgPreset("电影质感", 40f, 0f, 0.55f, 1.2f),
+                            BgPreset("纯净原图", 95f, 0f, 0.08f, 1f),
+                            BgPreset("柔和梦境", 65f, 12f, 0.25f, 1.05f),
+                        ).forEach { (name, glass, blur, dim, saturate) ->
+                            AssistChip(
+                                onClick = {
+                                    persist(
+                                        appearance.copy(
+                                            bgOpacity = 1f,
+                                            bgBlur = blur,
+                                            bgDim = dim,
+                                            bgSaturate = saturate,
+                                            panelGlass = glass,
+                                        ),
+                                    )
+                                },
+                                label = { Text(name, style = MaterialTheme.typography.labelSmall) },
+                            )
+                        }
+                    }
+
+                    Text(
+                        "图像不透明度：${(appearance.bgOpacity * 100).toInt()}%",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -144,6 +175,46 @@ fun SettingsScreen(
                         value = appearance.bgOpacity,
                         onValueChange = { persist(appearance.copy(bgOpacity = it)) },
                         valueRange = 0.05f..1f,
+                    )
+                    Text(
+                        "模糊：${appearance.bgBlur.toInt()}px",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Slider(
+                        value = appearance.bgBlur,
+                        onValueChange = { persist(appearance.copy(bgBlur = it)) },
+                        valueRange = 0f..30f,
+                    )
+                    Text(
+                        "蒙层浓度：${(appearance.bgDim * 100).toInt()}%",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Slider(
+                        value = appearance.bgDim,
+                        onValueChange = { persist(appearance.copy(bgDim = it)) },
+                        valueRange = 0f..0.85f,
+                    )
+                    Text(
+                        "饱和度：${(appearance.bgSaturate * 100).toInt()}%",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Slider(
+                        value = appearance.bgSaturate,
+                        onValueChange = { persist(appearance.copy(bgSaturate = it)) },
+                        valueRange = 0.5f..1.5f,
+                    )
+                    Text(
+                        "面板通透：${appearance.panelGlass.toInt()}%",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Slider(
+                        value = appearance.panelGlass,
+                        onValueChange = { persist(appearance.copy(panelGlass = it)) },
+                        valueRange = 0f..100f,
                     )
                     Text(
                         "屏幕亮度：${(appearance.brightness * 100).toInt()}%",
@@ -156,7 +227,7 @@ fun SettingsScreen(
                         valueRange = 0.4f..1f,
                     )
                     Text(
-                        "背景图显示在界面底层；亮度调低 = 夜间模式（整屏变暗，不挡操作）",
+                        "背景图满清晰度显示，蒙层独立压暗/提亮保证文字可读；面板通透越高界面越透明。亮度调低 = 夜间模式（整屏变暗，不挡操作）",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -261,12 +332,21 @@ fun SettingsScreen(
                     SettingInfoRow("应用", "DSH Remote v$versionName")
                     SettingInfoRow("协议", "dsh-api (client-request / WS+SSE mux)")
                     SettingInfoRow("后端", "DeepSeek Harness")
-                    SettingInfoRow("主题", "DSH 深色 · 背景图/亮度可调")
+                    SettingInfoRow("主题", "DSH 浅色/深色 · 背景图/蒙层/面板通透可调")
                 }
             }
         }
     }
 }
+
+/** 背景一键预设（与桌面端 dsh-beautify 同名模板对齐） */
+private data class BgPreset(
+    val name: String,
+    val glass: Float,
+    val blur: Float,
+    val dim: Float,
+    val saturate: Float,
+)
 
 @Composable
 private fun SettingInfoRow(label: String, value: String) {

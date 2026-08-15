@@ -57,16 +57,35 @@ var DshSuccess = DshSuccessDark; private set
 var DshWarn = DshWarnDark; private set
 var DshError = DshErrorDark; private set
 
-fun applyPalette(dark: Boolean) {
+/**
+ * 面板通透系数：glass 0–100 → 各层级表面不透明度。
+ * 对齐桌面端 dsh-beautify 的 GLASS_TOKENS 映射，背景图开启后表面半透明，文字由蒙层保证对比度。
+ * 返回 Pair(背景 alpha, 层1 alpha)，层2 在函数内派生。
+ */
+fun surfaceAlphaFor(glass: Float, isBg: Boolean = true): Triple<Float, Float, Float> {
+    if (!isBg) return Triple(1f, 1f, 1f)
+    val g = glass.coerceIn(0f, 100f) / 100f
+    val bgAlpha = (1f - 0.6f * g).coerceAtLeast(0.3f)
+    val l1Alpha = (1f - 0.35f * g).coerceAtLeast(0.45f)
+    val l2Alpha = (1f - 0.25f * g).coerceAtLeast(0.55f)
+    return Triple(bgAlpha, l1Alpha, l2Alpha)
+}
+
+fun applyPalette(dark: Boolean, bgActive: Boolean = false, glass: Float = 0f) {
+    val (bgA, l1A, l2A) = surfaceAlphaFor(glass, bgActive)
     if (dark) {
-        DshPalette.bg = DshBackgroundDark; DshPalette.surface = DshSurfaceDark
-        DshPalette.surfaceHigh = DshSurfaceHighDark; DshPalette.brand = DshBrandDark
+        DshPalette.bg = DshBackgroundDark.copy(alpha = bgA)
+        DshPalette.surface = DshSurfaceDark.copy(alpha = l1A)
+        DshPalette.surfaceHigh = DshSurfaceHighDark.copy(alpha = l2A)
+        DshPalette.brand = DshBrandDark
         DshPalette.brandSoft = DshBrandSoftDark; DshPalette.border = DshBorderDark
         DshPalette.success = DshSuccessDark; DshPalette.warn = DshWarnDark
         DshPalette.error = DshErrorDark
     } else {
-        DshPalette.bg = DshBackgroundLight; DshPalette.surface = DshSurfaceLight
-        DshPalette.surfaceHigh = DshSurfaceHighLight; DshPalette.brand = DshBrandLight
+        DshPalette.bg = DshBackgroundLight.copy(alpha = bgA)
+        DshPalette.surface = DshSurfaceLight.copy(alpha = l1A)
+        DshPalette.surfaceHigh = DshSurfaceHighLight.copy(alpha = l2A)
+        DshPalette.brand = DshBrandLight
         DshPalette.brandSoft = DshBrandSoftLight; DshPalette.border = DshBorderLight
         DshPalette.success = DshSuccessLight; DshPalette.warn = DshWarnLight
         DshPalette.error = DshErrorLight
@@ -95,58 +114,63 @@ object DshShape {
     val small = RoundedCornerShape(10.dp)
 }
 
-private fun dshColorScheme(dark: Boolean): ColorScheme = if (dark) darkColorScheme(
-    primary = DshBrandDark,
-    onPrimary = Color(0xFF0D1B2A),
-    primaryContainer = Color(0xFF1B3A6B),
-    onPrimaryContainer = Color(0xFFDCE7FB),
-    secondary = DshBrandSoftDark,
-    onSecondary = Color(0xFF0D1B2A),
-    tertiary = DshWarnDark,
-    onTertiary = Color(0xFF241A05),
-    error = DshErrorDark,
-    onError = Color(0xFF2A0B0B),
-    errorContainer = Color(0xFF3A1D22),
-    onErrorContainer = Color(0xFFFFD9DB),
-    background = DshBackgroundDark,
-    onBackground = DshTextPrimaryDark,
-    surface = DshSurfaceDark,
-    onSurface = DshTextPrimaryDark,
-    surfaceVariant = DshSurfaceHighDark,
-    onSurfaceVariant = DshTextSecondaryDark,
-    outline = DshBorderDark,
-    outlineVariant = Color(0xFF23354B),
-) else lightColorScheme(
-    primary = DshBrandLight,
-    onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFFDCE7FB),
-    onPrimaryContainer = Color(0xFF12275C),
-    secondary = DshBrandSoftLight,
-    onSecondary = Color(0xFFFFFFFF),
-    tertiary = DshWarnLight,
-    onTertiary = Color(0xFF2B2003),
-    error = DshErrorLight,
-    onError = Color(0xFFFFFFFF),
-    errorContainer = Color(0xFFFBE0E0),
-    onErrorContainer = Color(0xFF4A1515),
-    background = DshBackgroundLight,
-    onBackground = DshTextPrimaryLight,
-    surface = DshSurfaceLight,
-    onSurface = DshTextPrimaryLight,
-    surfaceVariant = DshSurfaceHighLight,
-    onSurfaceVariant = DshTextSecondaryLight,
-    outline = DshBorderLight,
-    outlineVariant = Color(0xFFE4EAF3),
-)
+private fun dshColorScheme(dark: Boolean, bgActive: Boolean = false, glass: Float = 0f): ColorScheme {
+    val (bgA, l1A, l2A) = surfaceAlphaFor(glass, bgActive)
+    return if (dark) darkColorScheme(
+        primary = DshBrandDark,
+        onPrimary = Color(0xFF0D1B2A),
+        primaryContainer = Color(0xFF1B3A6B),
+        onPrimaryContainer = Color(0xFFDCE7FB),
+        secondary = DshBrandSoftDark,
+        onSecondary = Color(0xFF0D1B2A),
+        tertiary = DshWarnDark,
+        onTertiary = Color(0xFF241A05),
+        error = DshErrorDark,
+        onError = Color(0xFF2A0B0B),
+        errorContainer = Color(0xFF3A1D22),
+        onErrorContainer = Color(0xFFFFD9DB),
+        background = DshBackgroundDark.copy(alpha = bgA),
+        onBackground = DshTextPrimaryDark,
+        surface = DshSurfaceDark.copy(alpha = l1A),
+        onSurface = DshTextPrimaryDark,
+        surfaceVariant = DshSurfaceHighDark.copy(alpha = l2A),
+        onSurfaceVariant = DshTextSecondaryDark,
+        outline = DshBorderDark,
+        outlineVariant = Color(0xFF23354B),
+    ) else lightColorScheme(
+        primary = DshBrandLight,
+        onPrimary = Color(0xFFFFFFFF),
+        primaryContainer = Color(0xFFDCE7FB),
+        onPrimaryContainer = Color(0xFF12275C),
+        secondary = DshBrandSoftLight,
+        onSecondary = Color(0xFFFFFFFF),
+        tertiary = DshWarnLight,
+        onTertiary = Color(0xFF2B2003),
+        error = DshErrorLight,
+        onError = Color(0xFFFFFFFF),
+        errorContainer = Color(0xFFFBE0E0),
+        onErrorContainer = Color(0xFF4A1515),
+        background = DshBackgroundLight.copy(alpha = bgA),
+        onBackground = DshTextPrimaryLight,
+        surface = DshSurfaceLight.copy(alpha = l1A),
+        onSurface = DshTextPrimaryLight,
+        surfaceVariant = DshSurfaceHighLight.copy(alpha = l2A),
+        onSurfaceVariant = DshTextSecondaryLight,
+        outline = DshBorderLight,
+        outlineVariant = Color(0xFFE4EAF3),
+    )
+}
 
 @Composable
 fun DshTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    bgActive: Boolean = false,
+    glass: Float = 0f,
     content: @Composable () -> Unit,
 ) {
-    applyPalette(darkTheme)
+    applyPalette(darkTheme, bgActive, glass)
     MaterialTheme(
-        colorScheme = dshColorScheme(darkTheme),
+        colorScheme = dshColorScheme(darkTheme, bgActive, glass),
         typography = Typography(),
         content = content,
     )

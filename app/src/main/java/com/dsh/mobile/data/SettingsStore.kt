@@ -16,7 +16,17 @@ data class ConnectionConfig(
 
 data class AppearanceConfig(
     val bgUri: String? = null,
-    val bgOpacity: Float = 0.6f,
+    /** 图像不透明度 0.05–1（默认 100%，清晰可见） */
+    val bgOpacity: Float = 1f,
+    /** 背景模糊 0–30px（柔化背景，不影响文字） */
+    val bgBlur: Float = 0f,
+    /** 蒙层浓度 0–0.85（深色→黑 / 浅色→白，压在图片与界面之间保证文字可读） */
+    val bgDim: Float = 0.3f,
+    /** 背景饱和度 0.5–1.5 */
+    val bgSaturate: Float = 1f,
+    /** 面板通透 0–100（越高界面面板越透明，背景越清晰） */
+    val panelGlass: Float = 65f,
+    /** 全局亮度 0.4–1（夜间模式，整屏压暗） */
     val brightness: Float = 1f,
 )
 
@@ -28,6 +38,10 @@ class SettingsStore(private val context: Context) {
         private val DARK_MODE_KEY = booleanPreferencesKey("dark_mode")
         private val BG_URI_KEY = stringPreferencesKey("bg_uri")
         private val BG_OPACITY_KEY = floatPreferencesKey("bg_opacity")
+        private val BG_BLUR_KEY = floatPreferencesKey("bg_blur")
+        private val BG_DIM_KEY = floatPreferencesKey("bg_dim")
+        private val BG_SATURATE_KEY = floatPreferencesKey("bg_saturate")
+        private val PANEL_GLASS_KEY = floatPreferencesKey("panel_glass")
         private val BRIGHTNESS_KEY = floatPreferencesKey("brightness")
         private val BACKGROUND_NOTIFY_KEY = booleanPreferencesKey("background_notify")
         private val THEME_MODE_KEY = stringPreferencesKey("theme_mode")
@@ -77,7 +91,11 @@ class SettingsStore(private val context: Context) {
     val appearance: Flow<AppearanceConfig> = context.dataStore.data.map { prefs ->
         AppearanceConfig(
             bgUri = prefs[BG_URI_KEY],
-            bgOpacity = prefs[BG_OPACITY_KEY] ?: 0.6f,
+            bgOpacity = prefs[BG_OPACITY_KEY] ?: 1f,
+            bgBlur = prefs[BG_BLUR_KEY] ?: 0f,
+            bgDim = prefs[BG_DIM_KEY] ?: 0.3f,
+            bgSaturate = prefs[BG_SATURATE_KEY] ?: 1f,
+            panelGlass = prefs[PANEL_GLASS_KEY] ?: 65f,
             brightness = prefs[BRIGHTNESS_KEY] ?: 1f,
         )
     }
@@ -86,6 +104,10 @@ class SettingsStore(private val context: Context) {
         context.dataStore.edit { prefs ->
             if (cfg.bgUri != null) prefs[BG_URI_KEY] = cfg.bgUri else prefs.remove(BG_URI_KEY)
             prefs[BG_OPACITY_KEY] = cfg.bgOpacity
+            prefs[BG_BLUR_KEY] = cfg.bgBlur
+            prefs[BG_DIM_KEY] = cfg.bgDim
+            prefs[BG_SATURATE_KEY] = cfg.bgSaturate
+            prefs[PANEL_GLASS_KEY] = cfg.panelGlass
             prefs[BRIGHTNESS_KEY] = cfg.brightness
         }
     }
