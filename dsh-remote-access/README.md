@@ -1,0 +1,54 @@
+# dsh-remote-access v1.1.1 — 微信 iLink 桥 + cpolar 备选
+
+设置页「远程控制」插件：把 **微信 iLink Bot（腾讯官方 ClawBot 通道）** 作为 DSH 远程连接的主要方式，
+cpolar 公网隧道降级为「网页版」备选。
+
+## 功能
+
+- **微信遥控（主要方式）**
+  - 设置页一键生成微信登录二维码（官方 iLink 协议，`ilinkai.weixin.qq.com`）
+  - 扫码确认后，在微信里给 bot（自己给自己发消息）发文字即可遥控 DSH
+  - 消息注入专用 DSH 会话（会话名「微信遥控」），助手回复**流式**回传微信
+  - 思考期间显示「对方正在输入中」；不回传思考过程，只回传结果与关键节点（🔧 工具名）
+  - 工具需要审批时微信收到请求，回复 `同意 <id>` / `拒绝 <id>` 即可
+  - 微信发图片自动转给 DSH 看图；语音转文字；长回复自动分片（4000 字符）
+  - 凭证持久化：重启 DSH 自动恢复，无需重新扫码；会话过期（errcode -14）自动重新出码
+  - 命令：`/状态` 查看连接信息、`/断开` 断开
+  - 默认仅绑定扫码的微信号（白名单，防止朋友发消息误触发）
+- **网页版隧道（备选）**：原 cpolar 功能保留
+
+## 更新日志
+
+- **v1.1.1**：修复「apiProxy 服务不可用」——DSH 升级后 `api-gateway` 挂载晚于 `webServer`，
+  apply 时一次性 `ctx.get("apiProxy")` 会拿到 undefined 并永久缓存；改为每次调用惰性解析，
+  并把「服务未挂载」与「sessions 缺少方法」两种失败分开报错
+- **v1.1.0**：微信 iLink 桥 + cpolar 备选的首个完整版本
+
+## 技术要点
+
+- **零依赖**：协议客户端自研（`lib/ilink.js`），Node 20 可用（官方 SDK 要求 Node ≥ 22，故未引用）
+- 协议依据：`protocol-spec.md`（从 Tencent/openclaw-weixin 与 corespeed-io/wechatbot 源码逐字段提取，
+  真实路径带 `/ilink/bot/` 前缀、隐藏头 `iLink-App-Id`/`iLink-App-ClientVersion`、
+  `X-WECHAT-UIN` = base64(十进制随机 uint32)、AES-128-ECB 媒体加密等）
+- DSH 侧走官方网关：`ctx.apiProxy.sessions.create/prompt`（与网页前端同一条路径）
+- 审批：`approval/request` 事件 prepend 应答器，仅接管微信绑定会话
+- 状态文件：`$DSH_HOME/remote-access/wx-state.json`（凭证）、`wx-config.json`（绑定会话/白名单）
+
+## 部署
+
+本仓库即插件包。替换 profile 里的两个副本：
+
+```
+C:\Users\Administrator\.dsh\profiles\web\vendor\dsh-remote-access\lib\
+C:\Users\Administrator\.dsh\profiles\web\node_modules\dsh-remote-access\lib\
+```
+
+然后**重启 DSH**（宿主插件代码生效）并刷新页面。
+
+## 文件
+
+- `lib/ilink.js` — 微信 iLink Bot API 客户端（扫码登录、长轮询、发送、typing、AES 媒体上传下载）
+- `lib/bridge.js` — 微信 ↔ DSH 桥（会话注入、流式回传、审批应答、白名单）
+- `lib/index.js` — 插件宿主入口（HTTP 路由 + cpolar 原有逻辑）
+- `lib/client.js` — 设置页 UI（微信卡片 + cpolar 卡片）
+- `protocol-spec.md` — 协议精确报文规范（源码出处齐全）

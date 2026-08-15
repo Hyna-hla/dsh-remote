@@ -1,0 +1,23 @@
+{
+  "name": "dsh-remote-access",
+  "version": "1.1.1",
+  "description": "设置页「远程控制」：微信 iLink 桥（主要方式，扫码后微信内直接遥控 DSH）+ cpolar 公网隧道（备选，个人自用，非官方）",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": ["slots"],
+      "immediately": true
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "license": "MIT"
+}

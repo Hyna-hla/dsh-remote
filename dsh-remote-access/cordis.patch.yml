@@ -1,0 +1,4 @@
+# dsh-remote-access bundle patch — 由 profile 的 bundle 层应用
+- insert:
+    - id: dsh-remote-access
+      name: dsh-remote-access

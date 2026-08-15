@@ -51,6 +51,14 @@ cd "E:\AI搓的小东西\DSH-Mobile"
 > 为什么 cpolar 模式用 `-host-header=localhost:<port>`：DSH 的 `/api` 有浏览器信任围栏
 > （Host 必须是 loopback 或 trusted-host），重写 Host 后所有请求视为本机发出。
 
+## PC 端插件：微信遥控（dsh-remote-access）
+
+除手机 App 外，仓库还附 PC 端 DSH 插件 `dsh-remote-access/`：在 DSH 设置页「远程控制」扫码绑定
+微信 iLink Bot 后，直接在**微信里给自己发消息**即可遥控 DSH —— 消息注入专用会话、回复流式回传、
+审批在微信里回复 `同意/拒绝` 处理、支持图片与语音转文字。零依赖协议客户端 + 完整报文文档见
+[dsh-remote-access/README.md](dsh-remote-access/README.md) 与
+[dsh-remote-access/protocol-spec.md](dsh-remote-access/protocol-spec.md)。
+
 ## 协议（逆向自 dsh-client-connection，仅个人学习用途）
 
 - 上行：`POST /api/<method>`，body = `{"type":"client-request","rpcId","method","payload"}`
@@ -86,6 +94,7 @@ app/src/main/java/com/dsh/mobile/
 ├── MainActivity.kt
 └── DshApplication.kt
 dsh-remote-start.ps1 # PC 端一键启动脚本（lan / cpolar 两种模式，自动探测桌面版端口）
+dsh-remote-access/   # PC 端微信遥控插件（iLink Bot 桥 + cpolar 隧道，含协议文档）
 ```
 
 ## 已知限制与路线图
