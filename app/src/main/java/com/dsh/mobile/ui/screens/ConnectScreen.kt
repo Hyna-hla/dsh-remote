@@ -9,6 +9,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -24,33 +26,32 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.dsh.mobile.R
 import androidx.core.content.ContextCompat
-import com.dsh.mobile.data.ConnectionConfig
-import com.dsh.mobile.data.DshConnection
-import com.dsh.mobile.data.HostProfile
-import com.dsh.mobile.data.SettingsStore
+import com.dsh.mobile.data.*
 import com.dsh.mobile.service.DshConnectionService
 import com.dsh.mobile.ui.theme.DshBrand
 import com.dsh.mobile.ui.theme.DshSuccess
 import com.dsh.mobile.ui.theme.DshShape
 import com.dsh.mobile.ui.theme.brandGradient
 import com.journeyapps.barcodescanner.CaptureActivity
-import java.util.UUID
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 @Composable
-fun ConnectScreen(connection: DshConnection) {
+fun ConnectScreen(
+    connection: DshConnection,
+    onEditHost: (String?) -> Unit = {},
+) {
     val context = LocalContext.current
     val settingsStore = remember { SettingsStore(context) }
     val scope = rememberCoroutineScope()
 
-    var url by remember { mutableStateOf("") }
-    var isLoading by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-
+    val profiles by settingsStore.profiles.collectAsState(initial = emptyList())
+    val activeId by settingsStore.activeProfileId.collectAsState(initial = null)
     val connState by connection.state.collectAsState()
 
-    // —— 连接成功后：申请通知权限 + 启动后台提醒服务 ——
+    val sortedProfiles = profiles.sortedByDescending { it.lastUsedAt }
+    val activeProfile = profiles.firstOrNull { it.id == activeId }
+
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { }
@@ -67,28 +68,33 @@ fun ConnectScreen(connection: DshConnection) {
         }
     }
 
-    // —— 扫码连接：先申请相机权限，再启动扫描，扫到即自动连接 ——
+    fun connectTo(profile: HostProfile) {
+        scope.launch {
+            settingsStore.setActiveProfile(profile.id)
+            settingsStore.upsertProfile(profile.copy(autoConnect = true))
+        }
+        connection.connect(profile) { info ->
+            scope.launch { settingsStore.markAttempt(info.profileId, info.errorCode, info.hostVersion) }
+        }
+        onConnectedActions()
+    }
+
+    // —— 扫码：解析结果 → 新建或更新配置并连接 ——
     val scannerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             val scanned = result.data?.getStringExtra("SCAN_RESULT")?.trim().orEmpty()
             if (scanned.isNotEmpty()) {
-                url = scanned
-                errorMessage = null
-                isLoading = true
-                scope.launch {
-                    settingsStore.saveConnection(ConnectionConfig(serverUrl = scanned, autoConnect = true))
-                }
-                connection.connect(
-                    HostProfile(
-                        id = "legacy-" + UUID.randomUUID().toString(),
-                        remark = "旧连接",
+                val existing = profiles.firstOrNull { it.url == scanned }
+                val profile = existing?.copy(remark = existing.remark.ifBlank { scanned })
+                    ?: HostProfile(
+                        id = java.util.UUID.randomUUID().toString(),
+                        remark = scanned,
                         url = scanned,
-                        autoConnect = true,
-                    ),
-                )
-                onConnectedActions()
+                    )
+                scope.launch { settingsStore.upsertProfile(profile) }
+                connectTo(profile)
             }
         }
     }
@@ -107,229 +113,210 @@ fun ConnectScreen(connection: DshConnection) {
         cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
     }
 
-    // 载入保存的地址并自动连接
+    // —— 自动连接 ——
     LaunchedEffect(Unit) {
-        val config = settingsStore.connectionConfig.first()
-        if (config.serverUrl.isNotEmpty()) {
-            url = config.serverUrl
-            if (config.autoConnect) {
-                connection.connect(
-                    HostProfile(
-                        id = "legacy-" + UUID.randomUUID().toString(),
-                        remark = "旧连接",
-                        url = config.serverUrl,
-                        autoConnect = true,
-                    ),
-                )
-                onConnectedActions()
+        val auto = settingsStore.profiles.first().firstOrNull { it.autoConnect }
+        if (auto != null) {
+            scope.launch { settingsStore.setActiveProfile(auto.id) }
+            connectTo(auto)
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
+        // 错误横幅（spec §6：错误码 → 原因 → 建议；不可恢复错误标注已停止重连）
+        val st = connState
+        if (st is DshConnection.State.Error && st.code != null) {
+            val code = st.code
+            val stopped = code == ConnectionErrorCode.AUTH_FAILED ||
+                code == ConnectionErrorCode.VERSION_MISMATCH
+            Surface(color = MaterialTheme.colorScheme.errorContainer) {
+                Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                    Text(
+                        ErrorMessages.reason(code) + if (stopped) "（已停止自动重连）" else "",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        ErrorMessages.advice(code),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                }
             }
         }
-    }
 
-    LaunchedEffect(connState) {
-        when (connState) {
-            is DshConnection.State.Error -> {
-                isLoading = false
-                errorMessage = (connState as DshConnection.State.Error).message
-            }
-            is DshConnection.State.Connected -> isLoading = false
-            else -> {}
-        }
-    }
-
-    fun doConnect() {
-        val u = url.trim()
-        if (u.isBlank()) return
-        isLoading = true
-        errorMessage = null
-        scope.launch {
-            settingsStore.saveConnection(ConnectionConfig(serverUrl = u, autoConnect = true))
-        }
-        connection.connect(
-            HostProfile(
-                id = "legacy-" + UUID.randomUUID().toString(),
-                remark = "旧连接",
-                url = u,
-                autoConnect = true,
-            ),
-        )
-        onConnectedActions()
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            // 让开状态栏/灵动岛：整页内容（含右上角扫码按钮）从状态栏下方开始
-            .statusBarsPadding(),
-    ) {
-        // 滚动容器包住满高 Column：内容垂直居中（上下弹性留白），小屏高度不足时自动可滚动
-        Box(
-            Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState()),
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Spacer(Modifier.weight(1f).height(48.dp))
-
-            Surface(
-                shape = DshShape.card,
-                color = MaterialTheme.colorScheme.surface,
-                modifier = Modifier.size(84.dp),
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    // 品牌鲸鱼（灵感来自 DeepSeek 官方标识，黑白负空间风格）
+            item {
+                Spacer(Modifier.height(18.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Image(
                         painter = painterResource(R.drawable.ic_launcher_foreground),
                         contentDescription = null,
-                        modifier = Modifier.size(52.dp),
+                        modifier = Modifier.size(36.dp),
                     )
+                    Spacer(Modifier.width(10.dp))
+                    Column {
+                        Text("DSH Remote", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Text(
+                            "遥控你电脑上的 DeepSeek Harness 智能体",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                    IconButton(onClick = { startScan() }) {
+                        Icon(Icons.Default.QrCodeScanner, contentDescription = "扫码连接", tint = DshBrand)
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+            }
+
+            // 活跃主机卡片
+            activeProfile?.let { p ->
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = DshShape.card,
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surface,
+                        ),
+                    ) {
+                        Column(Modifier.padding(14.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                val dotColor = when (connState) {
+                                    is DshConnection.State.Connected -> DshSuccess
+                                    is DshConnection.State.Error -> MaterialTheme.colorScheme.error
+                                    is DshConnection.State.Connecting -> DshBrand
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                                Box(
+                                    Modifier.size(10.dp)
+                                        .background(dotColor, DshShape.pill),
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    p.remark.ifBlank { p.url },
+                                    style = MaterialTheme.typography.titleMedium,
+                                    maxLines = 1,
+                                )
+                                Spacer(Modifier.weight(1f))
+                                TextButton(onClick = { onEditHost(p.id) }) { Text("编辑") }
+                            }
+                            Text(
+                                p.url,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                            )
+                            if (connState is DshConnection.State.Connected) {
+                                val connected = connState as DshConnection.State.Connected
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    "已连接" + (connected.hostVersion?.let { " · 主机版本 $it" } ?: " · 版本未知"),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = DshSuccess,
+                                )
+                            }
+                        }
+                    }
                 }
             }
-            Spacer(Modifier.height(20.dp))
-            Text(
-                "DSH Remote",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "遥控你电脑上的 DeepSeek Harness 智能体",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
 
-            Spacer(Modifier.height(40.dp))
-
-            OutlinedTextField(
-                value = url,
-                onValueChange = { url = it },
-                label = { Text("服务器地址") },
-                placeholder = { Text("192.168.1.100:8787 或你的 cpolar 域名") },
-                singleLine = true,
-                leadingIcon = { Icon(Icons.Default.Dns, null) },
-                modifier = Modifier.fillMaxWidth(),
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
-                ),
-            )
-
-            errorMessage?.let {
-                Spacer(Modifier.height(10.dp))
+            item {
+                Spacer(Modifier.height(4.dp))
                 Text(
-                    it,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
+                    "已保存的主机",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
                 )
             }
 
-            Spacer(Modifier.height(20.dp))
-
-            Button(
-                onClick = { doConnect() },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(54.dp)
-                    .background(brandGradient(), DshShape.pill),
-                enabled = url.isNotBlank() && !isLoading,
-                shape = DshShape.pill,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.Transparent,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                ),
-            ) {
-                if (isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(22.dp),
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        strokeWidth = 2.dp,
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Text("连接中…")
-                } else {
-                    Icon(Icons.Default.Power, null, Modifier.size(20.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("连接")
-                }
-            }
-
-            val conn = connState
-            if (conn is DshConnection.State.Connected) {
-                Spacer(Modifier.height(10.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Default.CheckCircle,
-                        null,
-                        modifier = Modifier.size(16.dp),
-                        tint = DshSuccess,
-                    )
-                    Spacer(Modifier.width(6.dp))
+            if (sortedProfiles.isEmpty()) {
+                item {
                     Text(
-                        "已连接：${conn.baseUrl}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = DshSuccess,
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(36.dp))
-
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                ),
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        "连接方式",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        "① 局域网（同一 Wi-Fi）：PC 运行 dsh-remote-start.ps1，填 PC 局域网 IP\n\n" +
-                            "② 远程穿透（任何网络）：PC 用 cpolar 或 DSH 设置里的「远程控制」生成公网地址\n\n" +
-                            "③ 扫码连接：点右上角扫码图标，扫描「远程控制」页面生成的二维码，自动连接",
+                        "还没有主机配置：扫码或点下方「添加主机」",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        lineHeight = androidx.compose.ui.unit.TextUnit.Unspecified,
                     )
                 }
+            } else {
+                items(sortedProfiles, key = { it.id }) { p ->
+                    val isActive = p.id == activeId
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = DshShape.card,
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        ),
+                        onClick = { if (!isActive) connectTo(p) },
+                    ) {
+                        Row(
+                            Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(p.remark.ifBlank { p.url }, style = MaterialTheme.typography.titleSmall)
+                                    if (isActive) {
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            "使用中",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = DshBrand,
+                                        )
+                                    }
+                                }
+                                Text(
+                                    p.url,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                )
+                                p.lastErrorCode?.let { code ->
+                                    runCatching { ConnectionErrorCode.valueOf(code) }.getOrNull()?.let { c ->
+                                        Text(
+                                            "上次错误：${ErrorMessages.reason(c)}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.error,
+                                        )
+                                    }
+                                }
+                            }
+                            Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
             }
-            Spacer(Modifier.height(28.dp))
-            val versionName = remember {
-                runCatching {
-                    context.packageManager.getPackageInfo(context.packageName, 0).versionName
-                }.getOrNull() ?: "?"
-            }
-            Text(
-                "DSH Remote v$versionName · 非官方客户端 · 数据只存你的手机与你的服务器",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-            )
-            Spacer(Modifier.height(20.dp))
-            // 底部弹性留白：与顶部对称，内容整体垂直居中
-            Spacer(Modifier.weight(1f).height(48.dp))
-            }
-        }
 
-        // 右上角扫码按钮（根 Box 已做 statusBarsPadding，不会再被状态栏压住）
-        IconButton(
-            onClick = { startScan() },
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(8.dp),
-        ) {
-            Icon(
-                Icons.Default.QrCodeScanner,
-                contentDescription = "扫码连接",
-                tint = DshBrand,
-            )
+            item {
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = { onEditHost(null) },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    shape = DshShape.pill,
+                ) {
+                    Icon(Icons.Default.Add, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("添加主机")
+                }
+                Spacer(Modifier.height(20.dp))
+                val versionName = remember {
+                    runCatching {
+                        context.packageManager.getPackageInfo(context.packageName, 0).versionName
+                    }.getOrNull() ?: "?"
+                }
+                Text(
+                    "DSH Remote v$versionName · 非官方客户端 · 数据只存你的手机与你的服务器",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                )
+                Spacer(Modifier.height(16.dp))
+            }
         }
     }
 }
