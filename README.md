@@ -36,8 +36,9 @@
 
 ## 安装（APK）
 
-- 最新构建产物：[release/DSH-Remote-v1.0.14.apk](release/DSH-Remote-v1.0.14.apk)（debug 签名，Android 10+）
+- 最新构建产物：[release/DSH-Remote-v1.0.14.apk](release/DSH-Remote-v1.0.14.apk)（debug 签名，约 60MB，与历次安装包一致）
 - 传到手机 → 允许「未知来源」安装 → 填服务器地址 → 连接
+- 另有 R8 精简版（约 4MB）：[release/DSH-Remote-v1.0.14-min.apk](release/DSH-Remote-v1.0.14-min.apk)，体积小但未经设备实测，推荐主用 debug 包
 
 ## PC 端使用
 
