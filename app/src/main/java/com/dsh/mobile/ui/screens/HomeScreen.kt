@@ -27,10 +27,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.dsh.mobile.R
 import com.dsh.mobile.data.*
 import com.dsh.mobile.ui.theme.DshBrand
+import com.dsh.mobile.ui.theme.DshBrandSoft
 import com.dsh.mobile.ui.theme.DshSuccess
 import com.dsh.mobile.ui.theme.DshShape
+import com.dsh.mobile.ui.theme.DshThemeId
 import com.dsh.mobile.ui.theme.DshThemeStyle
 import com.dsh.mobile.ui.theme.ThemeStyle
 import com.dsh.mobile.ui.theme.brandGradient
@@ -40,6 +43,8 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -252,40 +257,81 @@ fun HomeScreen(
                     .padding(horizontal = 16.dp, vertical = 8.dp),
             ) {
                 Spacer(Modifier.height(8.dp))
-                // 问候区：STANDARD 用官方风格大标题；CODEX 用终端提示符风格
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (DshThemeStyle == ThemeStyle.CODEX) {
+                // 问候区：STANDARD 用官方风格大标题；CODEX 用终端提示符风格；CYBERPUNK 用 HUD 风格
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            when (DshThemeStyle) {
+                                ThemeStyle.CODEX -> Text(
+                                    "❯",
+                                    style = MaterialTheme.typography.headlineLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = DshBrand,
+                                )
+                                ThemeStyle.CYBERPUNK -> Text(
+                                    "◈",
+                                    style = MaterialTheme.typography.headlineLarge,
+                                    fontWeight = FontWeight.Black,
+                                    color = DshBrand,
+                                )
+                                else -> {}
+                            }
+                            if (DshThemeStyle != ThemeStyle.STANDARD) Spacer(Modifier.width(10.dp))
+                            Text(
+                                when (DshThemeStyle) {
+                                    ThemeStyle.CODEX -> "新任务"
+                                    ThemeStyle.CYBERPUNK -> "新任务"
+                                    else -> "你好 👋"
+                                },
+                                style = MaterialTheme.typography.headlineLarge,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
                         Text(
-                            "❯",
-                            style = MaterialTheme.typography.headlineLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = DshBrand,
+                            "今天想交给智能体什么任务？",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        Spacer(Modifier.width(10.dp))
                     }
-                    Text(
-                        if (DshThemeStyle == ThemeStyle.CODEX) "新任务" else "你好 👋",
-                        style = MaterialTheme.typography.headlineLarge,
-                        fontWeight = FontWeight.Bold,
-                    )
+                    // 深蓝主题专属：鲸鱼娘女仆立绘（dsh-deep-whale 皮肤资产，CC BY-NC-SA 4.0）
+                    if (DshThemeId == "blue") {
+                        Spacer(Modifier.width(8.dp))
+                        Image(
+                            painter = androidx.compose.ui.res.painterResource(R.drawable.maid_left),
+                            contentDescription = "鲸鱼娘",
+                            modifier = Modifier
+                                .width(96.dp)
+                                .height(130.dp)
+                                .graphicsLayer { alpha = 0.95f },
+                            contentScale = ContentScale.Fit,
+                        )
+                    }
                 }
-                Text(
-                    "今天想交给智能体什么任务？",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                // 品牌装饰：STANDARD 用渐变条；CODEX 用终端字符分隔线
+                // 品牌装饰：STANDARD 用渐变条；CODEX 用终端字符分隔线；CYBERPUNK 用双线 HUD 条
                 Spacer(Modifier.height(10.dp))
-                if (DshThemeStyle == ThemeStyle.CODEX) {
-                    Text(
+                when (DshThemeStyle) {
+                    ThemeStyle.CODEX -> Text(
                         "─".repeat(26),
                         style = MaterialTheme.typography.labelSmall,
                         color = DshBrand,
                         maxLines = 1,
                         overflow = TextOverflow.Clip,
                     )
-                } else {
-                    Box(
+                    ThemeStyle.CYBERPUNK -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.width(18.dp).height(3.dp).background(DshBrand))
+                        Spacer(Modifier.width(4.dp))
+                        Box(Modifier.width(10.dp).height(3.dp).background(DshBrandSoft))
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "NIGHT CITY // 2077",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = DshBrandSoft,
+                        )
+                    }
+                    else -> Box(
                         Modifier
                             .width(36.dp)
                             .height(3.dp)
@@ -357,8 +403,19 @@ fun HomeScreen(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
+                            // 深蓝主题专属：工作区盾徽（dsh-deep-whale 皮肤装饰）
+                            if (DshThemeId == "blue") {
+                                Image(
+                                    painter = androidx.compose.ui.res.painterResource(R.drawable.maid_shield),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(15.dp),
+                                )
+                                Spacer(Modifier.width(6.dp))
+                            }
                             Text(
-                                if (DshThemeStyle == ThemeStyle.CODEX) "❯ 新任务" else "新任务",
+                                if (DshThemeStyle == ThemeStyle.CODEX) "❯ 新任务"
+                                else if (DshThemeStyle == ThemeStyle.CYBERPUNK) "◈ 新任务"
+                                else "新任务",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = DshBrand,
                             )
@@ -498,25 +555,41 @@ fun HomeScreen(
                     contentAlignment = Alignment.Center,
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        // 官方风格空态：品牌底圆 + 鲸鱼 logo
-                        Box(
-                            modifier = Modifier
-                                .size(72.dp)
-                                .background(DshBrand.copy(alpha = 0.12f), CircleShape),
-                            contentAlignment = Alignment.Center,
-                        ) {
+                        if (DshThemeId == "blue") {
+                            // 深蓝主题专属：鲸鱼娘立绘空态
                             Image(
-                                painter = androidx.compose.ui.res.painterResource(com.dsh.mobile.R.drawable.ic_launcher_foreground),
-                                contentDescription = null,
-                                modifier = Modifier.size(40.dp),
+                                painter = androidx.compose.ui.res.painterResource(R.drawable.maid_left),
+                                contentDescription = "鲸鱼娘",
+                                modifier = Modifier.width(130.dp),
+                                contentScale = ContentScale.Fit,
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                "还没有会话，从上面的输入框开始第一个任务吧",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else {
+                            // 官方风格空态：品牌底圆 + 鲸鱼 logo
+                            Box(
+                                modifier = Modifier
+                                    .size(72.dp)
+                                    .background(DshBrand.copy(alpha = 0.12f), CircleShape),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Image(
+                                    painter = androidx.compose.ui.res.painterResource(com.dsh.mobile.R.drawable.ic_launcher_foreground),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(40.dp),
+                                )
+                            }
+                            Spacer(Modifier.height(12.dp))
+                            Text(
+                                if (DshThemeStyle == ThemeStyle.CYBERPUNK) "— NIGHT CITY // 2077 —" else "还没有会话，从上面的输入框开始第一个任务吧",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        Spacer(Modifier.height(12.dp))
-                        Text(
-                            "还没有会话，从上面的输入框开始第一个任务吧",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
                     }
                 }
             } else {
@@ -797,6 +870,15 @@ private fun SessionCard(
     val time = remember(session.updatedAt) {
         SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(session.updatedAt))
     }
+    // 夜之城：会话 = 数据碎片，按稀有度上色（白/绿/青/紫/橙循环）；运行中 = 传奇橙黄
+    val ncRarity = listOf(
+        Color(0xFFE8F1FF), Color(0xFF00E5A0), Color(0xFF00F0FF), Color(0xFFB484FF), Color(0xFFFF9F40),
+    )
+    val titleColor = when {
+        DshThemeStyle != ThemeStyle.CYBERPUNK -> Color.Unspecified
+        session.running -> Color(0xFFFFB300)
+        else -> ncRarity[(session.sessionId.hashCode() and Int.MAX_VALUE) % ncRarity.size]
+    }
     // 运行态脉冲呼吸（官方状态灯的"活着"感）
     val pulse by if (session.running) {
         val t = rememberInfiniteTransition(label = "run")
@@ -850,7 +932,8 @@ private fun SessionCard(
                     Text(
                         title,
                         style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Medium,
+                        fontWeight = if (DshThemeStyle == ThemeStyle.CYBERPUNK) FontWeight.Bold else FontWeight.Medium,
+                        color = titleColor,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),

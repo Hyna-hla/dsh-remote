@@ -34,8 +34,9 @@ data class ThemeColors(
  * 主题风格：决定排版与装饰语言，而不只是颜色。
  * - STANDARD：官方 DSH 风格排版（精调字号/字重/行高/字距）+ 圆润卡片
  * - CODEX：Codex CLI 终端风格（全局等宽字体 + 方角 + 终端装饰）
+ * - CYBERPUNK：夜之城风格（切角按钮 + 霓虹强调 + HUD 装饰）
  */
-enum class ThemeStyle { STANDARD, CODEX }
+enum class ThemeStyle { STANDARD, CODEX, CYBERPUNK }
 
 data class ThemeDef(
     val id: String,
@@ -62,8 +63,9 @@ object ThemeRegistry {
     val blue = ThemeDef(
         "blue", "深蓝", light = false,
         ThemeColors(
+            // DeepSeek Chat 蓝鲸蓝 #4D6BFE（对齐 chat.deepseek.com 官方蓝鲸配色）
             background = Color(0xFF0D1B2A), surface = Color(0xFF1B2838), surfaceHigh = Color(0xFF243447),
-            brand = Color(0xFF4D7CFE), brandSoft = Color(0xFF64B5F6),
+            brand = Color(0xFF4D6BFE), brandSoft = Color(0xFF6D8BFF),
             textPrimary = Color(0xFFE6EDF7), textSecondary = Color(0xFF9DB2CE), border = Color(0xFF2C3E55),
             success = Color(0xFF3FB68B), warn = Color(0xFFE6B455), error = Color(0xFFE06C6C),
         ),
@@ -100,11 +102,24 @@ object ThemeRegistry {
         style = ThemeStyle.CODEX,
     )
 
+    /** 夜之城（Cyberpunk 2077）：NC 黄 × 霓虹青、切角按钮、近黑夜蓝底（对齐 dsh-theme-cyberpunk2077） */
+    val cyberpunk = ThemeDef(
+        "cyberpunk", "夜之城 2077", light = false,
+        ThemeColors(
+            background = Color(0xFF05070D), surface = Color(0xFF0A0E18), surfaceHigh = Color(0xFF0D1322),
+            brand = Color(0xFFFCE300), brandSoft = Color(0xFF00F0FF),
+            textPrimary = Color(0xFFE8F1FF), textSecondary = Color(0xFF9FB2D6), border = Color(0xFF1B2A42),
+            success = Color(0xFF00E5A0), warn = Color(0xFFFF4DA6), error = Color(0xFFFF3B3B),
+        ),
+        version = "1.0",
+        style = ThemeStyle.CYBERPUNK,
+    )
+
     /**
-     * 内置主题只有 4 套（v1.0.25 起）：每套都有真实的观感差异，不再提供"只换颜色"的皮肤。
+     * 内置主题只有 5 套（v1.0.25 起）：每套都有真实的观感差异，不再提供"只换颜色"的皮肤。
      * 旧皮肤 id（aurora/ocean/... ）不再内置，已选旧皮肤的用户自动回落到深蓝。
      */
-    private val builtins = listOf(blue, black, warm, codex)
+    private val builtins = listOf(blue, black, warm, codex, cyberpunk)
     val builtinIds: Set<String> = builtins.map { it.id }.toSet()
 
     fun available(custom: List<ThemeDef>): List<ThemeDef> = builtins + custom

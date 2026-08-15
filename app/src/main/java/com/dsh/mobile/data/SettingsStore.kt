@@ -47,6 +47,8 @@ class SettingsStore(private val context: Context) {
         private val AUTO_MODEL_KEY = booleanPreferencesKey("auto_model")
         private val THEME_MODE_KEY = stringPreferencesKey("theme_mode")
         private val WORKSPACE_ID_KEY = stringPreferencesKey("workspace_id")
+        private val UI_FONT_KEY = stringPreferencesKey("ui_font")
+        private val CODE_FONT_KEY = stringPreferencesKey("code_font")
     }
 
     val connectionConfig: Flow<ConnectionConfig> = context.dataStore.data.map { prefs ->
@@ -67,6 +69,24 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setThemeMode(mode: String) {
         context.dataStore.edit { it[THEME_MODE_KEY] = mode }
+    }
+
+    /** 界面字体（Android 系统字体族名，空串 = 主题默认） */
+    val uiFont: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[UI_FONT_KEY] ?: ""
+    }
+
+    suspend fun setUiFont(family: String) {
+        context.dataStore.edit { it[UI_FONT_KEY] = family }
+    }
+
+    /** 代码字体（等宽族名，空串 = Monospace） */
+    val codeFont: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[CODE_FONT_KEY] ?: ""
+    }
+
+    suspend fun setCodeFont(family: String) {
+        context.dataStore.edit { it[CODE_FONT_KEY] = family }
     }
 
     /** 新对话默认工作区（空 = 用 DSH 默认工作区） */

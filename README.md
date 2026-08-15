@@ -13,7 +13,7 @@
 - **审批与问答**：审批横幅（允许一次/拒绝）、问答题卡片（单选/多选）
 - **自适应模型**：设置里可开「自适应模型」（默认开）——短问答自动走 Flash，复杂任务（长文本或命中"分析/重构/审查"等关键词）自动切 Pro，发送前完成切换
 - **模型与权限**：会话内切换模型 / 思考程度（reasoningEffort）、审查严格度（只读 / 工作区可写 / 完全访问）
-- **可拓展主题**：内置 4 套有真实观感差异的主题——DeepSeek 经典深蓝（默认）/ 纯黑（AMOLED）/ 暖白（护眼米白）/ **Codex CLI 终端风**（全局等宽字体 + 方角 + `❯` 提示符 + `─` 分隔线，完全不同的界面语言）；支持导入**自定义主题包**（zip，含 theme.json + 可选预览图），同名导入即**热替换更新**（无需重启），设置页见缩略图/版本/删除；单文件 theme.json 也可直接导入
+- **可拓展主题**：内置 5 套有真实观感差异的主题——**深蓝（鲸鱼娘装扮，默认）** / 纯黑（AMOLED）/ 暖白 / **Codex CLI 终端风**（全局等宽 + 方角 + `❯` 提示符）/ **夜之城 2077**（NC 黄霓虹青 + 切角 + 稀有度会话色）；支持导入**自定义主题包**（zip，含 theme.json + 可选预览图），同名导入即**热替换更新**；单文件 theme.json 也可直接导入；另支持**界面字体/代码字体**切换（对齐 dsh-font 概念）
 - **背景图与面板**：设置 → 外观可选本地背景图 + 四档一键预设（通透玻璃/电影质感/纯净原图/柔和梦境）；图像不透明度/模糊/饱和度/蒙层浓度独立可调，**面板通透**玻璃化（对齐桌面 dsh-beautify 模板）；屏幕亮度 = 夜间模式
 - **图片消息**：📎 选择图片（PNG/JPEG/WebP/GIF ≤4MB）随消息发送，新对话与历史会话均支持
 - **技能选择**：📚 技能列表（skill.list），点选自动插入"请使用 X 技能"到输入框
@@ -21,6 +21,10 @@
 
 ## 更新日志
 
+- **v1.0.26**：皮肤资产全面整合（来自 SKIN 资源包）——
+  - **深蓝主题 = 鲸鱼娘装扮**（dsh-deep-whale 皮肤）：首页问候区右侧鲸鱼娘女仆立绘、空态鲸鱼娘立绘、宫殿夜景低透明度背景、「新任务」盾徽、输入栏上方底部纹章；品牌色对齐 DeepSeek Chat 蓝鲸蓝 `#4D6BFE`（dsh-blue-whale 复刻）
+  - **夜之城 2077 主题**（对齐 dsh-theme-cyberpunk2077）：NC 黄 × 霓虹青、**45° 切角按钮/卡片**、`◈ 新任务` + `NIGHT CITY // 2077` HUD 文案、会话按**稀有度上色**（白/绿/青/紫/橙循环，运行中 = 传奇橙黄）、错误横幅红底警示斜纹
+  - **字体选择**（对齐 dsh-font 概念）：设置 → 外观 → 界面字体 / 代码字体（黑体/细黑/衬线/圆体/窄体/等宽… 即选即生效，选项以各自字体预览）
 - **v1.0.25**：真正的 UI 布局重构——
   - **布局对齐 DSH Web UI**：新任务输入卡增加「新任务」头行（任务标签 + 预设选择收进卡片头部，底部只留附件与发送）；助手消息加**品牌左侧色条**（官方 Web 视觉锚点，流式时软化）；工具调用卡片状态改为**文字徽章**（完成/失败/运行中），参数等宽展示
   - **Codex CLI 完整终端 UI**：`❯ codex` 问候 + `─` 字符分隔线、输入卡 `❯ 新任务` 标签、会话输入栏 `❯` 提示符、工具参数 `$` 前缀、`thinking…` 状态、全局等宽字体 + 方角形状体系——切换主题即可看到完全不同的界面语言
@@ -63,10 +67,10 @@
 
 ## 安装（APK）
 
-- 仓库内提供 R8 精简版：[release/DSH-Remote-v1.0.25-min.apk](release/DSH-Remote-v1.0.25-min.apk)（已签名，约 4.6MB，可直接安装）
-- **debug 主包（约 62MB，与历次安装包一致）**：因 GitHub 单文件 >50MB 限制不进仓库，本地留档于 `release/DSH-Remote-v1.0.25.apk`（构建产物亦在 `app/build/outputs/apk/debug/`）；分发走 GitHub Release 附件或 Google Play
+- 仓库内提供 R8 精简版：[release/DSH-Remote-v1.0.26-min.apk](release/DSH-Remote-v1.0.26-min.apk)（已签名，约 4.6MB，可直接安装）
+- **debug 主包（约 62MB，与历次安装包一致）**：因 GitHub 单文件 >50MB 限制不进仓库，本地留档于 `release/DSH-Remote-v1.0.26.apk`（构建产物亦在 `app/build/outputs/apk/debug/`）；分发走 GitHub Release 附件或 Google Play
 - 传到手机 → 允许「未知来源」安装 → 填服务器地址 → 连接
-- Google Play 上架包（已签名 AAB）：[release/DSH-Remote-v1.0.25.aab](release/DSH-Remote-v1.0.25.aab)；上架清单见 [docs/play-listing.md](docs/play-listing.md)
+- Google Play 上架包（已签名 AAB）：[release/DSH-Remote-v1.0.26.aab](release/DSH-Remote-v1.0.26.aab)；上架清单见 [docs/play-listing.md](docs/play-listing.md)
 - 自定义主题包格式与示例：[docs/theme-package-format.md](docs/theme-package-format.md)、[docs/aurora.dshTheme.zip](docs/aurora.dshTheme.zip)
 
 ## PC 端使用
@@ -135,3 +139,12 @@ cpolar/DSH 端口探测带缓存，通道生成更快。详见
 - 图片消息仅支持 DSH 协议核心接受的图片内容块（PNG/JPEG/WebP/GIF），长图不缩放仅采样显示
 - 权限审批只支持「允许一次 / 拒绝」两个决策（与 web 端一致）；若服务端审批策略为 never 则不会出现审批请求
 - 后续：推送通知云端化（App 被杀也能收到，需接三方推送）、远程通道访问鉴权（token）
+
+## 皮肤素材署名与许可
+
+鲸鱼娘皮肤素材来自 [dsh-deep-whale](https://github.com/Small-tailqwq/dsh-deep-whale)（深海女仆工坊 maid-atelier）：
+- 鲸鱼娘角色原作：**上善**（[Pixiv](https://www.pixiv.net/users/62155430) · [Bilibili](https://b23.tv/8h5L4xz)）
+- 女仆鲸鱼娘二次设计：**ZipZipPipe**（[Pixiv](https://www.pixiv.net/users/18604994) · [Bilibili](https://b23.tv/Pnw6nG8)）
+- 完整署名链见 [docs/maid-atelier-NOTICE.md](docs/maid-atelier-NOTICE.md)
+- 素材以 **CC BY-NC-SA 4.0** 发布（署名-非商业性使用-相同方式共享），本 App 仅个人自用，不用于商业用途
+- 蓝鲸配色参考 [dsh-blue-whale](https://github.com/starslittle/dsh-blue-whale)；夜之城主题对齐 [dsh-theme-cyberpunk2077](https://github.com/nicepkg/dsh-theme-cyberpunk2077)；字体方案对齐 [dsh-font](https://github.com/nicepkg/dsh-font)（App 仅引用系统字体族名，不打包字体文件）

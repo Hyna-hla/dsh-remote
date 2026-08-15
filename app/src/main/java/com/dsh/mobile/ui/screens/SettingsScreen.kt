@@ -62,6 +62,9 @@ fun SettingsScreen(
     var backgroundNotify by remember { mutableStateOf(true) }
     var themeMode by remember { mutableStateOf("blue") }
     var autoModel by remember { mutableStateOf(true) }
+    var uiFont by remember { mutableStateOf("") }
+    var codeFont by remember { mutableStateOf("") }
+    var fontPicker by remember { mutableStateOf<String?>(null) } // "ui" / "code"
     var notifGranted by remember { mutableStateOf(true) }
     var themeImportError by remember { mutableStateOf<String?>(null) }
     var showAppearanceDetail by remember { mutableStateOf(false) }
@@ -94,6 +97,8 @@ fun SettingsScreen(
         backgroundNotify = settingsStore.backgroundNotify.first()
         themeMode = settingsStore.themeMode.first()
         autoModel = settingsStore.autoModel.first()
+        uiFont = settingsStore.uiFont.first()
+        codeFont = settingsStore.codeFont.first()
         notifGranted = Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(
             context, Manifest.permission.POST_NOTIFICATIONS,
         ) == PackageManager.PERMISSION_GRANTED
@@ -230,6 +235,40 @@ fun SettingsScreen(
                         modifier = Modifier.padding(vertical = 4.dp),
                         color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
                     )
+                    // 字体设置（对齐 dsh-font 概念：界面字体 + 代码字体分离，即选即生效）
+                    Text(
+                        "字体",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { fontPicker = "ui" }
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text("界面字体", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            UI_FONTS.firstOrNull { it.second == uiFont }?.first ?: "默认",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = DshBrand,
+                        )
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { fontPicker = "code" }
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text("代码字体", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            CODE_FONTS.firstOrNull { it.second == codeFont }?.first ?: "默认",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = DshBrand,
+                        )
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = { bgPicker.launch(arrayOf("image/*")) }) {
                             Icon(Icons.Default.Image, null, Modifier.size(16.dp))
@@ -522,6 +561,93 @@ fun SettingsScreen(
             }
         }
     }
+
+    // 字体选择对话框（UI 字体 / 代码字体）
+    fontPicker?.let { kind ->
+        FontPickerDialog(
+            title = if (kind == "ui") "界面字体" else "代码字体",
+            options = if (kind == "ui") UI_FONTS else CODE_FONTS,
+            current = if (kind == "ui") uiFont else codeFont,
+            onDismiss = { fontPicker = null },
+            onPick = { family ->
+                if (kind == "ui") {
+                    uiFont = family
+                    scope.launch { settingsStore.setUiFont(family) }
+                } else {
+                    codeFont = family
+                    scope.launch { settingsStore.setCodeFont(family) }
+                }
+                fontPicker = null
+            },
+        )
+    }
+}
+
+/** 界面字体选项（Android 系统字体族；label → 族名，"" = 主题默认） */
+private val UI_FONTS = listOf(
+    "默认（主题字体）" to "",
+    "无衬线（标准黑体）" to "sans-serif",
+    "细黑体" to "sans-serif-light",
+    "中黑体" to "sans-serif-medium",
+    "衬线（宋体感）" to "serif",
+    "圆体（casual）" to "casual",
+    "窄体（condensed）" to "sans-serif-condensed",
+    "等宽（monospace）" to "monospace",
+)
+
+/** 代码字体选项（等宽族；"" = Monospace） */
+private val CODE_FONTS = listOf(
+    "默认（Monospace）" to "",
+    "衬线等宽（serif-monospace）" to "serif-monospace",
+    "窄等宽（condensed）" to "sans-serif-condensed",
+    "系统无衬线" to "sans-serif",
+)
+
+/** 字体选择对话框：选项以各自字体渲染（对齐 dsh-font 的预览体验） */
+@Composable
+private fun FontPickerDialog(
+    title: String,
+    options: List<Pair<String, String>>,
+    current: String,
+    onDismiss: () -> Unit,
+    onPick: (String) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                options.forEach { (label, family) ->
+                    val font = if (family.isEmpty()) null
+                    else runCatching {
+                        androidx.compose.ui.text.font.FontFamily(
+                            android.graphics.Typeface.create(family, android.graphics.Typeface.NORMAL),
+                        )
+                    }.getOrNull()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onPick(family) }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = current == family, onClick = { onPick(family) })
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = font),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+    )
 }
 
 /** 背景一键预设（与桌面端 dsh-beautify 同名模板对齐） */

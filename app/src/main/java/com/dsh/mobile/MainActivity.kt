@@ -40,6 +40,7 @@ import com.dsh.mobile.data.AppearanceConfig
 import com.dsh.mobile.data.SettingsStore
 import com.dsh.mobile.ui.navigation.AppNavigation
 import com.dsh.mobile.ui.theme.DshTheme
+import com.dsh.mobile.ui.theme.FontConfig
 import com.dsh.mobile.ui.theme.ThemeDef
 import com.dsh.mobile.ui.theme.ThemeRegistry
 import com.dsh.mobile.ui.theme.ThemeRepository
@@ -89,6 +90,9 @@ class MainActivity : ComponentActivity() {
             val appearance by settingsStore.appearance.collectAsState(initial = AppearanceConfig())
             val bgUri = appearance.bgUri?.let { runCatching { Uri.parse(it) }.getOrNull() }
             val bgActive = bgUri != null
+            // 字体设置（对齐 dsh-font 概念：界面字体 + 代码字体，即选即生效）
+            val uiFont by settingsStore.uiFont.collectAsState(initial = "")
+            val codeFont by settingsStore.codeFont.collectAsState(initial = "")
 
             // 状态栏图标对比（浅色主题=深色图标）
             SideEffect {
@@ -108,10 +112,41 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            DshTheme(theme = theme, bgActive = bgActive, glass = appearance.panelGlass) {
+            DshTheme(
+                theme = theme,
+                bgActive = bgActive,
+                glass = appearance.panelGlass,
+                fonts = FontConfig(ui = uiFont.ifBlank { null }, code = codeFont.ifBlank { null }),
+            ) {
                 val (bgAlpha, _, _) = surfaceAlphaFor(appearance.panelGlass, bgActive)
 
                 Box(Modifier.fillMaxSize()) {
+                    // — 深蓝主题专属背景：鲸鱼娘宫殿夜景（dsh-deep-whale 皮肤资产，低透明度铺底；
+                    //   用户自定义背景图优先）—
+                    if (bgUri == null && theme.id == "blue") {
+                        val palaceBitmap = remember(theme.id) {
+                            decodeSampledBitmap(context, R.drawable.maid_palace_night)
+                        }
+                        AndroidView(
+                            factory = { ctx ->
+                                ImageView(ctx).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
+                            },
+                            update = { iv ->
+                                if (iv.tag !== "palace" && palaceBitmap != null) {
+                                    iv.tag = "palace"
+                                    iv.setImageBitmap(palaceBitmap)
+                                }
+                                iv.alpha = 0.30f
+                            },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.35f)),
+                        )
+                    }
+
                     // — 背景图层：满清晰度图片 + 蒙层（深色→黑 / 浅色→白），对齐桌面端模板 —
                     if (bgUri != null) {
                         val bgBitmap = remember(bgUri) { decodeSampledBitmap(context, bgUri) }
@@ -205,6 +240,23 @@ private fun decodeSampledBitmap(context: android.content.Context, uri: Uri): Bit
         while (bounds.outWidth / sample > maxW * 2 || bounds.outHeight / sample > maxH * 2) sample *= 2
         val opts = BitmapFactory.Options().apply { inSampleSize = sample }
         resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
+    } catch (_: Exception) {
+        null
+    }
+}
+
+/** 资源图采样解码（主题内置背景） */
+private fun decodeSampledBitmap(context: android.content.Context, resId: Int): Bitmap? {
+    return try {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeResource(context.resources, resId, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        val maxW = context.resources.displayMetrics.widthPixels
+        val maxH = context.resources.displayMetrics.heightPixels
+        var sample = 1
+        while (bounds.outWidth / sample > maxW * 2 || bounds.outHeight / sample > maxH * 2) sample *= 2
+        val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+        BitmapFactory.decodeResource(context.resources, resId, opts)
     } catch (_: Exception) {
         null
     }

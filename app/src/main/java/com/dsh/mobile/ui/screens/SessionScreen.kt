@@ -29,8 +29,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -894,7 +896,9 @@ fun SessionScreen(
         // 连接中断提示条（事件流断开/首连失败时显示，重连成功后消失）
         streamNotice?.let { notice ->
             Surface(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(if (DshThemeStyle == ThemeStyle.CYBERPUNK) Modifier.ncHatch() else Modifier),
                 color = MaterialTheme.colorScheme.errorContainer,
             ) {
                 Row(
@@ -1077,6 +1081,25 @@ fun SessionScreen(
                         },
                     )
                 }
+            }
+        }
+
+        // 深蓝主题专属：输入栏上方底部纹章（dsh-deep-whale 皮肤装饰，低调居中）
+        if (DshThemeId == "blue") {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 2.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(
+                    painter = androidx.compose.ui.res.painterResource(com.dsh.mobile.R.drawable.maid_crest),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .width(88.dp)
+                        .graphicsLayer { alpha = 0.55f },
+                    contentScale = ContentScale.FillWidth,
+                )
             }
         }
 
@@ -1524,6 +1547,21 @@ private fun ToolStatusBadge(text: String, color: Color) {
     }
 }
 
+/** 夜之城警示纹：红底 45° 斜纹（错误横幅/提示条用，对齐 dsh-theme-cyberpunk2077） */
+private fun Modifier.ncHatch(color: Color = Color.Red): Modifier = this.drawBehind {
+    val step = 14f
+    var x = -size.height
+    while (x < size.width) {
+        drawLine(
+            color = color.copy(alpha = 0.28f),
+            start = androidx.compose.ui.geometry.Offset(x, size.height),
+            end = androidx.compose.ui.geometry.Offset(x + size.height, 0f),
+            strokeWidth = 5f,
+        )
+        x += step
+    }
+}
+
 @Composable
 private fun NoticeRow(item: ChatItem.Notice, modifier: Modifier = Modifier) {
     Row(
@@ -1535,6 +1573,7 @@ private fun NoticeRow(item: ChatItem.Notice, modifier: Modifier = Modifier) {
                 else MaterialTheme.colorScheme.surfaceVariant,
                 RoundedCornerShape(10.dp),
             )
+            .then(if (item.isError && DshThemeStyle == ThemeStyle.CYBERPUNK) Modifier.ncHatch() else Modifier)
             .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
