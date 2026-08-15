@@ -19,37 +19,54 @@ import com.dsh.mobile.data.*
 import com.dsh.mobile.ui.theme.DshShape
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.util.UUID
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HostProfileScreen(profileId: String?, onBack: () -> Unit) {
+fun HostProfileScreen(profileId: String?, connection: DshConnection, onBack: () -> Unit) {
     val context = LocalContext.current
     val settingsStore = remember { SettingsStore(context) }
     val scope = rememberCoroutineScope()
     val isNew = profileId == null
 
-    var original by remember {
-        mutableStateOf<HostProfile?>(
-            profileId?.let { id ->
-                runBlocking { settingsStore.profiles.first().firstOrNull { it.id == id } }
-            } ?: HostProfile(id = UUID.randomUUID().toString(), remark = "", url = "")
-        )
+    // 非阻塞加载原 profile：组合期不读 DataStore；新建时 produce 一个空 profile 供编辑
+    val original by produceState<HostProfile?>(
+        initialValue = null,
+        profileId,
+    ) {
+        settingsStore.ensureMigrated()
+        value = settingsStore.profiles.first().firstOrNull { it.id == profileId }
+            ?: if (profileId == null) HostProfile(id = UUID.randomUUID().toString(), remark = "", url = "") else null
     }
-    var remark by remember { mutableStateOf(original?.remark ?: "") }
-    var url by remember { mutableStateOf(original?.url ?: "") }
-    var trustSelfSigned by remember { mutableStateOf(original?.trustSelfSigned ?: false) }
-    var caCertUri by remember { mutableStateOf(original?.caCertUri) }
-    var proxyType by remember { mutableStateOf(original?.proxy?.type ?: "none") }
-    var proxyHost by remember { mutableStateOf(original?.proxy?.host ?: "") }
-    var proxyPort by remember { mutableStateOf(original?.proxy?.port?.takeIf { it > 0 }?.toString() ?: "") }
-    var proxyUser by remember { mutableStateOf(original?.proxy?.username ?: "") }
-    var proxyPass by remember { mutableStateOf(original?.proxy?.password ?: "") }
-    var autoConnect by remember { mutableStateOf(original?.autoConnect ?: false) }
+
+    var remark by remember { mutableStateOf("") }
+    var url by remember { mutableStateOf("") }
+    var trustSelfSigned by remember { mutableStateOf(false) }
+    var caCertUri by remember { mutableStateOf<String?>(null) }
+    var proxyType by remember { mutableStateOf("none") }
+    var proxyHost by remember { mutableStateOf("") }
+    var proxyPort by remember { mutableStateOf("") }
+    var proxyUser by remember { mutableStateOf("") }
+    var proxyPass by remember { mutableStateOf("") }
+    var autoConnect by remember { mutableStateOf(false) }
     var diag by remember { mutableStateOf<List<DiagStep>?>(null) }
     var diagRunning by remember { mutableStateOf(false) }
+
+    // 原 profile 就绪后回填一次各字段（编辑态加载到才填；新建态回填空值无副作用）
+    LaunchedEffect(original) {
+        val p = original ?: return@LaunchedEffect
+        remark = p.remark
+        url = p.url
+        trustSelfSigned = p.trustSelfSigned
+        caCertUri = p.caCertUri
+        proxyType = p.proxy?.type ?: "none"
+        proxyHost = p.proxy?.host ?: ""
+        proxyPort = p.proxy?.port?.takeIf { it > 0 }?.toString() ?: ""
+        proxyUser = p.proxy?.username ?: ""
+        proxyPass = p.proxy?.password ?: ""
+        autoConnect = p.autoConnect
+    }
 
     val caPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
@@ -74,7 +91,7 @@ fun HostProfileScreen(profileId: String?, onBack: () -> Unit) {
         val profile = (original ?: HostProfile(id = UUID.randomUUID().toString(), remark = "", url = ""))
             .copy(
                 remark = remark.ifBlank { url },
-                url = url.trim().trimEnd('/'),
+                url = normalizeBaseUrl(url),
                 trustSelfSigned = trustSelfSigned,
                 caCertUri = caCertUri,
                 proxy = if (proxyType == "none") null else ProxyConfig(
@@ -90,6 +107,24 @@ fun HostProfileScreen(profileId: String?, onBack: () -> Unit) {
         }
         scope.launch {
             settingsStore.upsertProfile(profile)
+            // 活跃主机改动需传导到前台连接与后台服务 watcher
+            if (settingsStore.activeProfileId.first() == profile.id) {
+                val orig = original
+                val paramsChanged = orig == null ||
+                    orig.url != profile.url ||
+                    orig.trustSelfSigned != profile.trustSelfSigned ||
+                    orig.caCertUri != profile.caCertUri ||
+                    orig.proxy != profile.proxy
+                if (paramsChanged) {
+                    // 先断开再连接：URL 不变时 connect() 会因「已连接且同地址」短路，
+                    // 显式断开确保 SSL/代理等参数变化也能重建 OkHttpClient
+                    connection.disconnect()
+                    connection.connect(profile)
+                    // 两次 edit 制造 distinct 变更，触发服务 watcher 重启应用新参数
+                    settingsStore.setActiveProfile(null)
+                    settingsStore.setActiveProfile(profile.id)
+                }
+            }
             onBack()
         }
     }
@@ -97,6 +132,10 @@ fun HostProfileScreen(profileId: String?, onBack: () -> Unit) {
     fun delete() {
         original?.let { p ->
             scope.launch {
+                // 删除活跃主机：先断开前台连接，避免幽灵连接
+                if (settingsStore.activeProfileId.first() == p.id) {
+                    connection.disconnect()
+                }
                 settingsStore.deleteProfile(p.id)
                 onBack()
             }
@@ -105,7 +144,7 @@ fun HostProfileScreen(profileId: String?, onBack: () -> Unit) {
 
     fun runDiag() {
         val profile = (original ?: return).copy(
-            remark = remark, url = url.trim().trimEnd('/'),
+            remark = remark, url = normalizeBaseUrl(url),
             trustSelfSigned = trustSelfSigned, caCertUri = caCertUri,
             proxy = if (proxyType == "none") null else ProxyConfig(
                 type = proxyType, host = proxyHost, port = proxyPort.toIntOrNull() ?: 0,
@@ -205,16 +244,24 @@ fun HostProfileScreen(profileId: String?, onBack: () -> Unit) {
                             label = { Text("端口") }, singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        OutlinedTextField(
-                            value = proxyUser, onValueChange = { proxyUser = it },
-                            label = { Text("账号（可选）") }, singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        OutlinedTextField(
-                            value = proxyPass, onValueChange = { proxyPass = it },
-                            label = { Text("密码（可选）") }, singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
+                        if (proxyType == "http") {
+                            OutlinedTextField(
+                                value = proxyUser, onValueChange = { proxyUser = it },
+                                label = { Text("账号（可选）") }, singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            OutlinedTextField(
+                                value = proxyPass, onValueChange = { proxyPass = it },
+                                label = { Text("密码（可选）") }, singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        } else if (proxyType == "socks5") {
+                            Text(
+                                "SOCKS5 暂不支持认证（OkHttp 限制）；需要认证请改用 HTTP 代理",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }

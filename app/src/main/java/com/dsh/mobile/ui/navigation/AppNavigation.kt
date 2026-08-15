@@ -107,6 +107,7 @@ fun AppNavigation(
         ) {
             HostProfileScreen(
                 profileId = it.arguments?.getString("profileId")?.takeIf { v -> v != "new" },
+                connection = connection,
                 onBack = { navController.popBackStack() },
             )
         }
