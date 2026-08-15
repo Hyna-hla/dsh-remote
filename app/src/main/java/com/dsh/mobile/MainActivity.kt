@@ -27,6 +27,16 @@ import com.dsh.mobile.ui.theme.DshTheme
 
 class MainActivity : ComponentActivity() {
 
+    override fun onStart() {
+        super.onStart()
+        DshApplication.isAppInForeground = true
+    }
+
+    override fun onStop() {
+        super.onStop()
+        DshApplication.isAppInForeground = false
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

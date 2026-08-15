@@ -29,6 +29,7 @@ class SettingsStore(private val context: Context) {
         private val BG_URI_KEY = stringPreferencesKey("bg_uri")
         private val BG_OPACITY_KEY = floatPreferencesKey("bg_opacity")
         private val BRIGHTNESS_KEY = floatPreferencesKey("brightness")
+        private val BACKGROUND_NOTIFY_KEY = booleanPreferencesKey("background_notify")
     }
 
     val connectionConfig: Flow<ConnectionConfig> = context.dataStore.data.map { prefs ->
@@ -67,5 +68,14 @@ class SettingsStore(private val context: Context) {
             prefs[BG_OPACITY_KEY] = cfg.bgOpacity
             prefs[BRIGHTNESS_KEY] = cfg.brightness
         }
+    }
+
+    /** App 在后台时是否推送审批/确认提醒（默认开） */
+    val backgroundNotify: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[BACKGROUND_NOTIFY_KEY] ?: true
+    }
+
+    suspend fun setBackgroundNotify(enabled: Boolean) {
+        context.dataStore.edit { it[BACKGROUND_NOTIFY_KEY] = enabled }
     }
 }

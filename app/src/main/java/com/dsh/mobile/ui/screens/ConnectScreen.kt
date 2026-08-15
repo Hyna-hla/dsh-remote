@@ -2,6 +2,7 @@ package com.dsh.mobile.ui.screens
 
 import android.app.Activity
 import android.content.Intent
+import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -17,9 +18,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import com.dsh.mobile.data.ConnectionConfig
 import com.dsh.mobile.data.DshConnection
 import com.dsh.mobile.data.SettingsStore
+import com.dsh.mobile.service.DshConnectionService
 import com.dsh.mobile.ui.theme.DshBrand
 import com.dsh.mobile.ui.theme.DshSuccess
 import com.journeyapps.barcodescanner.CaptureActivity
@@ -38,6 +41,23 @@ fun ConnectScreen(connection: DshConnection) {
 
     val connState by connection.state.collectAsState()
 
+    // —— 连接成功后：申请通知权限 + 启动后台提醒服务 ——
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { }
+
+    fun onConnectedActions() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS)
+            != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+        runCatching {
+            ContextCompat.startForegroundService(context, Intent(context, DshConnectionService::class.java))
+        }
+    }
+
     // —— 扫码连接：先申请相机权限，再启动扫描，扫到即自动连接 ——
     val scannerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -52,6 +72,7 @@ fun ConnectScreen(connection: DshConnection) {
                     settingsStore.saveConnection(ConnectionConfig(serverUrl = scanned, autoConnect = true))
                 }
                 connection.connect(scanned)
+                onConnectedActions()
             }
         }
     }
@@ -77,6 +98,7 @@ fun ConnectScreen(connection: DshConnection) {
             url = config.serverUrl
             if (config.autoConnect) {
                 connection.connect(config.serverUrl)
+                onConnectedActions()
             }
         }
     }
@@ -101,6 +123,7 @@ fun ConnectScreen(connection: DshConnection) {
             settingsStore.saveConnection(ConnectionConfig(serverUrl = u, autoConnect = true))
         }
         connection.connect(u)
+        onConnectedActions()
     }
 
     Box(modifier = Modifier.fillMaxSize()) {

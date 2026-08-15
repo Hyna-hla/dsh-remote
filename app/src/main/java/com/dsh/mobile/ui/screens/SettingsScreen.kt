@@ -15,9 +15,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import com.dsh.mobile.data.AppearanceConfig
 import com.dsh.mobile.data.DshConnection
 import com.dsh.mobile.data.SettingsStore
+import com.dsh.mobile.service.DshConnectionService
 import com.dsh.mobile.ui.theme.DshError
 import com.dsh.mobile.ui.theme.DshSuccess
 import kotlinx.coroutines.flow.first
@@ -35,9 +37,23 @@ fun SettingsScreen(
     val settingsStore = remember { SettingsStore(context) }
     val scope = rememberCoroutineScope()
     var appearance by remember { mutableStateOf(AppearanceConfig()) }
+    var backgroundNotify by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
         appearance = settingsStore.appearance.first()
+        backgroundNotify = settingsStore.backgroundNotify.first()
+    }
+
+    fun setBackgroundNotify(enabled: Boolean) {
+        backgroundNotify = enabled
+        scope.launch { settingsStore.setBackgroundNotify(enabled) }
+        if (enabled) {
+            runCatching {
+                ContextCompat.startForegroundService(context, Intent(context, DshConnectionService::class.java))
+            }
+        } else {
+            runCatching { context.stopService(Intent(context, DshConnectionService::class.java)) }
+        }
     }
 
     fun persist(next: AppearanceConfig) {
@@ -117,6 +133,34 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+            }
+
+            Text("提醒", style = MaterialTheme.typography.titleMedium)
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("后台审批提醒", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "App 在后台时，桌面端请求审批/确认会推送横幅通知（通知栏常驻一个连接小图标）",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Switch(
+                            checked = backgroundNotify,
+                            onCheckedChange = { setBackgroundNotify(it) },
+                        )
+                    }
                 }
             }
 
