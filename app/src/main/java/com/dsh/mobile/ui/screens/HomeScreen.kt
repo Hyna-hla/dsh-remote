@@ -1,4 +1,4 @@
-﻿package com.dsh.mobile.ui.screens
+package com.dsh.mobile.ui.screens
 
 import android.net.Uri
 import android.util.Base64
@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.dsh.mobile.R
@@ -228,6 +229,51 @@ fun HomeScreen(
         }
     }
 
+    // 工作区选择面板（所有布局分支共用的覆盖层；DeepLook 分支不渲染 Scaffold，也必须挂这里）
+    val workspaceSheetOverlay: @Composable () -> Unit = {
+        if (workspaceSheet) {
+            ModalBottomSheet(onDismissRequest = { workspaceSheet = false }) {
+                WorkspaceSheetContent(
+                    workspaces = workspaces,
+                    selectedWorkspaceId = selectedWorkspaceId,
+                    newWsPath = newWsPath,
+                    onNewWsPath = { newWsPath = it; wsError = null },
+                    newWsTitle = newWsTitle,
+                    onNewWsTitle = { newWsTitle = it },
+                    wsBusy = wsBusy,
+                    wsError = wsError,
+                    onSetError = { wsError = it },
+                    onPickDefault = {
+                        selectedWorkspaceId = ""
+                        scope.launch { settingsStore.setWorkspaceId("") }
+                        workspaceSheet = false
+                    },
+                    onPickWorkspace = { id ->
+                        selectedWorkspaceId = id
+                        scope.launch { settingsStore.setWorkspaceId(id) }
+                        workspaceSheet = false
+                    },
+                    onCreateWorkspace = { path, title ->
+                        wsBusy = true
+                        scope.launch {
+                            try {
+                                connection.createWorkspace(path, title.ifBlank { null })
+                                newWsPath = ""
+                                newWsTitle = ""
+                                refreshArchived()
+                                workspaceSheet = false
+                            } catch (e: Exception) {
+                                wsError = e.message
+                            } finally {
+                                wsBusy = false
+                            }
+                        }
+                    },
+                )
+            }
+        }
+    }
+
     // ChatGPT 移动端布局：纯黑扁平 + 顶部导航栏 + 侧边抽屉（85% 宽 + 遮罩）+ 底部胶囊输入栏
     if (DshThemeStyle == ThemeStyle.CHATGPT) {
         ChatGptHomeLayout(
@@ -320,30 +366,34 @@ fun HomeScreen(
 
     // DeepLook 布局（DeepSeek 移动端 1:1）：鲸鱼顶栏 + 大标题 + iOS 分组卡片 + 底部三 tab 导航
     if (DshThemeStyle == ThemeStyle.DEEPLOOK) {
-        DeepLookHomeLayout(
-            sessions = sessions,
-            workspaces = workspaces,
-            selectedWorkspaceId = selectedWorkspaceId,
-            onWorkspaceClick = { workspaceSheet = true },
-            input = input,
-            onInputChange = { input = it },
-            sending = sending,
-            onSend = { send() },
-            sendError = sendError,
-            preset = preset,
-            presets = presets,
-            presetMenu = presetMenu,
-            onPresetMenuChange = { presetMenu = it },
-            pendingImages = pendingImages,
-            onPickImage = { imagePicker.launch("image/*") },
-            onRemoveImage = { i -> pendingImages = pendingImages.filterIndexed { j, _ -> j != i } },
-            onSessionClick = onSessionClick,
-            onSettings = onSettings,
-            onRefresh = {
-                refreshSessions()
-                refreshArchived()
-            },
-        )
+        Box {
+            DeepLookHomeLayout(
+                sessions = sessions,
+                workspaces = workspaces,
+                selectedWorkspaceId = selectedWorkspaceId,
+                onWorkspaceClick = { workspaceSheet = true },
+                input = input,
+                onInputChange = { input = it },
+                sending = sending,
+                onSend = { send() },
+                sendError = sendError,
+                preset = preset,
+                presets = presets,
+                presetMenu = presetMenu,
+                onPresetMenuChange = { presetMenu = it },
+                pendingImages = pendingImages,
+                onPickImage = { imagePicker.launch("image/*") },
+                onRemoveImage = { i -> pendingImages = pendingImages.filterIndexed { j, _ -> j != i } },
+                onSessionClick = onSessionClick,
+                onSettings = onSettings,
+                onRefresh = {
+                    refreshSessions()
+                    refreshArchived()
+                },
+            )
+            // 工作区选择面板覆盖层（DeepLook 分支不渲染 Scaffold，这里单独挂载）
+            workspaceSheetOverlay()
+        }
         return
     }
 
@@ -791,140 +841,131 @@ fun HomeScreen(
             }
 
             // 工作区选择面板（对齐 Web WorkspacePicker：默认 / 已有工作区 / 新建）
-            if (workspaceSheet) {
-                ModalBottomSheet(onDismissRequest = { workspaceSheet = false }) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp),
-                    ) {
-                        Text(
-                            "新对话工作区",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            "新对话将创建在所选工作区（PC 端目录）下，切换后自动记住。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(Modifier.height(14.dp))
+            workspaceSheetOverlay()
+        }
+    }
+}
 
-                        // 默认工作区
-                        WorkspaceRow(
-                            icon = Icons.Default.Home,
-                            title = "默认工作区",
-                            subtitle = "跟随 DSH 的默认目录",
-                            selected = selectedWorkspaceId.isBlank(),
-                            onClick = {
-                                selectedWorkspaceId = ""
-                                scope.launch { settingsStore.setWorkspaceId("") }
-                                workspaceSheet = false
-                            },
-                        )
+/** 工作区选择面板内容（所有布局分支共用） */
+@Composable
+private fun WorkspaceSheetContent(
+    workspaces: List<WorkspaceView>,
+    selectedWorkspaceId: String,
+    newWsPath: String,
+    onNewWsPath: (String) -> Unit,
+    newWsTitle: String,
+    onNewWsTitle: (String) -> Unit,
+    wsBusy: Boolean,
+    wsError: String?,
+    onSetError: (String?) -> Unit,
+    onPickDefault: () -> Unit,
+    onPickWorkspace: (String) -> Unit,
+    onCreateWorkspace: (String, String) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp),
+    ) {
+        Text(
+            "新对话工作区",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "新对话将创建在所选工作区（PC 端目录）下，切换后自动记住。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(14.dp))
 
-                        // 已有工作区
-                        workspaces.forEach { ws ->
-                            WorkspaceRow(
-                                icon = Icons.Default.Folder,
-                                title = ws.title.ifBlank { ws.path },
-                                subtitle = ws.path,
-                                selected = selectedWorkspaceId == ws.workspaceId,
-                                onClick = {
-                                    selectedWorkspaceId = ws.workspaceId
-                                    scope.launch { settingsStore.setWorkspaceId(ws.workspaceId) }
-                                    workspaceSheet = false
-                                },
-                            )
-                        }
+        // 默认工作区
+        WorkspaceRow(
+            icon = Icons.Default.Home,
+            title = "默认工作区",
+            subtitle = "跟随 DSH 的默认目录",
+            selected = selectedWorkspaceId.isBlank(),
+            onClick = onPickDefault,
+        )
 
-                        HorizontalDivider(
-                            modifier = Modifier.padding(vertical = 10.dp),
-                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
-                        )
+        // 已有工作区
+        workspaces.forEach { ws ->
+            WorkspaceRow(
+                icon = Icons.Default.Folder,
+                title = ws.title.ifBlank { ws.path },
+                subtitle = ws.path,
+                selected = selectedWorkspaceId == ws.workspaceId,
+                onClick = { onPickWorkspace(ws.workspaceId) },
+            )
+        }
 
-                        // 新建工作区：输入 PC 端目录绝对路径
-                        Text(
-                            "新建工作区",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Medium,
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = newWsPath,
-                            onValueChange = { newWsPath = it; wsError = null },
-                            modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("PC 端目录绝对路径，如 E:\\AI搓的小东西") },
-                            label = { Text("目录路径（必须已存在）") },
-                            singleLine = true,
-                            shape = DshShape.small,
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = newWsTitle,
-                            onValueChange = { newWsTitle = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("可选：显示名称") },
-                            label = { Text("标题") },
-                            singleLine = true,
-                            shape = DshShape.small,
-                        )
-                        wsError?.let {
-                            Spacer(Modifier.height(6.dp))
-                            Text(
-                                it,
-                                color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                        Spacer(Modifier.height(10.dp))
-                        Button(
-                            onClick = {
-                                val path = newWsPath.trim()
-                                if (path.isEmpty()) {
-                                    wsError = "请填写 PC 端目录路径"
-                                    return@Button
-                                }
-                                if (wsBusy) return@Button
-                                wsBusy = true
-                                scope.launch {
-                                    try {
-                                        connection.createWorkspace(
-                                            path,
-                                            newWsTitle.trim().ifBlank { null },
-                                        )
-                                        newWsPath = ""
-                                        newWsTitle = ""
-                                        refreshArchived()
-                                        workspaceSheet = false
-                                    } catch (e: Exception) {
-                                        wsError = e.message
-                                    } finally {
-                                        wsBusy = false
-                                    }
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = DshShape.small,
-                        ) {
-                            if (wsBusy) {
-                                CircularProgressIndicator(
-                                    Modifier.size(16.dp),
-                                    color = MaterialTheme.colorScheme.onPrimary,
-                                    strokeWidth = 2.dp,
-                                )
-                            } else {
-                                Icon(Icons.Default.Add, null, Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("创建并选中")
-                            }
-                        }
-                        Spacer(Modifier.height(28.dp))
-                    }
+        HorizontalDivider(
+            modifier = Modifier.padding(vertical = 10.dp),
+            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+        )
+
+        // 新建工作区：输入 PC 端目录绝对路径
+        Text(
+            "新建工作区",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Medium,
+        )
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = newWsPath,
+            onValueChange = onNewWsPath,
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("PC 端目录绝对路径，如 E:\\AI搓的小东西") },
+            label = { Text("目录路径（必须已存在）") },
+            singleLine = true,
+            shape = DshShape.small,
+        )
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = newWsTitle,
+            onValueChange = onNewWsTitle,
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("可选：显示名称") },
+            label = { Text("标题") },
+            singleLine = true,
+            shape = DshShape.small,
+        )
+        wsError?.let {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                it,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        Button(
+            onClick = {
+                val path = newWsPath.trim()
+                if (path.isEmpty()) {
+                    onSetError("请填写 PC 端目录路径")
+                    return@Button
                 }
+                if (wsBusy) return@Button
+                onCreateWorkspace(path, newWsTitle.trim())
+            },
+            modifier = Modifier.fillMaxWidth(),
+            shape = DshShape.small,
+        ) {
+            if (wsBusy) {
+                CircularProgressIndicator(
+                    Modifier.size(16.dp),
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    strokeWidth = 2.dp,
+                )
+            } else {
+                Icon(Icons.Default.Add, null, Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("创建并选中")
             }
         }
+        Spacer(Modifier.height(28.dp))
     }
 }
 
@@ -1158,7 +1199,8 @@ private fun ClaudeHomeLayout(
                 Modifier
                     .fillMaxHeight()
                     .fillMaxWidth(0.85f)
-                    .background(Color(0xFF171716)),
+                    .background(Color(0xFF171716))
+                    .statusBarsPadding(),
             ) {
                 // ── 顶部标题区：衬线大标题 32/600 + New chat（橙色加号 24 + 18sp）──
                 Column(
@@ -1365,7 +1407,9 @@ private fun ClaudeHomeLayout(
         Column(
             Modifier
                 .fillMaxSize()
-                .background(Color(0xFF171716)),
+                .background(Color(0xFF171716))
+                // 让开状态栏/灵动岛
+                .statusBarsPadding(),
         ) {
             // ── 顶部极简导航 56dp：纯图标无背景（汉堡 24 / 幽灵星芒 28），无中间标题 ──
             Row(
@@ -1413,6 +1457,10 @@ private fun ClaudeHomeLayout(
                     "今天有什么可以帮你的？",
                     style = MaterialTheme.typography.headlineMedium,
                     color = Color(0xFFF5F5F4),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp),
                 )
                 if (pendingImages.isNotEmpty()) {
                     Spacer(Modifier.height(20.dp))
@@ -1448,25 +1496,6 @@ private fun ClaudeHomeLayout(
                     .padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
             ) {
                 Column(Modifier.padding(12.dp)) {
-                    // 1. Pro 提示行（两端对齐：二级文本 + 淡紫 500）
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Text(
-                            "Get more with DSH",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFFA8A29E),
-                        )
-                        Text(
-                            "Upgrade to Pro",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Medium,
-                            color = Color(0xFFA78BFA),
-                        )
-                    }
                     // 2. 多行文本输入区（无边框无背景，17sp 一级文本，橙色光标）
                     BasicTextField(
                         value = input,
@@ -1491,7 +1520,7 @@ private fun ClaudeHomeLayout(
                             }
                         },
                     )
-                    // 3. 底部操作栏：+ 40 圆 / 模型胶囊 40 / 麦克风位插话 40 圆 / 发送 44 圆橙箭头
+                    // 3. 底部操作栏：+ 40 圆 / 模型胶囊 40 / 发送 44 圆橙箭头（无意义的装饰元素已移除）
                     Row(
                         Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1536,19 +1565,6 @@ private fun ClaudeHomeLayout(
                                     )
                                 }
                             }
-                        }
-                        Box(
-                            Modifier
-                                .size(40.dp)
-                                .background(Color(0xFF2A2A29), CircleShape),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                Icons.Default.Bolt,
-                                "插话",
-                                Modifier.size(20.dp),
-                                tint = Color(0xFFF5F5F4),
-                            )
                         }
                         Spacer(Modifier.weight(1f))
                         Box(
@@ -1615,6 +1631,13 @@ private fun DeepLookHomeLayout(
     onRefresh: () -> Unit,
 ) {
     val deep = Color(0xFF0D1B2A)
+    // 深色变体自适应：浅色下深蓝黑做前景强调（规范），深色下改用亮色前景 + 品牌蓝方块（否则黑底黑字不可见）
+    val darkVariant = DshThemeId == "deeplook-dark"
+    val deepAccent = if (darkVariant) MaterialTheme.colorScheme.onSurface else deep
+    val deepBlock = if (darkVariant) MaterialTheme.colorScheme.primary else deep
+    val faintIcon = if (darkVariant) MaterialTheme.colorScheme.onSurfaceVariant else Color(0xFF8A8A8E)
+    val chevronTint = if (darkVariant) MaterialTheme.colorScheme.onSurfaceVariant else Color(0xFFB4B4B8)
+    val dashTint = if (darkVariant) MaterialTheme.colorScheme.outline else Color(0xFFC9C9CD)
     var tab by remember { mutableStateOf("new") } // new | sessions
     val wsLabel = workspaces.firstOrNull { it.workspaceId == selectedWorkspaceId }
         ?.let { it.title.ifBlank { it.path } } ?: "标准模式"
@@ -1622,7 +1645,9 @@ private fun DeepLookHomeLayout(
     Column(
         Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
+            .background(MaterialTheme.colorScheme.background)
+            // 关键：让开状态栏/灵动岛，顶栏不再被遮挡
+            .statusBarsPadding(),
     ) {
         // ── 顶栏 46dp：深蓝黑鲸鱼 logo(30 圆角9) + DeepSeek Harness(17/600) + 设置 ──
         Row(
@@ -1636,7 +1661,7 @@ private fun DeepLookHomeLayout(
                 Modifier
                     .size(30.dp)
                     .clip(RoundedCornerShape(9.dp))
-                    .background(deep),
+                    .background(deepBlock),
                 contentAlignment = Alignment.Center,
             ) {
                 Image(
@@ -1694,7 +1719,7 @@ private fun DeepLookHomeLayout(
                             Icons.Default.Dashboard,
                             null,
                             Modifier.size(20.dp),
-                            tint = deep,
+                            tint = deepAccent,
                         )
                         Spacer(Modifier.width(10.dp))
                         Text(
@@ -1710,7 +1735,7 @@ private fun DeepLookHomeLayout(
                             Icons.Default.ChevronRight,
                             null,
                             Modifier.size(16.dp),
-                            tint = Color(0xFFB4B4B8),
+                            tint = chevronTint,
                         )
                     }
                 }
@@ -1831,7 +1856,7 @@ private fun DeepLookHomeLayout(
                         Box(Modifier.size(72.dp), contentAlignment = Alignment.Center) {
                             Canvas(Modifier.fillMaxSize()) {
                                 drawCircle(
-                                    color = Color(0xFFC9C9CD),
+                                    color = dashTint,
                                     style = Stroke(
                                         width = 2.dp.toPx(),
                                         pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(
@@ -1844,14 +1869,14 @@ private fun DeepLookHomeLayout(
                                 Icons.Default.ChatBubbleOutline,
                                 null,
                                 Modifier.size(28.dp),
-                                tint = Color(0xFFC9C9CD),
+                                tint = dashTint,
                             )
                         }
                         Spacer(Modifier.height(12.dp))
                         Text(
                             "暂无会话",
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFF8A8A8E),
+                            color = faintIcon,
                         )
                     }
                 } else {
@@ -1877,7 +1902,7 @@ private fun DeepLookHomeLayout(
                                         SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
                                             .format(Date(s.updatedAt)),
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = Color(0xFF8A8A8E),
+                                        color = faintIcon,
                                     )
                                 }
                                 if (s.running) {
@@ -1892,7 +1917,7 @@ private fun DeepLookHomeLayout(
                                     Icons.Default.ChevronRight,
                                     null,
                                     Modifier.size(16.dp),
-                                    tint = Color(0xFFB4B4B8),
+                                    tint = chevronTint,
                                 )
                             }
                             if (index < sessions.lastIndex) {
@@ -1930,12 +1955,12 @@ private fun DeepLookHomeLayout(
                     Icons.Default.ChatBubbleOutline,
                     null,
                     Modifier.size(24.dp),
-                    tint = if (tab == "sessions") deep else Color(0xFF8A8A8E),
+                    tint = if (tab == "sessions") deep else faintIcon,
                 )
                 Text(
                     "会话",
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (tab == "sessions") deep else Color(0xFF8A8A8E),
+                    color = if (tab == "sessions") deep else faintIcon,
                 )
             }
             // 新会话（深蓝黑圆角方块 + 白色加号，当前高亮）
@@ -1948,7 +1973,7 @@ private fun DeepLookHomeLayout(
                     Modifier
                         .size(width = 44.dp, height = 28.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(deep),
+                        .background(deepBlock),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(Icons.Default.Add, null, Modifier.size(20.dp), tint = Color.White)
@@ -1956,7 +1981,7 @@ private fun DeepLookHomeLayout(
                 Text(
                     "新会话",
                     style = MaterialTheme.typography.labelSmall,
-                    color = deep,
+                    color = deepAccent,
                     fontWeight = FontWeight.SemiBold,
                 )
             }
@@ -1970,12 +1995,12 @@ private fun DeepLookHomeLayout(
                     Icons.Default.Settings,
                     null,
                     Modifier.size(24.dp),
-                    tint = Color(0xFF8A8A8E),
+                    tint = faintIcon,
                 )
                 Text(
                     "设置",
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color(0xFF8A8A8E),
+                    color = faintIcon,
                 )
             }
         }
@@ -2111,7 +2136,8 @@ private fun ChatGptHomeLayout(
                 Modifier
                     .fillMaxHeight()
                     .fillMaxWidth(0.85f)
-                    .background(Color.Black),
+                    .background(Color.Black)
+                    .statusBarsPadding(),
             ) {
                 // ── 顶部标题区（60dp）：DSH Remote + 搜索圆钮 ──
                 Row(
@@ -2326,7 +2352,9 @@ private fun ChatGptHomeLayout(
         Column(
             Modifier
                 .fillMaxSize()
-                .background(Color.Black),
+                .background(Color.Black)
+                // 让开状态栏/灵动岛
+                .statusBarsPadding(),
         ) {
             // ── 顶部导航栏 56dp：汉堡 40 圆 | 中间 pill（映射「获取Plus」）| 新对话 40 圆 ──
             Row(

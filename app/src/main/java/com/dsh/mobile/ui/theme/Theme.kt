@@ -4,6 +4,9 @@ import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -14,27 +17,57 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 // ── 语义色（随主题切换，组件内直接用）───────────────────────────────────────
+// 注意：全部使用 Compose 快照状态（mutableStateOf），读取语法不变，
+// 但主题快速切换时所有读者会自动重组到一致的新值，杜绝"混合状态黑屏"。
 object DshPalette {
-    var bg: Color = ThemeRegistry.blue.colors.background
-    var surface: Color = ThemeRegistry.blue.colors.surface
-    var surfaceHigh: Color = ThemeRegistry.blue.colors.surfaceHigh
-    var brand: Color = ThemeRegistry.blue.colors.brand
-    var brandSoft: Color = ThemeRegistry.blue.colors.brandSoft
-    var border: Color = ThemeRegistry.blue.colors.border
-    var success: Color = ThemeRegistry.blue.colors.success
-    var warn: Color = ThemeRegistry.blue.colors.warn
-    var error: Color = ThemeRegistry.blue.colors.error
+    var bg by mutableStateOf(ThemeRegistry.blue.colors.background)
+    var surface by mutableStateOf(ThemeRegistry.blue.colors.surface)
+    var surfaceHigh by mutableStateOf(ThemeRegistry.blue.colors.surfaceHigh)
+    var brand by mutableStateOf(ThemeRegistry.blue.colors.brand)
+    var brandSoft by mutableStateOf(ThemeRegistry.blue.colors.brandSoft)
+    var border by mutableStateOf(ThemeRegistry.blue.colors.border)
+    var success by mutableStateOf(ThemeRegistry.blue.colors.success)
+    var warn by mutableStateOf(ThemeRegistry.blue.colors.warn)
+    var error by mutableStateOf(ThemeRegistry.blue.colors.error)
 }
 
-var DshBackground = ThemeRegistry.blue.colors.background; private set
-var DshSurface = ThemeRegistry.blue.colors.surface; private set
-var DshSurfaceHigh = ThemeRegistry.blue.colors.surfaceHigh; private set
-var DshBrand = ThemeRegistry.blue.colors.brand; private set
-var DshBrandSoft = ThemeRegistry.blue.colors.brandSoft; private set
-var DshBorder = ThemeRegistry.blue.colors.border; private set
-var DshSuccess = ThemeRegistry.blue.colors.success; private set
-var DshWarn = ThemeRegistry.blue.colors.warn; private set
-var DshError = ThemeRegistry.blue.colors.error; private set
+private val _bgState = mutableStateOf(ThemeRegistry.blue.colors.background)
+private val _surfaceState = mutableStateOf(ThemeRegistry.blue.colors.surface)
+private val _surfaceHighState = mutableStateOf(ThemeRegistry.blue.colors.surfaceHigh)
+private val _brandState = mutableStateOf(ThemeRegistry.blue.colors.brand)
+private val _brandSoftState = mutableStateOf(ThemeRegistry.blue.colors.brandSoft)
+private val _borderState = mutableStateOf(ThemeRegistry.blue.colors.border)
+private val _successState = mutableStateOf(ThemeRegistry.blue.colors.success)
+private val _warnState = mutableStateOf(ThemeRegistry.blue.colors.warn)
+private val _errorState = mutableStateOf(ThemeRegistry.blue.colors.error)
+
+var DshBackground: Color
+    get() = _bgState.value
+    private set(value) { _bgState.value = value }
+var DshSurface: Color
+    get() = _surfaceState.value
+    private set(value) { _surfaceState.value = value }
+var DshSurfaceHigh: Color
+    get() = _surfaceHighState.value
+    private set(value) { _surfaceHighState.value = value }
+var DshBrand: Color
+    get() = _brandState.value
+    private set(value) { _brandState.value = value }
+var DshBrandSoft: Color
+    get() = _brandSoftState.value
+    private set(value) { _brandSoftState.value = value }
+var DshBorder: Color
+    get() = _borderState.value
+    private set(value) { _borderState.value = value }
+var DshSuccess: Color
+    get() = _successState.value
+    private set(value) { _successState.value = value }
+var DshWarn: Color
+    get() = _warnState.value
+    private set(value) { _warnState.value = value }
+var DshError: Color
+    get() = _errorState.value
+    private set(value) { _errorState.value = value }
 
 /** 主题是否浅色（状态栏图标对比与蒙层颜色选择） */
 fun isLightMode(theme: ThemeDef): Boolean = theme.light
@@ -72,20 +105,28 @@ fun applyPalette(theme: ThemeDef, bgActive: Boolean = false, glass: Float = 0f) 
 }
 
 // ── Telegram / Twitter 风格常量（随主题风格切换：STANDARD 圆润 / CODEX 方角 / CYBERPUNK 切角）──
+// 快照状态：形状随主题切换自动触发重组
 object DshShape {
-    var bubble: Shape = RoundedCornerShape(18.dp)
-    var userBubble: Shape = RoundedCornerShape(18.dp, 6.dp, 18.dp, 18.dp)
-    var assistantBubble: Shape = RoundedCornerShape(6.dp, 18.dp, 18.dp, 18.dp)
-    var pill: Shape = RoundedCornerShape(24.dp)
-    var card: Shape = RoundedCornerShape(14.dp)
-    var small: Shape = RoundedCornerShape(10.dp)
+    var bubble by mutableStateOf<Shape>(RoundedCornerShape(18.dp))
+    var userBubble by mutableStateOf<Shape>(RoundedCornerShape(18.dp, 6.dp, 18.dp, 18.dp))
+    var assistantBubble by mutableStateOf<Shape>(RoundedCornerShape(6.dp, 18.dp, 18.dp, 18.dp))
+    var pill by mutableStateOf<Shape>(RoundedCornerShape(24.dp))
+    var card by mutableStateOf<Shape>(RoundedCornerShape(14.dp))
+    var small by mutableStateOf<Shape>(RoundedCornerShape(10.dp))
 }
 
-/** 当前主题风格（组件装饰按它分支：等宽/方角/终端细节） */
-var DshThemeStyle = ThemeStyle.STANDARD; private set
+private val _styleState = mutableStateOf(ThemeStyle.STANDARD)
+private val _idState = mutableStateOf("blue")
 
-/** 当前主题 id（如 blue/codex/cyberpunk；按 id 启用专属装扮） */
-var DshThemeId = "blue"; private set
+/** 当前主题风格（组件装饰按它分支：等宽/方角/终端细节）；快照状态，切主题自动重组 */
+var DshThemeStyle: ThemeStyle
+    get() = _styleState.value
+    private set(value) { _styleState.value = value }
+
+/** 当前主题 id（如 blue/codex/cyberpunk；按 id 启用专属装扮）；快照状态 */
+var DshThemeId: String
+    get() = _idState.value
+    private set(value) { _idState.value = value }
 
 /** 品牌渐变（主按钮/强调装饰用）：brand → brandSoft，随主题色走 */
 fun brandGradient(): Brush = Brush.linearGradient(listOf(DshPalette.brand, DshPalette.brandSoft))
@@ -241,8 +282,8 @@ private fun dshTypography(style: ThemeStyle, fonts: FontConfig = FontConfig()): 
     ).also { _ -> codeFamily = code }
 }
 
-/** 当前代码字体（Typography 没有 code 槽位，单独记录供代码块/参数/终端文本使用） */
-private var codeFamily: FontFamily = FontFamily.Monospace
+/** 当前代码字体（Typography 没有 code 槽位，单独记录供代码块/参数/终端文本使用）；快照状态 */
+private var codeFamily: FontFamily by mutableStateOf(FontFamily.Monospace)
 
 /** 代码字体（等宽），供 MarkdownText/工具参数/终端装饰统一使用 */
 fun dshCodeFont(): FontFamily = codeFamily
