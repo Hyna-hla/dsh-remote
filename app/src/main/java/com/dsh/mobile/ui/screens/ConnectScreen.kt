@@ -6,6 +6,7 @@ import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -16,8 +17,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.dsh.mobile.R
 import androidx.core.content.ContextCompat
 import com.dsh.mobile.data.ConnectionConfig
 import com.dsh.mobile.data.DshConnection
@@ -143,23 +146,23 @@ fun ConnectScreen(connection: DshConnection) {
                 modifier = Modifier.size(84.dp),
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Default.ChatBubble,
+                    // 品牌鲸鱼（灵感来自 DeepSeek 官方标识，黑白负空间风格）
+                    Image(
+                        painter = painterResource(R.drawable.ic_launcher_foreground),
                         contentDescription = null,
-                        modifier = Modifier.size(40.dp),
-                        tint = DshBrand,
+                        modifier = Modifier.size(52.dp),
                     )
                 }
             }
             Spacer(Modifier.height(20.dp))
             Text(
-                "DeepSeek Harness",
+                "DSH Remote",
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                "移动端遥控 · 连接你电脑上的智能体",
+                "遥控你电脑上的 DeepSeek Harness 智能体",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -257,7 +260,13 @@ fun ConnectScreen(connection: DshConnection) {
                     )
                 }
             }
-            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(28.dp))
+            Text(
+                "DSH Remote v1.0.18 · 非官方客户端 · 数据只存你的手机与你的服务器",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            )
+            Spacer(Modifier.height(20.dp))
         }
 
         // 右上角扫码按钮
