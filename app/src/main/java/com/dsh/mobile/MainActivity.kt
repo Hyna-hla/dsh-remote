@@ -52,8 +52,10 @@ import androidx.core.view.WindowCompat
 import androidx.navigation.compose.rememberNavController
 import com.dsh.mobile.data.ApkInstaller
 import com.dsh.mobile.data.AppearanceConfig
+import com.dsh.mobile.data.DshConnection
 import com.dsh.mobile.data.ReleaseInfo
 import com.dsh.mobile.data.SettingsStore
+import com.dsh.mobile.data.TokenUsageWatcher
 import com.dsh.mobile.data.UpdateChecker
 import com.dsh.mobile.data.UpdateMirrors
 import com.dsh.mobile.ui.navigation.AppNavigation
@@ -227,6 +229,16 @@ class MainActivity : ComponentActivity() {
 
                     // — 资源更新提示层（启动自动检测；无更新静默，有更新询问是否下载）—
                     UpdatePromptOverlay(context)
+
+                    // — 全局 token 用量监听（假 Pro 扣费）：PC 端任何会话的回合都结算，
+                    //   不限移动端打开的会话（后台服务连接另行挂载，双连接按 seq 去重）—
+                    LaunchedEffect(Unit) {
+                        app.connection.events.collect { ev ->
+                            if (ev is DshConnection.Event.SessionEvent) {
+                                TokenUsageWatcher.onSessionEvent(ev.sessionId, ev.event)
+                            }
+                        }
+                    }
 
                     // — 全局亮度（夜间模式）：黑层叠加，不拦截触摸 —
                     if (appearance.brightness < 1f) {

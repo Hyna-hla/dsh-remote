@@ -10,6 +10,7 @@ import com.dsh.mobile.DshApplication
 import com.dsh.mobile.MainActivity
 import com.dsh.mobile.data.DshConnection
 import com.dsh.mobile.data.SettingsStore
+import com.dsh.mobile.data.TokenUsageWatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -119,6 +120,10 @@ class DshConnectionService : Service() {
     private suspend fun handle(event: DshConnection.Event) {
         if (DshApplication.isAppInForeground) return
         when (event) {
+            // 全局 token 用量监听：App 被杀后前台服务仍活着，PC 端回合消耗继续计费（假 Pro）
+            is DshConnection.Event.SessionEvent ->
+                TokenUsageWatcher.onSessionEvent(event.sessionId, event.event)
+
             is DshConnection.Event.ApprovalRequested -> {
                 if (!seenApprovals.add(event.approvalId)) return
                 val reason = event.reason?.let { "：" + it } ?: ""
