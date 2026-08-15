@@ -21,6 +21,10 @@
 
 ## 更新日志
 
+- **v1.1.1**：资源更新提示（版本号从 1.1.1 开始）——
+  - **启动自动检测**：App 打开时后台自动检查最新 Release（走镜像，无更新则完全不打扰）
+  - **有更新弹窗询问**：「检测到资源更新，是否下载？」——是 / 否，用户自选
+  - **下载全程透明**：实时显示当前使用的镜像站（ghfast.top / gh-proxy.com / ghproxy.net / 直连）、第几个源、请求地址、是否成功开始、实时进度百分比与**下载速度**（KB/s、MB/s）；镜像失败自动切换下一源并逐条展示切换记录；失败可重试，完成后一键安装
 - **v1.0.26**：皮肤资产全面整合（来自 SKIN 资源包）——
   - **深蓝主题 = 鲸鱼娘装扮**（dsh-deep-whale 皮肤）：首页问候区右侧鲸鱼娘女仆立绘、空态鲸鱼娘立绘、宫殿夜景低透明度背景、「新任务」盾徽、输入栏上方底部纹章；品牌色对齐 DeepSeek Chat 蓝鲸蓝 `#4D6BFE`（dsh-blue-whale 复刻）
   - **夜之城 2077 主题**（对齐 dsh-theme-cyberpunk2077）：NC 黄 × 霓虹青、**45° 切角按钮/卡片**、`◈ 新任务` + `NIGHT CITY // 2077` HUD 文案、会话按**稀有度上色**（白/绿/青/紫/橙循环，运行中 = 传奇橙黄）、错误横幅红底警示斜纹
@@ -67,10 +71,10 @@
 
 ## 安装（APK）
 
-- 仓库内提供 R8 精简版：[release/DSH-Remote-v1.0.26-min.apk](release/DSH-Remote-v1.0.26-min.apk)（已签名，约 4.6MB，可直接安装）
-- **debug 主包（约 62MB，与历次安装包一致）**：因 GitHub 单文件 >50MB 限制不进仓库，本地留档于 `release/DSH-Remote-v1.0.26.apk`（构建产物亦在 `app/build/outputs/apk/debug/`）；分发走 GitHub Release 附件或 Google Play
+- 仓库内提供 R8 精简版：[release/DSH-Remote-v1.1.1-min.apk](release/DSH-Remote-v1.1.1-min.apk)（已签名，约 4.6MB，可直接安装）
+- **debug 主包（约 62MB，与历次安装包一致）**：因 GitHub 单文件 >50MB 限制不进仓库，本地留档于 `release/DSH-Remote-v1.1.1.apk`（构建产物亦在 `app/build/outputs/apk/debug/`）；分发走 GitHub Release 附件或 Google Play
 - 传到手机 → 允许「未知来源」安装 → 填服务器地址 → 连接
-- Google Play 上架包（已签名 AAB）：[release/DSH-Remote-v1.0.26.aab](release/DSH-Remote-v1.0.26.aab)；上架清单见 [docs/play-listing.md](docs/play-listing.md)
+- Google Play 上架包（已签名 AAB）：[release/DSH-Remote-v1.1.1.aab](release/DSH-Remote-v1.1.1.aab)；上架清单见 [docs/play-listing.md](docs/play-listing.md)
 - 自定义主题包格式与示例：[docs/theme-package-format.md](docs/theme-package-format.md)、[docs/aurora.dshTheme.zip](docs/aurora.dshTheme.zip)
 
 ## PC 端使用

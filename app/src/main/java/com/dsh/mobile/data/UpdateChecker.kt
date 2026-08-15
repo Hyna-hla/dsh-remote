@@ -2,6 +2,8 @@ package com.dsh.mobile.data
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -118,6 +120,71 @@ object UpdateChecker {
         return checkLatest()
     }
 
+    // ── 透明下载事件流（v1.1.1：镜像切换/开始/速度全量上报，UI 全透明展示）──
+
+    const val PHASE_CONNECTING = "connecting"
+    const val PHASE_DOWNLOADING = "downloading"
+    const val PHASE_FAILED = "failed"
+    const val PHASE_DONE = "done"
+
+    data class DownloadEvent(
+        val phase: String,
+        /** 当前尝试的镜像序号（0 起） */
+        val mirrorIndex: Int,
+        /** 镜像显示名（ghfast.top / gh-proxy.com / ghproxy.net / 直连 GitHub） */
+        val mirrorName: String,
+        /** 实际请求地址（透明展示用） */
+        val url: String,
+        /** 0..1 */
+        val progress: Float = 0f,
+        /** 实时速度（字节/秒） */
+        val speedBytesPerSec: Long = 0L,
+    )
+
+    /** 镜像显示名 */
+    fun mirrorName(prefix: String): String = when {
+        prefix.isEmpty() -> "直连 GitHub"
+        prefix.contains("ghfast") -> "ghfast.top"
+        prefix.contains("gh-proxy") -> "gh-proxy.com"
+        prefix.contains("ghproxy") -> "ghproxy.net"
+        else -> prefix.removePrefix("https://").trimEnd('/')
+    }
+
+    /**
+     * 下载事件流：连接镜像 → 实时进度（含速度）→ 成功；镜像失败发 failed 事件并自动切下一个。
+     * 全部失败以异常结束。collect 的协程上下文决定执行线程。
+     */
+    fun downloadApkFlow(url: String, dest: File): Flow<DownloadEvent> = flow {
+        var lastErr: IOException? = null
+        val tmp = File(dest.parentFile, dest.name + ".part")
+        UpdateMirrors.DOWNLOAD_MIRRORS.forEachIndexed { index, prefix ->
+            val target = if (prefix.isEmpty()) url else prefix + url
+            val name = mirrorName(prefix)
+            emit(DownloadEvent(PHASE_CONNECTING, index, name, target))
+            try {
+                downloadTo(target, tmp) { done, total, speed ->
+                    emit(
+                        DownloadEvent(
+                            PHASE_DOWNLOADING, index, name, target,
+                            if (total > 0) (done.toFloat() / total).coerceIn(0f, 1f) else 0f,
+                            speed,
+                        ),
+                    )
+                }
+                if (tmp.length() > 0) {
+                    tmp.renameTo(dest)
+                    emit(DownloadEvent(PHASE_DONE, index, name, target, 1f))
+                    return@flow
+                }
+            } catch (e: IOException) {
+                lastErr = e
+                emit(DownloadEvent(PHASE_FAILED, index, name, target))
+                tmp.delete()
+            }
+        }
+        throw lastErr ?: IOException("下载失败：所有镜像均不可用")
+    }
+
     /**
      * 流式下载到 dest（多镜像依次尝试，失败自动切下一个镜像，最后直连兜底）。
      * onProgress 回调 0..1（主线程安全：调用方自行切线程更新 UI）。
@@ -125,47 +192,48 @@ object UpdateChecker {
      */
     suspend fun downloadApk(url: String, dest: File, onProgress: (Float) -> Unit) {
         withContext(Dispatchers.IO) {
-            var lastErr: IOException? = null
-            val tmp = File(dest.parentFile, dest.name + ".part")
-            for (prefix in UpdateMirrors.DOWNLOAD_MIRRORS) {
-                val target = if (prefix.isEmpty()) url else prefix + url
-                try {
-                    downloadTo(target, tmp, onProgress)
-                    if (tmp.length() > 0) {
-                        tmp.renameTo(dest)
-                        return@withContext
-                    }
-                } catch (e: IOException) {
-                    lastErr = e
-                    tmp.delete()
-                }
+            downloadApkFlow(url, dest).collect { ev ->
+                if (ev.phase == PHASE_DOWNLOADING) onProgress(ev.progress)
             }
-            throw lastErr ?: IOException("下载失败：所有镜像均不可用")
         }
     }
 
-    /** 单次下载实现（写入 .part 临时文件） */
-    private fun downloadTo(url: String, tmp: File, onProgress: (Float) -> Unit) {
+    /** 单次下载实现（写入 .part 临时文件；按 150ms 节流上报速度） */
+    private suspend fun downloadTo(
+        url: String,
+        tmp: File,
+        onProgress: suspend (doneBytes: Long, totalBytes: Long, speed: Long) -> Unit,
+    ) {
         val request = Request.Builder().url(url).header("User-Agent", USER_AGENT).build()
         val call = client.newCall(request)
         call.timeout().timeout(UpdateMirrors.ATTEMPT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
         call.execute().use { resp ->
-            if (!resp.isSuccessful) throw IOException("下载失败 HTTP ${resp.code}")
+            if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
             val body = resp.body ?: throw IOException("空响应")
             val total = body.contentLength()
             tmp.parentFile?.mkdirs()
             tmp.outputStream().use { out ->
                 val buf = ByteArray(64 * 1024)
                 var done = 0L
+                val startAt = System.nanoTime()
+                var lastEmitAt = 0L
                 body.byteStream().use { input ->
                     while (true) {
                         val n = input.read(buf)
                         if (n < 0) break
                         out.write(buf, 0, n)
                         done += n
-                        if (total > 0) onProgress((done.toFloat() / total).coerceIn(0f, 1f))
+                        val now = System.nanoTime()
+                        // 速度：整体平均（防瞬时跳变）
+                        val elapsedMs = ((now - startAt) / 1_000_000).coerceAtLeast(1)
+                        val speed = done * 1000 / elapsedMs
+                        if (now - lastEmitAt >= 150_000_000L || done >= total) {
+                            lastEmitAt = now
+                            onProgress(done, total, speed)
+                        }
                     }
                 }
+                if (total <= 0) onProgress(done, done, 0)
             }
         }
     }
