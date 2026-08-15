@@ -21,6 +21,11 @@
 
 ## 更新日志
 
+- **v1.1.4**：DeepLook 主题——DeepSeek 官方移动端 1:1（依据 5 张实机截图提取的设计规范）——
+  - **内置主题**：DeepLook（浅色：`#f8f8f8` 页面底 + 纯白分组卡片 + 品牌蓝 `#4d6bfe`）+ DeepLook 深色（规范 7.3 预留方案 `#0d1117`/`#161b22`）；同时提供可导入主题包（`SKIN/deeplook*.dshTheme.zip`，含预览图）
+  - **设计令牌**：iOS 分组列表风格——分组卡片纯白/圆角 16/阴影 1dp、行间 1px 分隔线、深蓝黑 `#0d1b2a` 选中态（分段控件/底部导航高亮）、主按钮全宽 50dp 高/圆角 13、排版（大标题 30/700、导航栏 17/600、分组标题 14/600、行标题 16/500、副文案 12.5/400、底部导航 label 10.5）
+  - **主界面布局**：顶栏 46dp 深蓝黑鲸鱼 logo(30dp 圆角9) + 「DeepSeek Harness」+ 设置；大标题「新会话/会话」；分组卡片（工作区选择、最近会话列表带 chevron 与分隔线）；空状态 **72dp 虚线圆环** + 「暂无会话」；**底部导航 78dp 三 tab**（会话 | ⊕新会话·深蓝黑圆角方块白加号高亮 | 设置）
+  - 设置 → 外观 → 选「DeepLook / DeepLook 深色」即切换
 - **v1.1.3**：Claude 移动端暖调深色 UI 主题包（1:1 按设计令牌落地）——
   - **设计令牌**：暖炭黑 `#171716` + 次级 `#242423` + 三级 `#2A2A29` + 陶土橙 `#E8755A` + 淡紫 `#A78BFA` + 暖白 `#F5F5F4` / 暖灰 `#A8A29E` / 弱化 `#78716C`；**衬线大标题**（32/600 侧边栏、36/500 空态标语）+ 无衬线正文（菜单 18/400、分区 16/500、输入 17/400、按钮 16/500）；圆角（输入容器 **28px 超大圆角**、胶囊=高/2、列表点击态 12）
   - **对话主界面**：极简顶部导航 56dp（纯图标无背景：汉堡 24 + 幽灵星芒 28，无中间标题）；空状态居中 64×64 陶土橙星芒 + 衬线 36sp 标语（间距 32）；底部输入容器三层结构（Pro 提示行「Get more with DSH / Upgrade to Pro」淡紫 → 无边框多行输入（橙色光标）→ 操作栏：+ 40 圆 / 模型胶囊 40 / 插话 40 圆 / 发送 **44×44 圆陶土橙向上箭头**）；会话页同步（28 圆角容器 + 箭头发送钮）
@@ -81,10 +86,10 @@
 
 ## 安装（APK）
 
-- 仓库内提供 R8 精简版：[release/DSH-Remote-v1.1.3-min.apk](release/DSH-Remote-v1.1.3-min.apk)（已签名，约 4.6MB，可直接安装）
-- **debug 主包（约 62MB，与历次安装包一致）**：因 GitHub 单文件 >50MB 限制不进仓库，本地留档于 `release/DSH-Remote-v1.1.3.apk`（构建产物亦在 `app/build/outputs/apk/debug/`）；分发走 GitHub Release 附件或 Google Play
+- 仓库内提供 R8 精简版：[release/DSH-Remote-v1.1.4-min.apk](release/DSH-Remote-v1.1.4-min.apk)（已签名，约 4.6MB，可直接安装）
+- **debug 主包（约 62MB，与历次安装包一致）**：因 GitHub 单文件 >50MB 限制不进仓库，本地留档于 `release/DSH-Remote-v1.1.4.apk`（构建产物亦在 `app/build/outputs/apk/debug/`）；分发走 GitHub Release 附件或 Google Play
 - 传到手机 → 允许「未知来源」安装 → 填服务器地址 → 连接
-- Google Play 上架包（已签名 AAB）：[release/DSH-Remote-v1.1.3.aab](release/DSH-Remote-v1.1.3.aab)；上架清单见 [docs/play-listing.md](docs/play-listing.md)
+- Google Play 上架包（已签名 AAB）：[release/DSH-Remote-v1.1.4.aab](release/DSH-Remote-v1.1.4.aab)；上架清单见 [docs/play-listing.md](docs/play-listing.md)
 - 自定义主题包格式与示例：[docs/theme-package-format.md](docs/theme-package-format.md)、[docs/aurora.dshTheme.zip](docs/aurora.dshTheme.zip)
 
 ## PC 端使用

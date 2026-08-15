@@ -298,12 +298,16 @@ private fun dshShapes(style: ThemeStyle): Shapes = when (style) {
 private fun dshColorScheme(theme: ThemeDef, bgActive: Boolean = false, glass: Float = 0f): ColorScheme {
     val (bgA, l1A, l2A) = surfaceAlphaFor(glass, bgActive)
     val c = theme.colors
+    val style = theme.style
     val background = c.background.copy(alpha = bgA)
     val surface = c.surface.copy(alpha = l1A)
     val surfaceVariant = c.surfaceHigh.copy(alpha = l2A)
+    // DeepLook 浅色：primaryContainer 用品牌深蓝黑 #0D1B2A（分段控件选中态 / 底部导航高亮，对齐移动端原型）
+    val lightContainer = if (style == ThemeStyle.DEEPLOOK) Color(0xFF0D1B2A) else Color(0xFFDCE7FB)
+    val lightOnContainer = if (style == ThemeStyle.DEEPLOOK) Color(0xFFFFFFFF) else Color(0xFF12275C)
     return if (theme.light) lightColorScheme(
         primary = c.brand, onPrimary = Color(0xFFFFFFFF),
-        primaryContainer = Color(0xFFDCE7FB), onPrimaryContainer = Color(0xFF12275C),
+        primaryContainer = lightContainer, onPrimaryContainer = lightOnContainer,
         secondary = c.brandSoft, onSecondary = Color(0xFFFFFFFF),
         tertiary = c.warn, onTertiary = Color(0xFF2B2003),
         error = c.error, onError = Color(0xFFFFFFFF),

@@ -1,4 +1,4 @@
-package com.dsh.mobile.ui.screens
+﻿package com.dsh.mobile.ui.screens
 
 import android.net.Uri
 import android.util.Base64
@@ -6,6 +6,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -30,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -311,6 +313,35 @@ fun HomeScreen(
                         }
                     }
                 }
+            },
+        )
+        return
+    }
+
+    // DeepLook 布局（DeepSeek 移动端 1:1）：鲸鱼顶栏 + 大标题 + iOS 分组卡片 + 底部三 tab 导航
+    if (DshThemeStyle == ThemeStyle.DEEPLOOK) {
+        DeepLookHomeLayout(
+            sessions = sessions,
+            workspaces = workspaces,
+            selectedWorkspaceId = selectedWorkspaceId,
+            onWorkspaceClick = { workspaceSheet = true },
+            input = input,
+            onInputChange = { input = it },
+            sending = sending,
+            onSend = { send() },
+            sendError = sendError,
+            preset = preset,
+            presets = presets,
+            presetMenu = presetMenu,
+            onPresetMenuChange = { presetMenu = it },
+            pendingImages = pendingImages,
+            onPickImage = { imagePicker.launch("image/*") },
+            onRemoveImage = { i -> pendingImages = pendingImages.filterIndexed { j, _ -> j != i } },
+            onSessionClick = onSessionClick,
+            onSettings = onSettings,
+            onRefresh = {
+                refreshSessions()
+                refreshArchived()
             },
         )
         return
@@ -1553,6 +1584,448 @@ private fun ClaudeHomeLayout(
             }
         }
     }
+}
+
+// ════════════════════════ DeepLook 布局（DeepSeek 移动端 1:1）════════════════════════
+// 依据 design/dsh-mobile-ui-spec.md（5 张实机截图提取）：
+// #f8f8f8 页面底 + 纯白分组卡片（圆角16 阴影1dp）+ 品牌蓝 #4d6bfe + 深蓝黑 #0d1b2a 选中态
+// 顶栏 46dp 鲸鱼 logo + 大标题 30/700 + 底部导航 78dp 三 tab（会话 | ⊕新会话(深蓝黑方块) | 设置）
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@Composable
+private fun DeepLookHomeLayout(
+    sessions: List<SessionSummary>,
+    workspaces: List<WorkspaceView>,
+    selectedWorkspaceId: String,
+    onWorkspaceClick: () -> Unit,
+    input: String,
+    onInputChange: (String) -> Unit,
+    sending: Boolean,
+    onSend: () -> Unit,
+    sendError: String?,
+    preset: String,
+    presets: List<Pair<String, String>>,
+    presetMenu: Boolean,
+    onPresetMenuChange: (Boolean) -> Unit,
+    pendingImages: List<DshConnection.ImagePart>,
+    onPickImage: () -> Unit,
+    onRemoveImage: (Int) -> Unit,
+    onSessionClick: (String) -> Unit,
+    onSettings: () -> Unit,
+    onRefresh: () -> Unit,
+) {
+    val deep = Color(0xFF0D1B2A)
+    var tab by remember { mutableStateOf("new") } // new | sessions
+    val wsLabel = workspaces.firstOrNull { it.workspaceId == selectedWorkspaceId }
+        ?.let { it.title.ifBlank { it.path } } ?: "标准模式"
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+    ) {
+        // ── 顶栏 46dp：深蓝黑鲸鱼 logo(30 圆角9) + DeepSeek Harness(17/600) + 设置 ──
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(46.dp)
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier
+                    .size(30.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(deep),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(
+                    painter = androidx.compose.ui.res.painterResource(R.drawable.ic_launcher_foreground),
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "DeepSeek Harness",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                Icons.Default.Settings,
+                "设置",
+                Modifier
+                    .size(22.dp)
+                    .clickable { onSettings() },
+                tint = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+
+        // ── 大标题 30/700 ──
+        Text(
+            if (tab == "new") "新会话" else "会话",
+            style = MaterialTheme.typography.headlineLarge,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        )
+
+        // ── 内容区（分组列表）──
+        Column(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState()),
+        ) {
+            if (tab == "new") {
+                // 分组「工作区」
+                DeepLookGroupTitle("工作区")
+                DeepLookCard {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { onWorkspaceClick() }
+                            .padding(horizontal = 14.dp, vertical = 13.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Default.Dashboard,
+                            null,
+                            Modifier.size(20.dp),
+                            tint = deep,
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            wsLabel,
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Icon(
+                            Icons.Default.ChevronRight,
+                            null,
+                            Modifier.size(16.dp),
+                            tint = Color(0xFFB4B4B8),
+                        )
+                    }
+                }
+
+                // 分组「给智能体派个任务」
+                DeepLookGroupTitle("给智能体派个任务")
+                DeepLookCard {
+                    Column(Modifier.padding(14.dp)) {
+                        OutlinedTextField(
+                            value = input,
+                            onValueChange = onInputChange,
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("描述你的任务…") },
+                            minLines = 3,
+                            maxLines = 6,
+                            shape = RoundedCornerShape(12.dp),
+                            keyboardOptions = KeyboardOptions.Default,
+                        )
+                        if (pendingImages.isNotEmpty()) {
+                            Spacer(Modifier.height(8.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                pendingImages.forEachIndexed { i, _ ->
+                                    AssistChip(
+                                        onClick = { onRemoveImage(i) },
+                                        label = { Text("图片 ${i + 1}") },
+                                        trailingIcon = {
+                                            Icon(Icons.Default.Close, null, Modifier.size(14.dp))
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                        sendError?.let {
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                it,
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            IconButton(onClick = onPickImage) {
+                                Icon(Icons.Default.AttachFile, null)
+                            }
+                            Box {
+                                AssistChip(
+                                    onClick = { onPresetMenuChange(true) },
+                                    modifier = Modifier.widthIn(max = 150.dp),
+                                    label = {
+                                        Text(
+                                            presets.firstOrNull { it.first == preset }?.second ?: preset,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            style = MaterialTheme.typography.labelMedium,
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.SmartToy, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                                    },
+                                )
+                                DropdownMenu(
+                                    expanded = presetMenu,
+                                    onDismissRequest = { onPresetMenuChange(false) },
+                                ) {
+                                    presets.forEach { (id, name) ->
+                                        DropdownMenuItem(
+                                            text = { Text(name) },
+                                            onClick = { onPresetMenuChange(false) },
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.weight(1f))
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        // 主按钮：全宽 50dp 高、圆角 13、品牌蓝、白字 16/600
+                        Button(
+                            onClick = onSend,
+                            enabled = (input.isNotBlank() || pendingImages.isNotEmpty()) && !sending,
+                            shape = RoundedCornerShape(13.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp),
+                        ) {
+                            if (sending) {
+                                CircularProgressIndicator(
+                                    Modifier.size(18.dp),
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                    strokeWidth = 2.dp,
+                                )
+                            } else {
+                                Icon(Icons.AutoMirrored.Filled.Send, null, Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    "发送",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+                // 会话列表分组卡片
+                DeepLookGroupTitle("最近会话")
+                if (sessions.isEmpty()) {
+                    // 空状态：72dp 虚线圆环 + 内部图标 + 「暂无会话」14sp
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 48.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Box(Modifier.size(72.dp), contentAlignment = Alignment.Center) {
+                            Canvas(Modifier.fillMaxSize()) {
+                                drawCircle(
+                                    color = Color(0xFFC9C9CD),
+                                    style = Stroke(
+                                        width = 2.dp.toPx(),
+                                        pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(
+                                            floatArrayOf(8f, 8f), 0f,
+                                        ),
+                                    ),
+                                )
+                            }
+                            Icon(
+                                Icons.Default.ChatBubbleOutline,
+                                null,
+                                Modifier.size(28.dp),
+                                tint = Color(0xFFC9C9CD),
+                            )
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            "暂无会话",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF8A8A8E),
+                        )
+                    }
+                } else {
+                    DeepLookCard {
+                        sessions.forEachIndexed { index, s ->
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onSessionClick(s.sessionId) }
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        chatGptTitleOf(s),
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+                                            .format(Date(s.updatedAt)),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color(0xFF8A8A8E),
+                                    )
+                                }
+                                if (s.running) {
+                                    Box(
+                                        Modifier
+                                            .size(8.dp)
+                                            .background(MaterialTheme.colorScheme.primary, CircleShape),
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                }
+                                Icon(
+                                    Icons.Default.ChevronRight,
+                                    null,
+                                    Modifier.size(16.dp),
+                                    tint = Color(0xFFB4B4B8),
+                                )
+                            }
+                            if (index < sessions.lastIndex) {
+                                HorizontalDivider(
+                                    color = MaterialTheme.colorScheme.surfaceVariant,
+                                    thickness = 1.dp,
+                                    modifier = Modifier.padding(horizontal = 14.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+        }
+
+        // ── 底部导航 78dp：三 tab 等宽（会话 | ⊕新会话 深蓝黑方块高亮 | 设置）──
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .background(
+                    MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                )
+                .padding(top = 8.dp)
+                .navigationBarsPadding()
+                .height(70.dp),
+        ) {
+            // 会话
+            DeepLookTab(modifier = Modifier.weight(1f),
+                selected = tab == "sessions",
+                onClick = { tab = "sessions" },
+                deep = deep,
+            ) {
+                Icon(
+                    Icons.Default.ChatBubbleOutline,
+                    null,
+                    Modifier.size(24.dp),
+                    tint = if (tab == "sessions") deep else Color(0xFF8A8A8E),
+                )
+                Text(
+                    "会话",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (tab == "sessions") deep else Color(0xFF8A8A8E),
+                )
+            }
+            // 新会话（深蓝黑圆角方块 + 白色加号，当前高亮）
+            DeepLookTab(modifier = Modifier.weight(1f),
+                selected = tab == "new",
+                onClick = { tab = "new" },
+                deep = deep,
+            ) {
+                Box(
+                    Modifier
+                        .size(width = 44.dp, height = 28.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(deep),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Default.Add, null, Modifier.size(20.dp), tint = Color.White)
+                }
+                Text(
+                    "新会话",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = deep,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            // 设置
+            DeepLookTab(modifier = Modifier.weight(1f),
+                selected = false,
+                onClick = { onSettings() },
+                deep = deep,
+            ) {
+                Icon(
+                    Icons.Default.Settings,
+                    null,
+                    Modifier.size(24.dp),
+                    tint = Color(0xFF8A8A8E),
+                )
+                Text(
+                    "设置",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFF8A8A8E),
+                )
+            }
+        }
+    }
+}
+
+/** 分组标题：14/600 次级文字 */
+@Composable
+private fun DeepLookGroupTitle(title: String) {
+    Text(
+        title,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 8.dp),
+    )
+}
+
+/** 分组卡片：纯白、圆角 16、极浅投影 */
+@Composable
+private fun DeepLookCard(content: @Composable ColumnScope.() -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 1.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+    ) {
+        Column(content = content)
+    }
+}
+
+/** 底部导航 tab（等宽；weight 由调用处传入） */
+@Composable
+private fun DeepLookTab(
+    modifier: Modifier = Modifier,
+    selected: Boolean,
+    onClick: () -> Unit,
+    deep: Color,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(
+        modifier
+            .fillMaxHeight()
+            .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+        content = content,
+    )
 }
 
 @Composable
