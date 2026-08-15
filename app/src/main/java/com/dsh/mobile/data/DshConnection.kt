@@ -73,6 +73,7 @@ class DshConnection(private val appContext: Context? = null) {
     private var streamClient: OkHttpClient = OkHttpClient()
     private var onAttempt: ((AttemptInfo) -> Unit)? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var connectJob: Job? = null
 
     private val _state = MutableStateFlow<State>(State.Disconnected)
     val state: StateFlow<State> = _state.asStateFlow()
@@ -85,6 +86,7 @@ class DshConnection(private val appContext: Context? = null) {
 
     private var baseUrl = ""
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val retryScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /** approvalId → server-request rpcId（应答时回显） */
     private val pendingApprovalRpc = mutableMapOf<String, String>()
@@ -109,7 +111,7 @@ class DshConnection(private val appContext: Context? = null) {
         streamClient = stream
         _state.value = State.Connecting(normalized)
         registerNetworkCallback()
-        scope.launch {
+        connectJob = scope.launch {
             var attempt = 0
             while (isActive) {
                 val result = try {
@@ -207,7 +209,7 @@ class DshConnection(private val appContext: Context? = null) {
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 // 新网络可用：若处于重连等待中，立即重置退避重试
-                scope.launch { retryNow() }
+                triggerImmediateRetry()
             }
         }
         networkCallback = cb
@@ -223,15 +225,18 @@ class DshConnection(private val appContext: Context? = null) {
     }
 
     @Volatile private var retryNowPending = false
-    private suspend fun retryNow() {
+    private fun triggerImmediateRetry() {
         if (retryNowPending) return
         retryNowPending = true
-        // 取消当前连接协程的子任务（探测/延迟），由 connect 循环重建
-        scope.coroutineContext.cancelChildren()
-        delay(300)
-        retryNowPending = false
-        currentProfile?.let { p ->
-            if (_state.value is State.Error) connect(p, onAttempt)
+        retryScope.launch {
+            try {
+                val p = currentProfile ?: return@launch
+                if (_state.value !is State.Error) return@launch
+                connectJob?.cancel()          // 取消正在等待退避的旧循环
+                connect(p, onAttempt)         // 立即重建（内部会新起连接循环）
+            } finally {
+                retryNowPending = false
+            }
         }
     }
 
@@ -690,5 +695,6 @@ class DshConnection(private val appContext: Context? = null) {
     fun destroy() {
         disconnectInternal()
         scope.cancel()
+        retryScope.cancel()
     }
 }
