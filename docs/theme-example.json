@@ -1,0 +1,18 @@
+{
+  "id": "aurora",
+  "name": "极光紫",
+  "light": false,
+  "colors": {
+    "background": "#14101F",
+    "surface": "#1E1830",
+    "surfaceHigh": "#2A2240",
+    "brand": "#9D7BFF",
+    "brandSoft": "#B79CFF",
+    "textPrimary": "#F0EAFB",
+    "textSecondary": "#B4A6D4",
+    "border": "#3A3058",
+    "success": "#4FC3A1",
+    "warn": "#E8C46E",
+    "error": "#E87777"
+  }
+}

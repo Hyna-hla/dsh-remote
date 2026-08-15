@@ -3,11 +3,18 @@ package com.dsh.mobile.ui.screens
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -16,6 +23,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -25,10 +34,13 @@ import com.dsh.mobile.data.SettingsStore
 import com.dsh.mobile.service.DshConnectionService
 import com.dsh.mobile.ui.theme.DshError
 import com.dsh.mobile.ui.theme.DshSuccess
+import com.dsh.mobile.ui.theme.ThemeRegistry
+import com.dsh.mobile.ui.theme.ThemeRepository
+import com.dsh.mobile.ui.theme.ThemeStore
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(
     connection: DshConnection,
@@ -44,8 +56,29 @@ fun SettingsScreen(
     var themeMode by remember { mutableStateOf("blue") }
     var autoModel by remember { mutableStateOf(true) }
     var notifGranted by remember { mutableStateOf(true) }
+    var themeImportError by remember { mutableStateOf<String?>(null) }
+    val customThemes by ThemeRepository.themes.collectAsState()
     val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { g ->
         notifGranted = g
+    }
+    val themePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        themeImportError = null
+        val bytes = runCatching {
+            context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        }.getOrNull()
+        if (bytes == null || bytes.isEmpty()) {
+            themeImportError = "无法读取主题文件"
+            return@rememberLauncherForActivityResult
+        }
+        // 自动识别：PK 魔数 = zip 主题包，否则按 JSON 文本
+        val def = ThemeRepository.importPayload(bytes, context)
+        if (def == null) {
+            themeImportError = "主题格式无效（zip 包需含 theme.json；JSON 需完整色板，格式见 docs/theme-package-format.md）"
+            return@rememberLauncherForActivityResult
+        }
+        themeMode = def.id
+        scope.launch { settingsStore.setThemeMode(def.id) }
     }
 
     LaunchedEffect(Unit) {
@@ -115,19 +148,73 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf(
-                            "blue" to "深蓝",
-                            "black" to "纯黑",
-                            "warm" to "暖白",
-                        ).forEach { (mode, label) ->
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ThemeRegistry.available(customThemes).forEach { t ->
                             FilterChip(
-                                selected = themeMode == mode,
+                                selected = themeMode == t.id,
                                 onClick = {
-                                    themeMode = mode
-                                    scope.launch { settingsStore.setThemeMode(mode) }
+                                    themeMode = t.id
+                                    scope.launch { settingsStore.setThemeMode(t.id) }
                                 },
-                                label = { Text(label) },
+                                label = { Text(t.name) },
+                            )
+                        }
+                    }
+                    if (customThemes.isNotEmpty()) {
+                        customThemes.forEach { t ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                val preview = remember(t.id) {
+                                    runCatching {
+                                        ThemeStore(context).previewFile(t.id)?.let { BitmapFactory.decodeFile(it.absolutePath) }
+                                    }.getOrNull()
+                                }
+                                if (preview != null) {
+                                    Image(
+                                        preview.asImageBitmap(), null,
+                                        Modifier.size(22.dp).clip(RoundedCornerShape(4.dp)),
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                } else {
+                                    Box(
+                                        Modifier.size(12.dp).clip(CircleShape).background(t.colors.brand),
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                }
+                                Text(
+                                    t.name + (t.version?.let { " v" + it } ?: "") + "（自定义）",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                IconButton(
+                                    onClick = {
+                                        if (themeMode == t.id) {
+                                            themeMode = "blue"
+                                            scope.launch { settingsStore.setThemeMode("blue") }
+                                        }
+                                        ThemeRepository.remove(t.id, context)
+                                    },
+                                ) {
+                                    Icon(
+                                        Icons.Default.Delete, "删除主题",
+                                        Modifier.size(16.dp), tint = DshError,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedButton(onClick = { themePicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/json", "text/plain", "application/octet-stream")) }) {
+                            Icon(Icons.Default.FileOpen, null, Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("导入主题 (zip/json)")
+                        }
+                        themeImportError?.let {
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                it,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = DshError,
                             )
                         }
                     }

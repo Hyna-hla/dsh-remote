@@ -22,3 +22,11 @@ build-log.txt
 # OS
 .DS_Store
 Thumbs.db
+
+# 大体积 debug 安装包不进仓库（>50MB，走本地留档 / Release 附件 / Play）
+release/*.apk
+!release/DSH-Remote-v1.0.15-min.apk
+
+# 大体积 debug 安装包不进仓库（>50MB，走本地留档 / Release 附件 / Play）
+release/*.apk
+!release/DSH-Remote-v1.0.15-min.apk

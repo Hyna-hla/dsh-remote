@@ -40,6 +40,9 @@ import com.dsh.mobile.data.AppearanceConfig
 import com.dsh.mobile.data.SettingsStore
 import com.dsh.mobile.ui.navigation.AppNavigation
 import com.dsh.mobile.ui.theme.DshTheme
+import com.dsh.mobile.ui.theme.ThemeDef
+import com.dsh.mobile.ui.theme.ThemeRegistry
+import com.dsh.mobile.ui.theme.ThemeRepository
 import com.dsh.mobile.ui.theme.isLightMode
 import com.dsh.mobile.ui.theme.surfaceAlphaFor
 
@@ -68,24 +71,28 @@ class MainActivity : ComponentActivity() {
         val app = application as DshApplication
         val settingsStore = SettingsStore(this)
         consumeDeepLink(intent)
+        ThemeRepository.init(applicationContext)
 
         setContent {
             val view = LocalView.current
             val context = LocalContext.current
             val themeModeRaw by settingsStore.themeMode.collectAsState(initial = "blue")
+            val customThemes by ThemeRepository.themes.collectAsState()
             // 兼容旧值：dark→blue，light→warm，system→blue
             val themeMode = when (themeModeRaw) {
                 "warm", "light" -> "warm"
-                "black" -> "black"
-                else -> "blue"
+                else -> themeModeRaw
+            }
+            val theme: ThemeDef = remember(themeMode, customThemes) {
+                ThemeRegistry.resolve(themeMode, customThemes)
             }
             val appearance by settingsStore.appearance.collectAsState(initial = AppearanceConfig())
             val bgUri = appearance.bgUri?.let { runCatching { Uri.parse(it) }.getOrNull() }
             val bgActive = bgUri != null
 
-            // 状态栏图标对比（暖白=深色图标）
+            // 状态栏图标对比（浅色主题=深色图标）
             SideEffect {
-                WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = isLightMode(themeMode)
+                WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = theme.light
             }
 
             // Android 13+ 通知运行时权限（缺权限时通知静默不显示）
@@ -101,7 +108,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            DshTheme(mode = themeMode, bgActive = bgActive, glass = appearance.panelGlass) {
+            DshTheme(theme = theme, bgActive = bgActive, glass = appearance.panelGlass) {
                 val (bgAlpha, _, _) = surfaceAlphaFor(appearance.panelGlass, bgActive)
 
                 Box(Modifier.fillMaxSize()) {
@@ -142,7 +149,7 @@ class MainActivity : ComponentActivity() {
                                 Modifier
                                     .fillMaxSize()
                                     .background(
-                                        (if (isLightMode(themeMode)) Color.White else Color.Black)
+                                        (if (theme.light) Color.White else Color.Black)
                                             .copy(alpha = appearance.bgDim.coerceIn(0f, 0.85f)),
                                     ),
                             )

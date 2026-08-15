@@ -13,7 +13,7 @@
 - **审批与问答**：审批横幅（允许一次/拒绝）、问答题卡片（单选/多选）
 - **自适应模型**：设置里可开「自适应模型」（默认开）——短问答自动走 Flash，复杂任务（长文本或命中"分析/重构/审查"等关键词）自动切 Pro，发送前完成切换
 - **模型与权限**：会话内切换模型 / 思考程度（reasoningEffort）、审查严格度（只读 / 工作区可写 / 完全访问）
-- **三主题**：DeepSeek 经典深蓝 / 纯黑（AMOLED）/ 暖白（护眼米白），状态栏自动适配
+- **可拓展主题**：内置 DeepSeek 经典深蓝 / 纯黑（AMOLED）/ 暖白（护眼米白）三套；支持导入**自定义主题包**（zip，含 theme.json + 可选预览图），同名导入即**热替换更新**（无需重启），设置页见缩略图/版本/删除；单文件 theme.json 也可直接导入
 - **背景图与面板**：设置 → 外观可选本地背景图 + 四档一键预设（通透玻璃/电影质感/纯净原图/柔和梦境）；图像不透明度/模糊/饱和度/蒙层浓度独立可调，**面板通透**玻璃化（对齐桌面 dsh-beautify 模板）；屏幕亮度 = 夜间模式
 - **图片消息**：📎 选择图片（PNG/JPEG/WebP/GIF ≤4MB）随消息发送，新对话与历史会话均支持
 - **技能选择**：📚 技能列表（skill.list），点选自动插入"请使用 X 技能"到输入框
@@ -21,6 +21,7 @@
 
 ## 更新日志
 
+- **v1.0.15**：可拓展主题系统——内置三主题注册表化，支持导入 zip 主题包（theme.json + 预览图 + 说明），同 id 导入 = 热替换更新，运行时即时生效；设置页主题管理（缩略图/版本/删除）；Play 上架准备（上传密钥、签名 AAB、隐私政策与上架清单见 docs/）
 - **v1.0.14**：通知功能修复——Android 13+ 运行时权限申请（此前无权限通知静默丢失）、审批/问答去重、**任务完成提醒**、点击通知**深链直达会话**；主题改为三色（深蓝/纯黑/暖白）；背景图性能优化（按屏幕采样解码 + 单次缓存，不再每次重组整图重解码）；新增自适应模型（按任务难度自动切 Flash/Pro）；PC 端插件 dsh-remote-access v1.1.2（本地二维码、探测缓存、微信桥优化）
 - **v1.0.13**：毛玻璃面板与背景图增强——模糊/饱和度/蒙层/面板通透度、四档一键预设，对齐桌面 dsh-beautify 模板；背景图默认满清晰度显示
 - **v1.0.12**：修复会话记录加载慢——首屏历史 10→3 条、chunk 线性合并去重、loadMore 5 条/页
@@ -36,9 +37,11 @@
 
 ## 安装（APK）
 
-- 最新构建产物：[release/DSH-Remote-v1.0.14.apk](release/DSH-Remote-v1.0.14.apk)（debug 签名，约 60MB，与历次安装包一致）
+- 仓库内提供 R8 精简版：[release/DSH-Remote-v1.0.15-min.apk](release/DSH-Remote-v1.0.15-min.apk)（已签名，约 4MB，可直接安装）
+- **debug 主包（约 60MB，与历次安装包一致）**：因 GitHub 单文件 >50MB 限制不进仓库，本地留档于 `release/DSH-Remote-v1.0.15.apk`（构建产物亦在 `app/build/outputs/apk/debug/`）；分发走 GitHub Release 附件或 Google Play
 - 传到手机 → 允许「未知来源」安装 → 填服务器地址 → 连接
-- 另有 R8 精简版（约 4MB）：[release/DSH-Remote-v1.0.14-min.apk](release/DSH-Remote-v1.0.14-min.apk)，体积小但未经设备实测，推荐主用 debug 包
+- Google Play 上架包（已签名 AAB）：[release/DSH-Remote-v1.0.15.aab](release/DSH-Remote-v1.0.15.aab)；上架清单见 [docs/play-listing.md](docs/play-listing.md)
+- 自定义主题包格式与示例：[docs/theme-package-format.md](docs/theme-package-format.md)、[docs/aurora.dshTheme.zip](docs/aurora.dshTheme.zip)
 
 ## PC 端使用
 

@@ -30,6 +30,7 @@ import com.dsh.mobile.ui.theme.DshBrand
 import com.dsh.mobile.ui.theme.DshSuccess
 import com.dsh.mobile.ui.theme.DshWarn
 import com.dsh.mobile.ui.theme.DshShape
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
@@ -98,7 +99,10 @@ fun HomeScreen(
             try {
                 sessions = connection.listSessions()
                     .sortedByDescending { it.updatedAt }
-            } catch (_: Exception) {}
+                listError = null
+            } catch (e: Exception) {
+                listError = "会话列表加载失败：${e.message}"
+            }
         }
     }
 
@@ -108,7 +112,9 @@ fun HomeScreen(
                 val w = connection.workspaceList()
                 workspaces = w.items
                 archivedIds = w.archivedSessionIds
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                listError = "工作区加载失败：${e.message}"
+            }
         }
     }
 
@@ -127,17 +133,30 @@ fun HomeScreen(
         }
     }
 
-    // 事件驱动的列表刷新
+    // 事件驱动的列表刷新（断线重连成功后立即补拉，避免列表停留在空态）
     LaunchedEffect(Unit) {
         connection.events.collect { ev ->
             when (ev) {
                 is DshConnection.Event.SessionAdded,
                 is DshConnection.Event.SessionRemoved,
                 is DshConnection.Event.SessionStatus,
-                -> refreshSessions()
+                is DshConnection.Event.Reconnected,
+                -> {
+                    refreshSessions()
+                    refreshArchived()
+                }
                 else -> {}
             }
         }
+    }
+
+    // 从设置页/会话页返回、App 回前台时强制刷新会话列表，
+    // 修复「从设置界面出来之后会话加载不出来」：返回时组合重建但拉取被静默失败吞掉后
+    // 列表停在空态，必须在这里兜底重拉。
+    LifecycleResumeEffect(Unit) {
+        refreshSessions()
+        refreshArchived()
+        onPauseOrDispose {}
     }
 
     fun send() {
