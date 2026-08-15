@@ -33,6 +33,8 @@ class DshConnectionService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var watcher: DshConnection? = null
     private var watchJob: Job? = null
+    private var eventsJob: Job? = null
+    private var stateJob: Job? = null
     private var notificationSeq = 0
 
     /** 会话活跃状态（运行中→空闲迁移触发完成通知） */
@@ -102,6 +104,8 @@ class DshConnectionService : Service() {
             settings.activeProfileId
                 .distinctUntilChanged()
                 .collect { activeId ->
+                    eventsJob?.cancel()
+                    stateJob?.cancel()
                     watcher?.disconnect()
                     watcher = null
                     seenApprovals.clear()
@@ -118,8 +122,8 @@ class DshConnectionService : Service() {
                     }
                     val connection = DshConnection(this@DshConnectionService)
                     watcher = connection
-                    launch { connection.events.collect { handle(it) } }
-                    launch {
+                    eventsJob = launch { connection.events.collect { handle(it) } }
+                    stateJob = launch {
                         connection.state.collect { st ->
                             val text = when (st) {
                                 is DshConnection.State.Connected -> "已连接 " + st.baseUrl
@@ -233,6 +237,8 @@ class DshConnectionService : Service() {
     }
 
     override fun onDestroy() {
+        eventsJob?.cancel()
+        stateJob?.cancel()
         watcher?.disconnect()
         watcher = null
         watchJob?.cancel()
