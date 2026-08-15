@@ -133,15 +133,25 @@ fun ConnectScreen(connection: DshConnection) {
         onConnectedActions()
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            // 让开状态栏/灵动岛：整页内容（含右上角扫码按钮）从状态栏下方开始
+            .statusBarsPadding(),
+    ) {
+        // 滚动容器包住满高 Column：内容垂直居中（上下弹性留白），小屏高度不足时自动可滚动
+        Box(
+            Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .verticalScroll(rememberScrollState()),
         ) {
-            Spacer(Modifier.height(72.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Spacer(Modifier.weight(1f).height(48.dp))
 
             Surface(
                 shape = DshShape.card,
@@ -280,9 +290,12 @@ fun ConnectScreen(connection: DshConnection) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             )
             Spacer(Modifier.height(20.dp))
+            // 底部弹性留白：与顶部对称，内容整体垂直居中
+            Spacer(Modifier.weight(1f).height(48.dp))
+            }
         }
 
-        // 右上角扫码按钮
+        // 右上角扫码按钮（根 Box 已做 statusBarsPadding，不会再被状态栏压住）
         IconButton(
             onClick = { startScan() },
             modifier = Modifier

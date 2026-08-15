@@ -61,3 +61,5 @@ Task 3: minor (deferred): key 字面量重复（companion private vs 迁移内�
 
 Task 3: fix round 1/5 (1 addressed, 0 open — writeProfiles 迁移覆盖; commits a78432a..472e080)
 Task 3: complete (commits 62eb722..472e080, review clean, 3 deferred minors)
+
+Task 4: 实现者 DONE_WITH_CONCERNS——CA 合成正确性疑虑。Ruling: 计划裁定版仍有缺陷（ctx.init(null,null,null) 使导入 CA 不参与握手信任），spec §5.3 权威：改为 CompositeTrustManager 传入 ctx.init + bytes 版纯函数 mergedCaContext；评审前先修（fix round 0）。
