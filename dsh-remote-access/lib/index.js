@@ -103,6 +103,19 @@ export const apply = (ctx) => {
   bridge.init().catch((err) => log("init failed", err));
   ctx.effect(() => () => bridge.dispose(), "dsh-remote-access: wechat bridge");
 
+  // 装机自检：cpolar 未安装时后台预下载（延迟 10s，避开启动高峰），
+  // 用户打开设置页时大概率已就绪；本机已有 cpolar（E:\coplar / PATH）则跳过。
+  setTimeout(() => {
+    findCpolar()
+      .then((exe) => {
+        if (!exe) {
+          log("cpolar 未安装，后台预下载（装机自检）…");
+          installCpolar();
+        }
+      })
+      .catch(() => {});
+  }, 10000);
+
   reg({
     kind: "exact",
     path: "/api/remote-access/wx/status",
