@@ -8,12 +8,6 @@ import kotlinx.coroutines.flow.map
 
 private val Context.dataStore by preferencesDataStore("dsh-mobile-settings")
 
-data class ConnectionConfig(
-    /** 服务器基础地址，如 http://192.168.1.100:8787 或 cpolar 域名 */
-    val serverUrl: String = "",
-    val autoConnect: Boolean = true,
-)
-
 /** 假 Pro 订阅状态（趣味彩蛋：真实 token 消耗扣减假订阅额度） */
 data class ProState(
     /** 当前套餐 id（空 = 未订阅） */
@@ -45,8 +39,6 @@ data class AppearanceConfig(
 class SettingsStore(private val context: Context) {
 
     companion object {
-        private val URL_KEY = stringPreferencesKey("server_url")
-        private val AUTO_KEY = booleanPreferencesKey("auto_connect")
         private val DARK_MODE_KEY = booleanPreferencesKey("dark_mode")
         private val BG_URI_KEY = stringPreferencesKey("bg_uri")
         private val BG_OPACITY_KEY = floatPreferencesKey("bg_opacity")
@@ -67,13 +59,6 @@ class SettingsStore(private val context: Context) {
         private val PRO_SINCE_KEY = longPreferencesKey("pro_since")
         private val PROFILE_LIST_KEY = stringPreferencesKey("connection_profiles")
         private val ACTIVE_PROFILE_KEY = stringPreferencesKey("active_profile_id")
-    }
-
-    val connectionConfig: Flow<ConnectionConfig> = context.dataStore.data.map { prefs ->
-        ConnectionConfig(
-            serverUrl = prefs[URL_KEY] ?: "",
-            autoConnect = prefs[AUTO_KEY] ?: true,
-        )
     }
 
     val profiles: Flow<List<HostProfile>> = context.dataStore.data.map { prefs ->
@@ -180,13 +165,6 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setWorkspaceId(id: String) {
         context.dataStore.edit { it[WORKSPACE_ID_KEY] = id }
-    }
-
-    suspend fun saveConnection(config: ConnectionConfig) {
-        context.dataStore.edit { prefs ->
-            prefs[URL_KEY] = config.serverUrl
-            prefs[AUTO_KEY] = config.autoConnect
-        }
     }
 
     suspend fun setDarkMode(enabled: Boolean) {

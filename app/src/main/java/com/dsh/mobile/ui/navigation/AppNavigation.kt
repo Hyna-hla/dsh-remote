@@ -21,6 +21,9 @@ sealed class Screen(val route: String) {
     }
     data object Settings : Screen("settings")
     data object Pro : Screen("pro")
+    data object HostProfile : Screen("hostProfile/{profileId}") {
+        fun createRoute(profileId: String?) = "hostProfile/${profileId ?: "new"}"
+    }
 }
 
 @Composable
@@ -63,7 +66,10 @@ fun AppNavigation(
         startDestination = Screen.Connect.route,
     ) {
         composable(Screen.Connect.route) {
-            ConnectScreen(connection = connection)
+            ConnectScreen(
+                connection = connection,
+                onEditHost = { id -> navController.navigate(Screen.HostProfile.createRoute(id)) },
+            )
         }
         composable(Screen.Home.route) {
             HomeScreen(
@@ -94,6 +100,15 @@ fun AppNavigation(
         }
         composable(Screen.Pro.route) {
             ProScreen(onBack = { navController.popBackStack() })
+        }
+        composable(
+            route = Screen.HostProfile.route,
+            arguments = listOf(navArgument("profileId") { type = NavType.StringType }),
+        ) {
+            HostProfileScreen(
+                profileId = it.arguments?.getString("profileId")?.takeIf { v -> v != "new" },
+                onBack = { navController.popBackStack() },
+            )
         }
     }
 }
