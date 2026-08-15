@@ -30,7 +30,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
+import com.dsh.mobile.data.ApkInstaller
 import com.dsh.mobile.data.AppearanceConfig
 import com.dsh.mobile.data.DshConnection
 import com.dsh.mobile.data.ReleaseInfo
@@ -603,15 +603,11 @@ private fun UpdateSection(
     val install: () -> Unit = {
         val f = apkFile
         if (f != null && f.exists()) {
-            runCatching {
-                val uri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", f)
-                val intent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(uri, "application/vnd.android.package-archive")
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                context.startActivity(intent)
-            }.onFailure {
-                phase = "error"; err = "打开安装器失败：" + it.message
+            // 多策略安装：系统安装器（INSTALL_PACKAGE / VIEW 双 intent）→ PackageInstaller 会话兜底
+            val error = ApkInstaller.install(context, f)
+            if (error != null) {
+                phase = "error"
+                err = error
             }
         }
     }

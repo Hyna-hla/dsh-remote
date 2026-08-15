@@ -1,4 +1,4 @@
-# harness-remote — 第三方 DeepSeek Harness 手机遥控端
+﻿# harness-remote — 第三方 DeepSeek Harness 手机遥控端
 
 > ⚠️ **非官方项目**：本仓库是个人开发的第三方客户端，与 DeepSeek 官方无关，未使用其商标、未经授权背书，仅供个人学习与自用。
 
@@ -21,6 +21,9 @@
 
 ## 更新日志
 
+- **v1.0.24**：更新通道修复——
+  - **安装不再失效**：点击安装改为多策略——系统安装器双 intent（`ACTION_INSTALL_PACKAGE` → `ACTION_VIEW`，先探测可响应者）+ **PackageInstaller 会话安装兜底**（同签名自更新直接装，无需「未知来源」授权），解决部分 ROM / Android 15+ 点击安装无反应的问题；失败时显示具体原因
+  - **镜像下载（国内免代理）**：检查更新 API 与 APK 下载都走 GitHub 加速镜像（ghfast.top → gh-proxy.com → ghproxy.net → 直连兜底），每个源 25s 硬超时、失败自动切换下一个，不开代理也能检查/下载更新
 - **v1.0.23**：主题系统升级（不再只是换色）——
   - **文字样式体系**：废弃默认 Typography，全 App 使用精调排版（标题收紧字距加粗、正文 15sp/22sp 行高、标签小字加字距、层级分明），消息/列表/卡片观感对齐官方 DSH 设计语言
   - **装饰细节**：品牌渐变主按钮（连接/发送/审批/提交）、输入卡与 hero 区品牌渐变装饰条、卡片品牌淡色描边、会话卡双行预览 + 模型徽章 chip + 运行态脉冲呼吸点、空态官方鲸鱼 logo
@@ -56,10 +59,10 @@
 
 ## 安装（APK）
 
-- 仓库内提供 R8 精简版：[release/DSH-Remote-v1.0.23-min.apk](release/DSH-Remote-v1.0.23-min.apk)（已签名，约 4.6MB，可直接安装）
-- **debug 主包（约 62MB，与历次安装包一致）**：因 GitHub 单文件 >50MB 限制不进仓库，本地留档于 `release/DSH-Remote-v1.0.23.apk`（构建产物亦在 `app/build/outputs/apk/debug/`）；分发走 GitHub Release 附件或 Google Play
+- 仓库内提供 R8 精简版：[release/DSH-Remote-v1.0.24-min.apk](release/DSH-Remote-v1.0.24-min.apk)（已签名，约 4.6MB，可直接安装）
+- **debug 主包（约 62MB，与历次安装包一致）**：因 GitHub 单文件 >50MB 限制不进仓库，本地留档于 `release/DSH-Remote-v1.0.24.apk`（构建产物亦在 `app/build/outputs/apk/debug/`）；分发走 GitHub Release 附件或 Google Play
 - 传到手机 → 允许「未知来源」安装 → 填服务器地址 → 连接
-- Google Play 上架包（已签名 AAB）：[release/DSH-Remote-v1.0.23.aab](release/DSH-Remote-v1.0.23.aab)；上架清单见 [docs/play-listing.md](docs/play-listing.md)
+- Google Play 上架包（已签名 AAB）：[release/DSH-Remote-v1.0.24.aab](release/DSH-Remote-v1.0.24.aab)；上架清单见 [docs/play-listing.md](docs/play-listing.md)
 - 自定义主题包格式与示例：[docs/theme-package-format.md](docs/theme-package-format.md)、[docs/aurora.dshTheme.zip](docs/aurora.dshTheme.zip)
 
 ## PC 端使用
