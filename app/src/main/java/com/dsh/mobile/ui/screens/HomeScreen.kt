@@ -60,6 +60,7 @@ fun HomeScreen(
     var pendingImages by remember { mutableStateOf<List<DshConnection.ImagePart>>(emptyList()) }
     val context = LocalContext.current
     val settingsStore = remember { SettingsStore(context) }
+    val cache = remember { HistoryCache(context) }
 
     // —— 新对话工作区选择 ——
     var selectedWorkspaceId by remember { mutableStateOf("") }
@@ -95,13 +96,19 @@ fun HomeScreen(
     val connState by connection.state.collectAsState()
 
     fun refreshSessions() {
+        // 冷热分离：先渲染 gzip 本地缓存（秒开），再刷网络
+        val cached = cache.loadSessionList()
+        if (!cached.isNullOrEmpty()) sessions = cached
         scope.launch {
             try {
                 sessions = connection.listSessions()
                     .sortedByDescending { it.updatedAt }
+                cache.saveSessionList(sessions)
                 listError = null
             } catch (e: Exception) {
-                listError = "会话列表加载失败：${e.message}"
+                if (cached.isNullOrEmpty()) {
+                    listError = "会话列表加载失败：" + e.message
+                }
             }
         }
     }

@@ -79,6 +79,25 @@ sealed interface ChatItem {
     data class Notice(override val key: String, val text: String, val isError: Boolean = false) : ChatItem
 }
 
+/** 缓存互转：UI 条目 ↔ gzip 磁盘条目 */
+private fun ChatItem.toCached(): CachedItem = when (this) {
+    is ChatItem.User -> CachedItem(kind = "user", text = text)
+    is ChatItem.Assistant -> CachedItem(
+        kind = "assistant", text = text, thinkSeconds = thinkSeconds, streaming = streaming,
+    )
+    is ChatItem.Tool -> CachedItem(
+        kind = "tool", name = name, args = args, status = status, result = result, isError = isError,
+    )
+    is ChatItem.Notice -> CachedItem(kind = "notice", text = text, isError = isError)
+}
+
+private fun CachedItem.toChatItem(key: String): ChatItem = when (kind) {
+    "user" -> ChatItem.User(key, text)
+    "assistant" -> ChatItem.Assistant(key, text, streaming = streaming, thinkSeconds = thinkSeconds)
+    "tool" -> ChatItem.Tool(key, callId = key, name = name, args = args, status = status, result = result, isError = isError)
+    else -> ChatItem.Notice(key, text, isError = isError)
+}
+
 private fun textBlocks(content: JsonElement?): String {
     val arr = content as? JsonArray ?: return ""
     return arr.mapNotNull { el ->
@@ -155,6 +174,7 @@ class SessionChatState(
     private val scope: CoroutineScope,
     private val connection: DshConnection,
     val sessionId: String,
+    private val cache: HistoryCache,
 ) {
     private val _items = MutableStateFlow<List<ChatItem>>(emptyList())
     val items: StateFlow<List<ChatItem>> = _items.asStateFlow()
@@ -170,6 +190,16 @@ class SessionChatState(
     // 流式增量缓冲：chunk 先攒在这里，50ms 批量 flush 一次列表
     private val pendingChunk = StringBuilder()
     private var flushJob: Job? = null
+    private var cacheJob: Job? = null
+
+    /** 温缓存延迟写盘（3s 防抖，gzip 压缩） */
+    private fun scheduleCacheSave() {
+        cacheJob?.cancel()
+        cacheJob = scope.launch {
+            delay(3_000)
+            cache.saveHistory(sessionId, _items.value.map { it.toCached() })
+        }
+    }
 
     // load() 完成前到达的实时事件先入队，历史页落地后重放，
     // 防止网络加载期间 _items 被整页覆盖丢掉实时 chunk
@@ -193,6 +223,7 @@ class SessionChatState(
             cur.add(ChatItem.Assistant(nextKey(), delta, streaming = true))
         }
         _items.value = cur
+        scheduleCacheSave()
     }
 
     private fun parseMeta(projections: JsonElement?) {
@@ -203,6 +234,12 @@ class SessionChatState(
     }
 
     suspend fun load() {
+        // 冷热分离：先渲染 gzip 本地温缓存（秒开），再刷网络冷数据
+        val cachedItems = cache.loadHistory(sessionId)?.mapIndexed { i, c -> c.toChatItem(nextKey()) }
+        if (!cachedItems.isNullOrEmpty()) {
+            _items.value = cachedItems
+            hasMore = true
+        }
         try {
             // 首屏只取最近 3 条消息：服务端把 assistant/chunk 全量回传（约占 payload 98%），
             // maxMessages=10 时载荷可达 1MB+，手机端传输+解码+拼接就是"加载慢"的来源。
@@ -282,8 +319,13 @@ class SessionChatState(
             // 循环尾：flush 进行中回合残留的 chunk 尾部
             flushChunks()
             _items.value = list
+            cache.saveHistory(sessionId, list.map { it.toCached() })
         } catch (e: Exception) {
-            _items.value = listOf(ChatItem.Notice(nextKey(), "加载历史失败：${e.message}", true))
+            if (cachedItems.isNullOrEmpty()) {
+                _items.value = listOf(ChatItem.Notice(nextKey(), "加载历史失败：" + e.message, true))
+            } else {
+                _items.value = _items.value + ChatItem.Notice(nextKey(), "网络失败，显示本地缓存（重进可重试）", false)
+            }
         } finally {
             // 历史页落地后重放加载期间积压的实时事件，保证内容不丢
             loaded = true
@@ -336,6 +378,7 @@ class SessionChatState(
                 }
             }
             if (list.isNotEmpty()) _items.value = list + _items.value
+            cache.saveHistory(sessionId, _items.value.map { it.toCached() })
         } catch (_: Exception) {}
     }
 
@@ -463,7 +506,8 @@ fun SessionScreen(
     onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    val state = remember(sessionId) { SessionChatState(scope, connection, sessionId) }
+    val context = LocalContext.current
+    val state = remember(sessionId) { SessionChatState(scope, connection, sessionId, HistoryCache(context)) }
     val items by state.items.collectAsState()
     val title by state.title.collectAsState()
     val running by state.running.collectAsState()
@@ -485,7 +529,6 @@ fun SessionScreen(
     var autoModelEnabled by remember { mutableStateOf(true) }
     val listState = rememberLazyListState()
 
-    val context = LocalContext.current
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
