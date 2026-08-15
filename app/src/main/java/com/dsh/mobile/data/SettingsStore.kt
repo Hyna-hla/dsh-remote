@@ -69,6 +69,15 @@ class SettingsStore(private val context: Context) {
         prefs[ACTIVE_PROFILE_KEY]
     }
 
+    /**
+     * 首次读取前执行旧版单地址（server_url / auto_connect）→ 新 profiles 迁移。
+     * 写路径（upsert/delete/markAttempt）已在 edit 内调用，但 App 冷启动无写操作时
+     * 旧配置不会迁移；所有读入口在读之前先调本方法，确保升级用户首读即迁移。
+     */
+    suspend fun ensureMigrated() {
+        context.dataStore.edit { applyLegacyMigration(it) }
+    }
+
     suspend fun upsertProfile(profile: HostProfile) {
         context.dataStore.edit { prefs ->
             applyLegacyMigration(prefs)

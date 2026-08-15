@@ -14,10 +14,12 @@ import javax.net.ssl.SSLSocketFactory
 data class DiagStep(val name: String, val ok: Boolean, val detail: String?, val elapsedMs: Long)
 
 suspend fun runDiagnostics(profile: HostProfile): List<DiagStep> = withContext(Dispatchers.IO) {
+    // 防御性规范化：与连接/保存共用同一 URL 语义，避免 URI(url) 对无协议地址直接失败
+    val normalized = profile.copy(url = normalizeBaseUrl(profile.url))
     val steps = mutableListOf<DiagStep>()
-    val uri = runCatching { URI(profile.url) }.getOrNull()
+    val uri = runCatching { URI(normalized.url) }.getOrNull()
     val host = uri?.host ?: ""
-    val https = profile.url.startsWith("https://")
+    val https = normalized.url.startsWith("https://")
     val port = uri?.port?.takeIf { it > 0 } ?: if (https) 443 else 80
 
     // 1. DNS
@@ -38,7 +40,7 @@ suspend fun runDiagnostics(profile: HostProfile): List<DiagStep> = withContext(D
     // 3. TLS（仅 https）
     if (https) {
         steps += timed("TLS 握手") {
-            val (unary, _) = OkHttpClientFactory.build(profile)
+            val (unary, _) = OkHttpClientFactory.build(normalized)
             val sf = unary.sslSocketFactory
             ((sf as SSLSocketFactory).createSocket(host, port) as SSLSocket).use { s ->
                 s.startHandshake()
@@ -49,11 +51,11 @@ suspend fun runDiagnostics(profile: HostProfile): List<DiagStep> = withContext(D
 
     // 4. host.describe 版本探测
     steps += timed("版本探测") {
-        val (unary, _) = OkHttpClientFactory.build(profile)
+        val (unary, _) = OkHttpClientFactory.build(normalized)
         val rpcId = "diag-" + java.util.UUID.randomUUID()
         val body = """{"type":"client-request","rpcId":"$rpcId","method":"host.describe","payload":{}}"""
             .toRequestBody("application/json".toMediaType())
-        val req = Request.Builder().url(profile.url + "/api/host.describe").post(body).build()
+        val req = Request.Builder().url(normalized.url + "/api/host.describe").post(body).build()
         unary.newCall(req).execute().use { resp ->
             val text = resp.body?.string() ?: ""
             if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}")
@@ -62,7 +64,7 @@ suspend fun runDiagnostics(profile: HostProfile): List<DiagStep> = withContext(D
         }
     }
 
-    OkHttpClientFactory.release(profile.id)
+    OkHttpClientFactory.release(normalized.id)
     steps
 }
 

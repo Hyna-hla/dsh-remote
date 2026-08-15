@@ -181,14 +181,6 @@ class DshConnection(private val appContext: Context? = null) {
         _state.value = State.Error("$detail（已停止自动重连）", code, profileId)
     }
 
-    private fun normalizeBaseUrl(raw: String): String {
-        var u = raw.trim()
-        if (u.isEmpty()) return u
-        if (!u.startsWith("http://") && !u.startsWith("https://")) u = "http://$u"
-        u = u.trimEnd('/')
-        return u
-    }
-
     @Synchronized
     fun disconnect() = disconnectInternal()
 

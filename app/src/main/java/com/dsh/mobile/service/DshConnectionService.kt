@@ -96,6 +96,7 @@ class DshConnectionService : Service() {
         if (watchJob != null) return
         watchJob = scope.launch {
             val settings = SettingsStore(this@DshConnectionService)
+            settings.ensureMigrated()
             if (!settings.backgroundNotify.first()) {
                 stopSelf()
                 return@launch

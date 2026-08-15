@@ -36,6 +36,18 @@ data class HostProfile(
     val lastErrorCode: String? = null,
 )
 
+/**
+ * 规范化主机地址（连接、诊断、保存共享同一语义）：
+ * trim → 无协议补 http:// → 去尾斜杠。
+ */
+fun normalizeBaseUrl(raw: String): String {
+    var u = raw.trim()
+    if (u.isEmpty()) return u
+    if (!u.startsWith("http://") && !u.startsWith("https://")) u = "http://$u"
+    u = u.trimEnd('/')
+    return u
+}
+
 object ProfileCodec {
     private val json = Json {
         ignoreUnknownKeys = true

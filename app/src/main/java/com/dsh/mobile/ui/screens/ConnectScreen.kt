@@ -115,6 +115,7 @@ fun ConnectScreen(
 
     // —— 自动连接 ——
     LaunchedEffect(Unit) {
+        settingsStore.ensureMigrated()
         val auto = settingsStore.profiles.first().firstOrNull { it.autoConnect }
         if (auto != null) {
             scope.launch { settingsStore.setActiveProfile(auto.id) }
