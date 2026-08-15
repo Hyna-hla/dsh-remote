@@ -2,6 +2,7 @@ package com.dsh.mobile.ui.screens
 
 import android.net.Uri
 import android.util.Base64
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -10,19 +11,25 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -217,6 +224,49 @@ fun HomeScreen(
                 sending = false
             }
         }
+    }
+
+    // ChatGPT 移动端布局：纯黑扁平 + 顶部导航栏 + 侧边抽屉（85% 宽 + 遮罩）+ 底部胶囊输入栏
+    if (DshThemeStyle == ThemeStyle.CHATGPT) {
+        ChatGptHomeLayout(
+            sessions = sessions,
+            archivedIds = archivedIds,
+            input = input,
+            onInputChange = { input = it },
+            sending = sending,
+            onSend = { send() },
+            sendError = sendError,
+            preset = preset,
+            presets = presets,
+            presetMenu = presetMenu,
+            onPresetMenuChange = { presetMenu = it },
+            pendingImages = pendingImages,
+            onPickImage = { imagePicker.launch("image/*") },
+            onRemoveImage = { i -> pendingImages = pendingImages.filterIndexed { j, _ -> j != i } },
+            onSessionClick = onSessionClick,
+            onSettings = onSettings,
+            onRefresh = {
+                refreshSessions()
+                refreshArchived()
+            },
+            onRestoreArchived = { id ->
+                scope.launch {
+                    val ws = workspaces.firstOrNull()?.workspaceId
+                    if (ws.isNullOrBlank()) {
+                        listError = "没有可用工作区，无法恢复"
+                    } else {
+                        try {
+                            connection.restoreSession(ws, id)
+                            refreshSessions()
+                            refreshArchived()
+                        } catch (e: Exception) {
+                            listError = e.message
+                        }
+                    }
+                }
+            },
+        )
+        return
     }
 
     Scaffold(
@@ -1013,6 +1063,460 @@ private fun ArchivedRow(id: String, onRestore: () -> Unit) {
                 modifier = Modifier.weight(1f),
             )
             TextButton(onClick = onRestore) { Text("恢复") }
+        }
+    }
+}
+
+// ════════════════════════ ChatGPT 移动端布局（主题包风格）════════════════════════
+// 按用户提供的 1:1 设计令牌落地：
+// 纯黑 #000000 底、次级 #1C1C1E、品牌 #3B82F6、强调 #60A5FA、二级文本 #9CA3AF
+// 顶部导航 56dp / 胶囊输入 52dp(圆角26) / 抽屉 85% 宽 + 50% 遮罩 / 菜单项 56dp / 会话项 48dp
+
+private fun chatGptTitleOf(s: SessionSummary): String =
+    runCatching {
+        s.projections?.jsonObject?.get("values")?.jsonObject
+            ?.get("title")?.jsonPrimitive?.contentOrNull
+    }.getOrNull() ?: "会话 ${s.sessionId.take(8)}"
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ChatGptHomeLayout(
+    sessions: List<SessionSummary>,
+    archivedIds: List<String>,
+    input: String,
+    onInputChange: (String) -> Unit,
+    sending: Boolean,
+    onSend: () -> Unit,
+    sendError: String?,
+    preset: String,
+    presets: List<Pair<String, String>>,
+    presetMenu: Boolean,
+    onPresetMenuChange: (Boolean) -> Unit,
+    pendingImages: List<DshConnection.ImagePart>,
+    onPickImage: () -> Unit,
+    onRemoveImage: (Int) -> Unit,
+    onSessionClick: (String) -> Unit,
+    onSettings: () -> Unit,
+    onRefresh: () -> Unit,
+    onRestoreArchived: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+    var searchActive by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    var showArchived by remember { mutableStateOf(false) }
+
+    val filtered = remember(sessions, searchQuery) {
+        if (searchQuery.isBlank()) sessions
+        else sessions.filter { chatGptTitleOf(it).contains(searchQuery, ignoreCase = true) }
+    }
+
+    val closeDrawer: () -> Unit = { scope.launch { drawerState.close() } }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        scrimColor = Color.Black.copy(alpha = 0.5f),
+        drawerContent = {
+            Column(
+                Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(0.85f)
+                    .background(Color.Black),
+            ) {
+                // ── 顶部标题区（60dp）：DSH Remote + 搜索圆钮 ──
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "DSH Remote",
+                        style = MaterialTheme.typography.headlineLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Box(
+                        Modifier
+                            .size(40.dp)
+                            .background(Color(0xFF1C1C1E), CircleShape)
+                            .clickable { searchActive = !searchActive },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Default.Search, null, Modifier.size(20.dp), tint = Color.White)
+                    }
+                }
+                if (searchActive) {
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = Color(0xFF1C1C1E),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 4.dp),
+                    ) {
+                        BasicTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = Color.White),
+                            cursorBrush = SolidColor(Color.White),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            decorationBox = { inner ->
+                                Box {
+                                    if (searchQuery.isEmpty()) {
+                                        Text("搜索会话…", color = Color(0xFF9CA3AF), style = MaterialTheme.typography.bodyMedium)
+                                    }
+                                    inner()
+                                }
+                            },
+                        )
+                    }
+                }
+
+                // ── 功能菜单区：每项 56dp，图标 28 白 + 文字 18 ──
+                val menuItems = listOf(
+                    Triple(Icons.Default.Add, "新对话") {
+                        closeDrawer()
+                    },
+                    Triple(Icons.Default.MenuBook, "技能") {
+                        Toast.makeText(context, "技能请在会话内选择", Toast.LENGTH_SHORT).show()
+                        closeDrawer()
+                    },
+                    Triple(Icons.Default.Archive, "已归档") {
+                        showArchived = !showArchived
+                    },
+                    Triple(Icons.Default.Settings, "设置") {
+                        closeDrawer()
+                        onSettings()
+                    },
+                )
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 8.dp),
+                ) {
+                    menuItems.forEach { (icon, label, action) ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(56.dp)
+                                .padding(horizontal = 12.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { action() },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(icon, null, Modifier.size(28.dp), tint = Color.White)
+                            Spacer(Modifier.width(16.dp))
+                            Text(
+                                label,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = Color.White,
+                            )
+                        }
+                    }
+                }
+
+                // ── 最近会话区（可滚动）：分区标题 16/600 #9CA3AF，项 48dp / 17sp ──
+                Text(
+                    "最近",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF9CA3AF),
+                    modifier = Modifier.padding(start = 32.dp, top = 16.dp, bottom = 8.dp),
+                )
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    if (filtered.isEmpty() && !showArchived) {
+                        // 骨架屏样式空态：40dp #1C1C1E 圆角 8 长条
+                        Box(
+                            Modifier
+                                .padding(horizontal = 32.dp, vertical = 4.dp)
+                                .fillMaxWidth()
+                                .height(40.dp)
+                                .background(Color(0xFF1C1C1E), RoundedCornerShape(8.dp)),
+                        )
+                    }
+                    filtered.forEach { s ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .padding(horizontal = 32.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    closeDrawer()
+                                    onSessionClick(s.sessionId)
+                                },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                chatGptTitleOf(s),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                    if (showArchived && archivedIds.isNotEmpty()) {
+                        Text(
+                            "已归档",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF9CA3AF),
+                            modifier = Modifier.padding(start = 32.dp, top = 12.dp, bottom = 4.dp),
+                        )
+                        archivedIds.forEach { id ->
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                                    .padding(horizontal = 32.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    "会话 ${id.take(8)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFF9CA3AF),
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                TextButton(onClick = { onRestoreArchived(id) }) { Text("恢复") }
+                            }
+                        }
+                    }
+                }
+
+                // ── 底部操作区：「聊天」主按钮（#3B82F6 52dp 圆角16）+ 设置圆钮 48dp ──
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        Modifier
+                            .height(52.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color(0xFF3B82F6))
+                            .clickable { closeDrawer() }
+                            .padding(horizontal = 32.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Default.Edit, null, Modifier.size(22.dp), tint = Color.White)
+                        Spacer(Modifier.width(8.dp))
+                        Text("聊天", style = MaterialTheme.typography.labelLarge, color = Color.White)
+                    }
+                    Box(
+                        Modifier
+                            .size(48.dp)
+                            .background(Color(0xFF1C1C1E), CircleShape)
+                            .clickable {
+                                closeDrawer()
+                                onSettings()
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Default.Settings, null, Modifier.size(24.dp), tint = Color.White)
+                    }
+                }
+            }
+        },
+    ) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black),
+        ) {
+            // ── 顶部导航栏 56dp：汉堡 40 圆 | 中间 pill（映射「获取Plus」）| 新对话 40 圆 ──
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier
+                        .size(40.dp)
+                        .background(Color(0xFF1C1C1E), CircleShape)
+                        .clickable { scope.launch { drawerState.open() } },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Default.Menu, null, Modifier.size(20.dp), tint = Color.White)
+                }
+                Spacer(Modifier.weight(1f))
+                // 中间 pill：预设名（#60A5FA 强调，含星标，点击展开预设菜单）
+                Box {
+                    Row(
+                        Modifier
+                            .height(40.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color(0xFF1C1C1E))
+                            .clickable { onPresetMenuChange(true) }
+                            .padding(horizontal = 20.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Default.Star,
+                            null,
+                            Modifier.size(18.dp),
+                            tint = Color(0xFF60A5FA),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            presets.firstOrNull { it.first == preset }?.second ?: preset,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color(0xFF60A5FA),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = presetMenu,
+                        onDismissRequest = { onPresetMenuChange(false) },
+                    ) {
+                        presets.forEach { (id, name) ->
+                            DropdownMenuItem(
+                                text = { Text(name) },
+                                onClick = { onPresetMenuChange(false) },
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                Box(
+                    Modifier
+                        .size(40.dp)
+                        .background(Color(0xFF1C1C1E), CircleShape)
+                        .clickable { onRefresh() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Default.ChatBubbleOutline, null, Modifier.size(20.dp), tint = Color.White)
+                }
+            }
+
+            // ── 中间空态区（纯黑 + 灰色提示 + 待发图片）──
+            Column(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Text(
+                    "今天想帮点什么？",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Color(0xFF9CA3AF),
+                )
+                if (pendingImages.isNotEmpty()) {
+                    Spacer(Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        pendingImages.forEachIndexed { i, _ ->
+                            AssistChip(
+                                onClick = { onRemoveImage(i) },
+                                label = { Text("图片 ${i + 1}") },
+                                trailingIcon = {
+                                    Icon(Icons.Default.Close, null, Modifier.size(14.dp))
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+
+            // ── 底部输入栏：16 外边距 + 安全区；52dp 胶囊容器 #1C1C1E 圆角 26 ──
+            sendError?.let {
+                Text(
+                    it,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
+                )
+            }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
+                    .height(52.dp)
+                    .clip(RoundedCornerShape(26.dp))
+                    .background(Color(0xFF1C1C1E))
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Default.Add,
+                    null,
+                    Modifier
+                        .size(24.dp)
+                        .clickable { onPickImage() },
+                    tint = Color.White,
+                )
+                BasicTextField(
+                    value = input,
+                    onValueChange = onInputChange,
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = Color.White),
+                    cursorBrush = SolidColor(Color.White),
+                    keyboardOptions = KeyboardOptions.Default,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 12.dp),
+                    decorationBox = { inner ->
+                        Box {
+                            if (input.isEmpty()) {
+                                Text(
+                                    "询问 DSH…",
+                                    color = Color(0xFF9CA3AF),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                            }
+                            inner()
+                        }
+                    },
+                )
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    Modifier
+                        .size(40.dp)
+                        .background(
+                            if (input.isNotBlank() || pendingImages.isNotEmpty()) Color(0xFF3B82F6)
+                            else Color(0xFF2C2C2E),
+                            CircleShape,
+                        )
+                        .clickable(enabled = (input.isNotBlank() || pendingImages.isNotEmpty()) && !sending) {
+                            onSend()
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (sending) {
+                        CircularProgressIndicator(
+                            Modifier.size(18.dp),
+                            color = Color.White,
+                            strokeWidth = 2.dp,
+                        )
+                    } else {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Send,
+                            null,
+                            Modifier.size(20.dp),
+                            tint = Color.White,
+                        )
+                    }
+                }
+            }
         }
     }
 }

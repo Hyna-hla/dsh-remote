@@ -121,6 +121,15 @@ private fun applyShapeStyle(style: ThemeStyle) {
             DshShape.card = cut
             DshShape.small = cutSm
         }
+        ThemeStyle.CHATGPT -> {
+            // ChatGPT 移动端：胶囊 = 高度/2，主按钮 16dp，列表点击态 8dp
+            DshShape.bubble = RoundedCornerShape(16.dp)
+            DshShape.userBubble = RoundedCornerShape(16.dp)
+            DshShape.assistantBubble = RoundedCornerShape(16.dp)
+            DshShape.pill = RoundedCornerShape(50)
+            DshShape.card = RoundedCornerShape(16.dp)
+            DshShape.small = RoundedCornerShape(8.dp)
+        }
     }
 }
 
@@ -157,20 +166,34 @@ private fun dshTypography(style: ThemeStyle, fonts: FontConfig = FontConfig()): 
     val code = familyOf(fonts.code, FontFamily.Monospace)
     val titleWeight = if (style == ThemeStyle.CYBERPUNK) FontWeight.Black else FontWeight.Bold
     val titleSpacing = if (style == ThemeStyle.CYBERPUNK) (-0.6).sp else (-0.3).sp
-    val bodySize = if (style == ThemeStyle.CYBERPUNK) 15.5.sp else 15.sp
-    val bodyLine = if (style == ThemeStyle.CYBERPUNK) 23.sp else 22.sp
+    val bodySize = when (style) {
+        ThemeStyle.CYBERPUNK -> 15.5.sp
+        ThemeStyle.CHATGPT -> 17.sp
+        else -> 15.sp
+    }
+    val bodyLine = when (style) {
+        ThemeStyle.CYBERPUNK -> 23.sp
+        ThemeStyle.CHATGPT -> 24.sp
+        else -> 22.sp
+    }
+    // ChatGPT 令牌：大标题 28/700、菜单 18/400、按钮 17/500、输入 17/400
+    val headlineLargeSize = if (style == ThemeStyle.CHATGPT) 28.sp else 27.sp
+    val bodyLargeWeight = if (style == ThemeStyle.CHATGPT) FontWeight.Normal else FontWeight.Normal
+    val bodyLargeSize = if (style == ThemeStyle.CHATGPT) 18.sp else 16.sp
+    val labelLargeSize = if (style == ThemeStyle.CHATGPT) 17.sp else 14.sp
+    val labelLargeWeight = if (style == ThemeStyle.CHATGPT) FontWeight.Medium else FontWeight.Medium
     return Typography(
         displayLarge = TextStyle(fontFamily = base, fontSize = 34.sp, fontWeight = FontWeight.Bold, lineHeight = 40.sp, letterSpacing = (-0.5).sp),
-        headlineLarge = TextStyle(fontFamily = base, fontSize = 27.sp, fontWeight = titleWeight, lineHeight = 33.sp, letterSpacing = titleSpacing),
+        headlineLarge = TextStyle(fontFamily = base, fontSize = headlineLargeSize, fontWeight = titleWeight, lineHeight = 33.sp, letterSpacing = titleSpacing),
         headlineMedium = TextStyle(fontFamily = base, fontSize = 23.sp, fontWeight = titleWeight, lineHeight = 29.sp, letterSpacing = (-0.2).sp),
         headlineSmall = TextStyle(fontFamily = base, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, lineHeight = 25.sp),
         titleLarge = TextStyle(fontFamily = base, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, lineHeight = 24.sp),
         titleMedium = TextStyle(fontFamily = base, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, lineHeight = 22.sp),
         titleSmall = TextStyle(fontFamily = base, fontSize = 14.sp, fontWeight = FontWeight.Medium, lineHeight = 20.sp, letterSpacing = 0.1.sp),
-        bodyLarge = TextStyle(fontFamily = base, fontSize = 16.sp, fontWeight = FontWeight.Normal, lineHeight = 24.sp),
+        bodyLarge = TextStyle(fontFamily = base, fontSize = bodyLargeSize, fontWeight = bodyLargeWeight, lineHeight = 24.sp),
         bodyMedium = TextStyle(fontFamily = base, fontSize = bodySize, fontWeight = FontWeight.Normal, lineHeight = bodyLine),
         bodySmall = TextStyle(fontFamily = base, fontSize = 12.5.sp, fontWeight = FontWeight.Normal, lineHeight = 18.sp),
-        labelLarge = TextStyle(fontFamily = base, fontSize = 14.sp, fontWeight = FontWeight.Medium, lineHeight = 20.sp),
+        labelLarge = TextStyle(fontFamily = base, fontSize = labelLargeSize, fontWeight = labelLargeWeight, lineHeight = 20.sp),
         labelMedium = TextStyle(fontFamily = base, fontSize = 12.sp, fontWeight = FontWeight.Medium, lineHeight = 16.sp, letterSpacing = 0.3.sp),
         labelSmall = TextStyle(fontFamily = base, fontSize = 11.sp, fontWeight = FontWeight.Medium, lineHeight = 15.sp, letterSpacing = 0.4.sp),
     ).also { _ -> codeFamily = code }
@@ -203,6 +226,14 @@ private fun dshShapes(style: ThemeStyle): Shapes = when (style) {
         medium = CutCornerShape(topEnd = 12.dp, bottomStart = 12.dp),
         large = CutCornerShape(topEnd = 14.dp, bottomStart = 14.dp),
         extraLarge = CutCornerShape(topEnd = 16.dp, bottomStart = 16.dp),
+    )
+    ThemeStyle.CHATGPT -> Shapes(
+        // ChatGPT 令牌：胶囊 = 高度/2（26dp），主按钮 16，列表点击态 8
+        extraSmall = RoundedCornerShape(8.dp),
+        small = RoundedCornerShape(8.dp),
+        medium = RoundedCornerShape(12.dp),
+        large = RoundedCornerShape(16.dp),
+        extraLarge = RoundedCornerShape(26.dp),
     )
 }
 

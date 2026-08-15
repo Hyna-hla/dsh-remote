@@ -35,8 +35,9 @@ data class ThemeColors(
  * - STANDARD：官方 DSH 风格排版（精调字号/字重/行高/字距）+ 圆润卡片
  * - CODEX：Codex CLI 终端风格（全局等宽字体 + 方角 + 终端装饰）
  * - CYBERPUNK：夜之城风格（切角按钮 + 霓虹强调 + HUD 装饰）
+ * - CHATGPT：ChatGPT 移动端深色风格（纯黑扁平 + 胶囊输入栏 + 侧边抽屉）
  */
-enum class ThemeStyle { STANDARD, CODEX, CYBERPUNK }
+enum class ThemeStyle { STANDARD, CODEX, CYBERPUNK, CHATGPT }
 
 data class ThemeDef(
     val id: String,
@@ -115,11 +116,24 @@ object ThemeRegistry {
         style = ThemeStyle.CYBERPUNK,
     )
 
+    /** ChatGPT 移动端深色：纯黑扁平 + 蓝 #3B82F6 + 胶囊输入（按用户提供的 1:1 设计令牌） */
+    val chatgpt = ThemeDef(
+        "chatgpt", "ChatGPT 深色", light = false,
+        ThemeColors(
+            background = Color(0xFF000000), surface = Color(0xFF1C1C1E), surfaceHigh = Color(0xFF2C2C2E),
+            brand = Color(0xFF3B82F6), brandSoft = Color(0xFF60A5FA),
+            textPrimary = Color(0xFFFFFFFF), textSecondary = Color(0xFF9CA3AF), border = Color(0xFF2C2C2E),
+            success = Color(0xFF34D399), warn = Color(0xFFFBBF24), error = Color(0xFFF87171),
+        ),
+        version = "1.0",
+        style = ThemeStyle.CHATGPT,
+    )
+
     /**
-     * 内置主题只有 5 套（v1.0.25 起）：每套都有真实的观感差异，不再提供"只换颜色"的皮肤。
+     * 内置主题只有 6 套：每套都有真实的观感差异，不再提供"只换颜色"的皮肤。
      * 旧皮肤 id（aurora/ocean/... ）不再内置，已选旧皮肤的用户自动回落到深蓝。
      */
-    private val builtins = listOf(blue, black, warm, codex, cyberpunk)
+    private val builtins = listOf(blue, black, warm, codex, cyberpunk, chatgpt)
     val builtinIds: Set<String> = builtins.map { it.id }.toSet()
 
     fun available(custom: List<ThemeDef>): List<ThemeDef> = builtins + custom

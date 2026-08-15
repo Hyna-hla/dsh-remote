@@ -21,6 +21,11 @@
 
 ## 更新日志
 
+- **v1.1.2**：ChatGPT 移动端深色 UI 主题包（1:1 按设计令牌落地）——
+  - **设计令牌**：纯黑 `#000000` 底 + 次级 `#1C1C1E` + 品牌蓝 `#3B82F6` + 强调 `#60A5FA` + 二级文本 `#9CA3AF`；排版按规格（大标题 28/700、菜单 18/400、分区标题 16/600、按钮 17/500、输入 17/400）；圆角（胶囊=高度/2、主按钮 16、列表点击态 8）
+  - **对话主界面**：顶部导航栏 56dp（40×40 圆形汉堡钮 + 中间胶囊 pill（预设名 #60A5FA 星标，映射「获取Plus」）+ 右侧新对话圆钮）；底部输入栏 52dp 胶囊容器（+ 图标 / 无边框白字输入灰占位 / ⚡插话图标（映射麦克风位）/ 40×40 圆发送钮 #3B82F6）+ 底部安全区适配；会话页同样胶囊化 + 用户气泡 #1C1C1E 白字
+  - **侧边抽屉栏**：85% 宽 + 50% 黑遮罩；顶部 60dp 标题区（28/700 白标题 + 搜索圆钮 + 会话搜索胶囊）；功能菜单区（新对话/技能/已归档/设置，每项 56dp、图标 28 + 文字 18）；「最近」分区（16/600 #9CA3AF 标题、48dp 会话项、骨架屏 40dp 灰条）；底部操作区（「聊天」主按钮 52dp #3B82F6 圆角16 + 设置圆钮 48dp）
+  - 设置 → 外观 → 选「ChatGPT 深色」即切换（与其他主题并存）
 - **v1.1.1**：资源更新提示（版本号从 1.1.1 开始）——
   - **启动自动检测**：App 打开时后台自动检查最新 Release（走镜像，无更新则完全不打扰）
   - **有更新弹窗询问**：「检测到资源更新，是否下载？」——是 / 否，用户自选
@@ -71,10 +76,10 @@
 
 ## 安装（APK）
 
-- 仓库内提供 R8 精简版：[release/DSH-Remote-v1.1.1-min.apk](release/DSH-Remote-v1.1.1-min.apk)（已签名，约 4.6MB，可直接安装）
-- **debug 主包（约 62MB，与历次安装包一致）**：因 GitHub 单文件 >50MB 限制不进仓库，本地留档于 `release/DSH-Remote-v1.1.1.apk`（构建产物亦在 `app/build/outputs/apk/debug/`）；分发走 GitHub Release 附件或 Google Play
+- 仓库内提供 R8 精简版：[release/DSH-Remote-v1.1.2-min.apk](release/DSH-Remote-v1.1.2-min.apk)（已签名，约 4.6MB，可直接安装）
+- **debug 主包（约 62MB，与历次安装包一致）**：因 GitHub 单文件 >50MB 限制不进仓库，本地留档于 `release/DSH-Remote-v1.1.2.apk`（构建产物亦在 `app/build/outputs/apk/debug/`）；分发走 GitHub Release 附件或 Google Play
 - 传到手机 → 允许「未知来源」安装 → 填服务器地址 → 连接
-- Google Play 上架包（已签名 AAB）：[release/DSH-Remote-v1.1.1.aab](release/DSH-Remote-v1.1.1.aab)；上架清单见 [docs/play-listing.md](docs/play-listing.md)
+- Google Play 上架包（已签名 AAB）：[release/DSH-Remote-v1.1.2.aab](release/DSH-Remote-v1.1.2.aab)；上架清单见 [docs/play-listing.md](docs/play-listing.md)
 - 自定义主题包格式与示例：[docs/theme-package-format.md](docs/theme-package-format.md)、[docs/aurora.dshTheme.zip](docs/aurora.dshTheme.zip)
 
 ## PC 端使用

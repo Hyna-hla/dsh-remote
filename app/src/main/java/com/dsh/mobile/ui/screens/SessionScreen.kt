@@ -1103,18 +1103,31 @@ fun SessionScreen(
             }
         }
 
-        // 输入栏
+        // 输入栏（ChatGPT 风格：52dp 胶囊容器 #1C1C1E 圆角26 + 底部安全区；其余风格保持原样）
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            tonalElevation = 3.dp,
-            shadowElevation = 8.dp,
+            tonalElevation = if (DshThemeStyle == ThemeStyle.CHATGPT) 0.dp else 3.dp,
+            shadowElevation = if (DshThemeStyle == ThemeStyle.CHATGPT) 0.dp else 8.dp,
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-                    .imePadding(),
-                verticalAlignment = Alignment.Bottom,
+                    .then(
+                        if (DshThemeStyle == ThemeStyle.CHATGPT) {
+                            Modifier
+                                .navigationBarsPadding()
+                                .padding(start = 16.dp, end = 16.dp, bottom = 16.dp, top = 4.dp)
+                                .height(52.dp)
+                                .clip(RoundedCornerShape(26.dp))
+                                .background(MaterialTheme.colorScheme.surface)
+                                .padding(horizontal = 12.dp)
+                        } else {
+                            Modifier
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                                .imePadding()
+                        },
+                    ),
+                verticalAlignment = if (DshThemeStyle == ThemeStyle.CHATGPT) Alignment.CenterVertically else Alignment.Bottom,
             ) {
                 IconButton(onClick = { imagePicker.launch("image/*") }) {
                     Icon(Icons.Default.AttachFile, null)
@@ -1136,31 +1149,49 @@ fun SessionScreen(
                         .width(0.dp)
                         .weight(1f),
                     placeholder = {
-                        Text(if (DshThemeStyle == ThemeStyle.CODEX) "> 消息…" else "给智能体发消息…")
+                        Text(
+                            when {
+                                DshThemeStyle == ThemeStyle.CODEX -> "> 消息…"
+                                DshThemeStyle == ThemeStyle.CHATGPT -> "询问 DSH…"
+                                else -> "给智能体发消息…"
+                            },
+                        )
                     },
-                    maxLines = 4,
+                    maxLines = if (DshThemeStyle == ThemeStyle.CHATGPT) 1 else 4,
                     shape = RoundedCornerShape(22.dp),
                 )
                 Spacer(Modifier.width(8.dp))
-                FilterChip(
-                    selected = steerMode,
-                    onClick = { steerMode = !steerMode },
-                    label = {
-                        Text(
-                            "⚡ 插话",
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.labelMedium,
-                        )
-                    },
-                    modifier = Modifier
-                        .align(Alignment.CenterVertically)
-                        .widthIn(max = 92.dp),
-                )
+                if (DshThemeStyle == ThemeStyle.CHATGPT) {
+                    // ChatGPT 规格：麦克风位置映射为 ⚡ 插话图标（24px 白）
+                    Icon(
+                        Icons.Default.Bolt,
+                        "插话",
+                        Modifier
+                            .size(24.dp)
+                            .clickable { steerMode = !steerMode },
+                        tint = if (steerMode) DshBrand else MaterialTheme.colorScheme.onSurface,
+                    )
+                } else {
+                    FilterChip(
+                        selected = steerMode,
+                        onClick = { steerMode = !steerMode },
+                        label = {
+                            Text(
+                                "⚡ 插话",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        },
+                        modifier = Modifier
+                            .align(Alignment.CenterVertically)
+                            .widthIn(max = 92.dp),
+                    )
+                }
                 if (running) {
                     FilledIconButton(
                         onClick = { stopRun() },
-                        modifier = Modifier.size(46.dp),
+                        modifier = Modifier.size(if (DshThemeStyle == ThemeStyle.CHATGPT) 40.dp else 46.dp),
                         colors = IconButtonDefaults.filledIconButtonColors(
                             containerColor = MaterialTheme.colorScheme.error,
                         ),
@@ -1170,9 +1201,15 @@ fun SessionScreen(
                 } else {
                     FilledIconButton(
                         onClick = { send() },
-                        modifier = Modifier
-                            .size(46.dp)
-                            .background(brandGradient(), CircleShape),
+                        modifier = if (DshThemeStyle == ThemeStyle.CHATGPT) {
+                            Modifier
+                                .size(40.dp)
+                                .background(DshBrand, CircleShape)
+                        } else {
+                            Modifier
+                                .size(46.dp)
+                                .background(brandGradient(), CircleShape)
+                        },
                         enabled = (input.isNotBlank() || pendingImages.isNotEmpty()) && !sending,
                         colors = IconButtonDefaults.filledIconButtonColors(
                             containerColor = Color.Transparent,
@@ -1293,7 +1330,8 @@ private fun UserBubble(item: ChatItem.User, modifier: Modifier = Modifier) {
     ) {
         Surface(
             shape = DshShape.userBubble,
-            color = MaterialTheme.colorScheme.primaryContainer,
+            color = if (DshThemeStyle == ThemeStyle.CHATGPT) Color(0xFF1C1C1E)
+            else MaterialTheme.colorScheme.primaryContainer,
             modifier = Modifier
                 .widthIn(max = 320.dp)
                 .combinedClickable(
@@ -1333,7 +1371,8 @@ private fun UserBubble(item: ChatItem.User, modifier: Modifier = Modifier) {
                     Text(
                         item.text,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        color = if (DshThemeStyle == ThemeStyle.CHATGPT) Color.White
+                        else MaterialTheme.colorScheme.onPrimaryContainer,
                     )
                 }
             }
