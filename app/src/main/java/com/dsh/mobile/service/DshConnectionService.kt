@@ -129,8 +129,8 @@ class DshConnectionService : Service() {
                             val text = when (st) {
                                 is DshConnection.State.Connected -> "已连接 " + st.baseUrl
                                 is DshConnection.State.Connecting -> "连接中…"
-                                is DshConnection.State.Error ->
-                                    if (st.code != null) "连接失败（${st.code.name}），自动重连中" else st.message
+                                // st.message 已含「N 秒后自动重连」或「（已停止自动重连）」，直接透传
+                                is DshConnection.State.Error -> st.message
                                 else -> "后台连接已开启"
                             }
                             updateForegroundText(text)

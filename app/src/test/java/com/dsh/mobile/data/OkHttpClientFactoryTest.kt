@@ -43,21 +43,21 @@ class OkHttpClientFactoryTest {
     fun mergedCaContextValidPemTrustsChain() {
         // 自签名证书（CN=dsh-remote-test.local），系统链不认识 → 由导入链接住，证明 CA 已合入信任链
         val pem = "-----BEGIN CERTIFICATE-----\n" +
-            "MIIDPDCCAiSgAwIBAgIQYHmZvkbZ8q5HKPlPstgj3jANBgkqhkiG9w0BAQsFADAgMR4wHAYDVQQD\n" +
-            "DBVkc2gtcmVtb3RlLXRlc3QubG9jYWwwHhcNMjYwODE1MjIxMjM2WhcNMjcwODE1MjIyMjM1WjAg\n" +
-            "MR4wHAYDVQQDDBVkc2gtcmVtb3RlLXRlc3QubG9jYWwwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAw\n" +
-            "ggEKAoIBAQCiWQ6PT4d2tX3DUfOkSDu4q23qA+TCJtv/GYDfvOkYDifTQNpumKoAiuL89HN949mQ\n" +
-            "vlhSeyAtfEmTnLc+nCFlIgWVI6QeMkl9AtEZ7miClj6IVyQFnI4VK5qKEozKn9TRapfhQYyqZf5v\n" +
-            "Y27C9U1YLloMQ4bTRTdYtLLWecaBKLjlyDpNUxffUnhlOgtFlX795S7hgLWjF57iwroPxT4qbvDF\n" +
-            "3F0IrN9EXlm8BgMr/Dx0YXl1bjMxHLrrpbil5J2ssoEeRjjrnyVjE3MPghfU36oZmqCjTLa9233G\n" +
-            "LeMw0LugDVg0MSDIAe6z3iXoBXVVJROAEcpwhy3wLIyV5Ft1AgMBAAGjcjBwMA4GA1UdDwEB/wQE\n" +
-            "AwIFoDAdBgNVHSUEFjAUBggrBgEFBQcDAgYIKwYBBQUHAwEwIAYDVR0RBBkwF4IVZHNoLXJlbW90\n" +
-            "ZS10ZXN0LmxvY2FsMB0GA1UdDgQWBBRPaK6UZlfK//JqQzO83Jgyyibh2zANBgkqhkiG9w0BAQsF\n" +
-            "AAOCAQEAHaX3LBsP5F45IvM6bzxBrvje5oUMUC1As6/7YQED5Vtj8qo9Du30VGFilSZxFasrEO4s\n" +
-            "vVCSxF00jOxCcbTEJCEivtbGBstoxBUAwzD5kkOLRYKsBBM4lf50bAShyInexSUWElYpp2hUc4Nx\n" +
-            "DtHBRVhGQ/Ayapxcy+gtjEAuAihGpTN57zC+6yXHiMgNMAXVx/q963dquufSpx1fUpnJI/jxw7Pb\n" +
-            "jA8vZpAaMEnCymvhegylfKVwlFsIhh6v/Oy1nX1qw0NWtq+iFiGiwuWFnEgif8pnBIrFLEwFjR2B\n" +
-            "z1DpBJx4eL+kLJH7AJXTg1TmY1Mu1MAaIOkVp7+RDfJL3w==\n" +
+            "MIIDPjCCAiagAwIBAgIQPudwMNZu/6dEnTtgc+XR8zANBgkqhkiG9w0BAQsFADAgMR4wHAYDVQQD\n" +
+            "DBVkc2gtcmVtb3RlLXRlc3QubG9jYWwwIBcNMjYwODE1MjMxMTQwWhgPMjA5ODEyMzExNjAwMDBa\n" +
+            "MCAxHjAcBgNVBAMMFWRzaC1yZW1vdGUtdGVzdC5sb2NhbDCCASIwDQYJKoZIhvcNAQEBBQADggEP\n" +
+            "ADCCAQoCggEBAKWbhgL++rZv3PXgYz2rfkhSwYR412dIetsVdyT6ib3xmtC+6Ig9fM9XO0MNJcYo\n" +
+            "ZHg1Eb2qjaPFqAjqTDHC65FPICyTqw5A5yw8BW1pESyYQKo9VxuR3hh9iaRNFGSc1h3pLbQSvKrQ\n" +
+            "DcQIz3DjRN8eJQn9EorXoHRpmLo76mXF1AoAC9reLspNKbH2sTDXUZ29hOs5pTNmPA7ZGCA0/X0m\n" +
+            "9UPx19L5It2U50jwt2h0Qt4pp7y/Se56cHycczgcKJo9MKfalbMAj5rIZCtGMqHBAPGaw8oHSf1f\n" +
+            "KbqBwLLuVkUVoUkrS4Gz4PmLN6IVSePRAuNm8m6Ffok5gHXidAkCAwEAAaNyMHAwDgYDVR0PAQH/\n" +
+            "BAQDAgWgMB0GA1UdJQQWMBQGCCsGAQUFBwMCBggrBgEFBQcDATAgBgNVHREEGTAXghVkc2gtcmVt\n" +
+            "b3RlLXRlc3QubG9jYWwwHQYDVR0OBBYEFDHlcoLPyVpiFcVNnz0wwPSsam1gMA0GCSqGSIb3DQEB\n" +
+            "CwUAA4IBAQA/h5QaDUq6bCzHD1ESo8QjjEzoRolQ4TfZLSmV7Gfn+7Pu3ll+SWwO2LXl0KnhiGj7\n" +
+            "KJznH5dFuhSCG5wKf5OzAFVNjjv8NhK2BIq9nd2RKttN1lckVfR6VC+7FsLDP20x6R+gG5Vi+mBn\n" +
+            "Z48lHzUZGxt2W4clm7Bs+YgWcCXo+/eUjjebiWOiwj8xu6vh+6f/YnaXBo5mS1UFDBHtkj2bdFM+\n" +
+            "DivAydVIzYX0pgLbeCulEOOYVKf2mzgf3b487LHuXXqm1+omW/YOBhDRjx8+VXCW4xSuquBMGnOy\n" +
+            "1lF8iUX5HNWHS80PJEzwGnNiHB500m1HuiojQyJE4RXFUgcP\n" +
             "-----END CERTIFICATE-----\n"
         val bytes = pem.toByteArray()
         val merged = OkHttpClientFactory.mergedCaContext(bytes)

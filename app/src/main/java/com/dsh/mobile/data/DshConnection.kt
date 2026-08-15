@@ -133,7 +133,9 @@ class DshConnection(private val appContext: Context? = null) {
                             break
                         }
                         onAttempt?.invoke(AttemptInfo(profile.id, null, result.version))
-                        _state.value = State.Connected(normalized, result.version)
+                        // UNKNOWN（占位/缺失/无法解析）时 hostVersion 置 null → UI 显示「版本未知」
+                        val hostVersion = if (verdict == VersionVerdict.OK) result.version else null
+                        _state.value = State.Connected(normalized, hostVersion)
                         streamLoop("mux", "/api/events.mux")
                         streamLoop("host", "/api/events.host")
                         break
