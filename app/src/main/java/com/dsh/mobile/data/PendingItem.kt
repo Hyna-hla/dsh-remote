@@ -1,9 +1,9 @@
 package com.dsh.mobile.data
 
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 
 sealed class PendingItem {
     abstract val sessionId: String
@@ -48,21 +48,21 @@ fun scanHistoryEvents(sessionId: String, entries: List<HistoryEntry>): List<Pend
         val ev = entry.event
         when (ev.type) {
             "approval/asked" -> {
-                val d = ev.data.jsonObject
-                val id = d["id"]?.jsonPrimitive?.contentOrNull ?: continue
+                val d = (ev.data as? JsonObject) ?: continue
+                val id = (d["id"] as? JsonPrimitive)?.contentOrNull ?: continue
                 if (approvals.containsKey(id)) continue
                 approvals[id] = PendingItem.Approval(
                     sessionId = sessionId,
                     approvalId = id,
-                    toolName = d["toolName"]?.jsonPrimitive?.contentOrNull ?: "?",
-                    reason = d["reason"]?.jsonPrimitive?.contentOrNull,
-                    callId = d["callId"]?.jsonPrimitive?.contentOrNull,
+                    toolName = (d["toolName"] as? JsonPrimitive)?.contentOrNull ?: "?",
+                    reason = (d["reason"] as? JsonPrimitive)?.contentOrNull,
+                    callId = (d["callId"] as? JsonPrimitive)?.contentOrNull,
                     arrivedAt = ev.time,
                     fromHistory = true,
                 )
             }
             "approval/decided" -> {
-                val id = ev.data.jsonObject["id"]?.jsonPrimitive?.contentOrNull ?: continue
+                val id = ((ev.data as? JsonObject)?.get("id") as? JsonPrimitive)?.contentOrNull ?: continue
                 approvals.remove(id)
             }
             "agent/error" -> {
@@ -80,10 +80,10 @@ fun scanHistoryEvents(sessionId: String, entries: List<HistoryEntry>): List<Pend
 
 /** 异常消息宽松提取：message / error / name，全缺返回默认文案 */
 internal fun errorMessageOf(data: JsonElement): String {
-    val o = data.jsonObject
-    return o["message"]?.jsonPrimitive?.contentOrNull
-        ?: o["error"]?.jsonPrimitive?.contentOrNull
-        ?: o["name"]?.jsonPrimitive?.contentOrNull
+    val o = (data as? JsonObject) ?: return "智能体执行出错"
+    return (o["message"] as? JsonPrimitive)?.contentOrNull
+        ?: (o["error"] as? JsonPrimitive)?.contentOrNull
+        ?: (o["name"] as? JsonPrimitive)?.contentOrNull
         ?: "智能体执行出错"
 }
 

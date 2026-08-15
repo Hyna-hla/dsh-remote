@@ -1,5 +1,7 @@
 package com.dsh.mobile.data
 
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
@@ -8,7 +10,7 @@ import org.junit.Test
 
 class PendingItemTest {
 
-    private fun ev(type: String, seq: Long, time: Long = seq, data: kotlinx.serialization.json.JsonObject = buildJsonObject { }) =
+    private fun ev(type: String, seq: Long, time: Long = seq, data: JsonElement = buildJsonObject { }) =
         SessionEventWire(type = type, seq = seq, time = time, data = data)
 
     private fun entry(e: SessionEventWire) = HistoryEntry(event = e)
@@ -65,6 +67,20 @@ class PendingItemTest {
     @Test
     fun badDataSkipped() {
         val out = scanHistoryEvents("s1", listOf(entry(ev("approval/asked", 1, data = buildJsonObject { put("nope", 1) }))))
+        assertTrue(out.isEmpty())
+    }
+
+    @Test
+    fun dataIsNullSkipped() {
+        val out = scanHistoryEvents("s1", listOf(entry(ev("approval/asked", 1, data = JsonNull))))
+        assertTrue(out.isEmpty())
+    }
+
+    @Test
+    fun wrongTypedFieldSkipped() {
+        val out = scanHistoryEvents("s1", listOf(
+            entry(ev("approval/asked", 1, data = buildJsonObject { put("id", buildJsonObject { put("x", 1) }) })),
+        ))
         assertTrue(out.isEmpty())
     }
 
