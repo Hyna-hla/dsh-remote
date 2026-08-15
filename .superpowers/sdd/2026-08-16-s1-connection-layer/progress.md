@@ -42,3 +42,22 @@ Task 1: minor (deferred): codecDefaults 只断言 3 个默认字段，建议全�
 Task 1: minor (deferred): 错误 JSON 形状输入（[1,2,3] / {}）无测试覆盖
 Task 1: complete (commits 440e339..bbede81, review clean, 3 deferred minors；代码实际位于并发 agent 的 2f82027，归属已注明)
 - 并发 agent 仍在活动（工作树 versionCode 37 / versionName 1.2.0，继续等待用户确认收工）
+
+- 恢复：用户确认并发 agent 收工（HEAD 758e6df v1.2.0，工作树干净）。Task 2 已派发（BASE 758e6df）。
+- 并发 agent 文件影响复查（后续任务派发时注意）：
+  - SettingsStore.kt：新增 ProState/假Pro 字段（无冲突，Task 3 增量添加 profiles 即可）。
+  - DshConnectionService.kt：handle() 新增 TokenUsageWatcher 钩子（Task 6 只重写 startWatching，须保留该钩子）。
+  - AppNavigation.kt：新增 Screen.Pro 路由 + onUpgrade（Task 9 在其旁加 HostProfile 路由，勿删 Pro）。
+  - DshApplication.kt：onCreate 新增 ProTokenBank.init/UpdateChecker.init（Task 5 只改 connection 构造参数，保留其余）。
+
+Task 2: 评审 Spec ✅，Important 1 条（plan-mandated：parse 的 toInt() 对超大数字段抛 NumberFormatException，违反 spec '不可解析→UNKNOWN 不阻断'）。Ruling: spec 是权威，计划代码缺陷必须修——toIntOrNull ?: return null + 新增溢出测试。
+Task 2: minor (deferred): SEMVER 未尾锚定（1.2.3x 判 OK）；fromHttpStatus 对 2xx 返回 PROTOCOL_ERROR；4 处测试覆盖缺口。
+
+Task 2: fix round 1/5 (1 addressed, 0 open — parse 溢出; commits f49111a..62eb722)
+Task 2: complete (commits 758e6df..62eb722, review clean, 4 deferred minors)
+
+Task 3: 评审 Spec ❌，Important 1 条（plan-mandated：writeProfiles 在 edit 内先迁移后用外部旧列表覆盖，迁移生成的 profile 被丢弃、active_profile_id 悬空，旧地址被删而不迁移）。Ruling: spec 权威，迁移必须生效——改为 upsert/delete/markAttempt 各自在 edit 内完成 迁移→本地重读→写回（移除 writeProfiles 的外部读）。
+Task 3: minor (deferred): key 字面量重复（companion private vs 迁移内字面量）；读-改-写窗口（修复时一并解决）；blank server_url 无测试覆盖。
+
+Task 3: fix round 1/5 (1 addressed, 0 open — writeProfiles 迁移覆盖; commits a78432a..472e080)
+Task 3: complete (commits 62eb722..472e080, review clean, 3 deferred minors)

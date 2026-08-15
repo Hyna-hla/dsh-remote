@@ -1,5 +1,5 @@
 ﻿param([int]$N)
-$plan = Get-Content "E:\AI搓的小东西\harness-remote\docs\superpowers\plans\2026-08-16-s1-connection-layer.md" -Raw
+$plan = Get-Content "E:\AI搓的小东西\harness-remote\docs\superpowers\plans\2026-08-16-s1-connection-layer.md" -Raw -Encoding UTF8
 $ws = "E:\AI搓的小东西\harness-remote\.superpowers\sdd\2026-08-16-s1-connection-layer"
 $start = [regex]::Match($plan, "(?ms)^### Task $N`:.*?$").Index
 if ($start -lt 0) { throw "task $N heading not found" }
@@ -19,3 +19,4 @@ $brief = $rest.Substring(0, $end).TrimEnd() + "`n"
 $out = Join-Path $ws ("task-{0}-brief.md" -f $N)
 [System.IO.File]::WriteAllText($out, $brief, [System.Text.UTF8Encoding]::new($false))
 Write-Output $out
+

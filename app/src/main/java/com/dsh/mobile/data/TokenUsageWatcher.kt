@@ -76,12 +76,24 @@ object TokenUsageWatcher {
         return chars
     }
 
-    /** usage 字段：inputTokens + outputTokens */
+    /** usage 字段：inputTokens + outputTokens（兼容 data.usage 与 data.message.usage 两种位置） */
     private fun usageOf(data: kotlinx.serialization.json.JsonElement): Long {
-        val u = data.jsonObject["usage"]?.jsonObject ?: return 0L
+        val u = data.jsonObject["usage"]?.jsonObject
+            ?: data.jsonObject["message"]?.jsonObject?.get("usage")?.jsonObject
+            ?: return 0L
         val input = u["inputTokens"]?.jsonPrimitive?.longOrNull ?: 0L
         val output = u["outputTokens"]?.jsonPrimitive?.longOrNull ?: 0L
         return input + output
+    }
+
+    /** 结算并去重扣费 */
+    private fun settle(sid: String, seq: Long, tokens: Long) {
+        if (tokens <= 0) return
+        // 双连接去重：同一回合（同 session 同 seq）只结算一次
+        val key = sid to seq
+        if (settled.containsKey(key)) return
+        settled[key] = true
+        ProTokenBank.consume(tokens)
     }
 
     /** 事件流入口（主线程/事件线程调用；内部同步） */
@@ -92,32 +104,35 @@ object TokenUsageWatcher {
             DshEventTypes.TURN_START -> stats[sid] = TurnStat()
 
             DshEventTypes.USER_MESSAGE -> {
-                val s = stats[sid] ?: return
+                val s = stats.getOrPut(sid) { TurnStat() }
                 s.input += inputLenOf(e.data)
             }
 
             DshEventTypes.ASSISTANT_CHUNK -> {
-                val s = stats[sid] ?: return
+                val s = stats.getOrPut(sid) { TurnStat() }
                 s.output += chunkLenOf(e.data)
             }
 
             DshEventTypes.ASSISTANT_MESSAGE -> {
-                val s = stats[sid] ?: return
+                val s = stats.getOrPut(sid) { TurnStat() }
                 s.output += assistantLenOf(e.data)
                 val u = usageOf(e.data)
                 if (u > s.usage) s.usage = u
             }
 
             DshEventTypes.TURN_END -> {
-                val s = stats.remove(sid) ?: return
-                // 双连接去重：同一回合（同 session 同 seq）只结算一次
-                val key = sid to e.seq
-                if (settled.containsKey(key)) return
-                settled[key] = true
-                val real = s.usage.coerceAtLeast(usageOf(e.data))
-                val estimate = (s.input + s.output) / 4 + 1
-                val tokens = if (real > 0) real else estimate
-                if (tokens > 0) ProTokenBank.consume(tokens)
+                val s = stats.remove(sid)
+                val real = usageOf(e.data)
+                if (s != null) {
+                    // 常规路径：回合内累计 + 服务端 usage（二者取大）
+                    val tokens = s.usage.coerceAtLeast(real)
+                        .let { if (it > 0) it else (s.input + s.output) / 4 + 1 }
+                    settle(sid, e.seq, tokens)
+                } else if (real > 0) {
+                    // 兜底路径：回合开始于 App 挂载监听之前（如 PC 端任务先跑起来），
+                    // 没有累计统计，但服务端 usage 仍在——按 usage 结算
+                    settle(sid, e.seq, real)
+                }
             }
         }
     }

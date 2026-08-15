@@ -2476,7 +2476,7 @@ private fun ChatGptHomeLayout(
                 verticalArrangement = Arrangement.Center,
             ) {
                 Text(
-                    "今天想帮点什么？",
+                    "今天想做点什么？",
                     style = MaterialTheme.typography.bodyLarge,
                     color = Color(0xFF9CA3AF),
                 )
