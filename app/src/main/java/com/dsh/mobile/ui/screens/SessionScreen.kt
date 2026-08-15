@@ -197,19 +197,40 @@ class SessionChatState(
 
     suspend fun load() {
         try {
-            val h = connection.history(sessionId, maxMessages = 10)
+            // 首屏只取最近 3 条消息：服务端把 assistant/chunk 全量回传（约占 payload 98%），
+            // maxMessages=10 时载荷可达 1MB+，手机端传输+解码+拼接就是"加载慢"的来源。
+            val h = connection.history(sessionId, maxMessages = 3)
             oldestSeq = h.events.firstOrNull()?.event?.seq
             hasMore = h.hasMore
             parseMeta(h.projections)
             val list = mutableListOf<ChatItem>()
+            // 历史 chunk 只保留"进行中回合"的尾部：其余 chunk 被 assistant/message 完整文本覆盖。
+            // 用 StringBuilder 线性合并，避免逐条 a.text + d 的 O(n²) 拷贝。
+            val chunkBuf = StringBuilder()
+            var chunkStreamingIdx = -1
+            fun flushChunks() {
+                if (chunkBuf.isEmpty()) return
+                if (chunkStreamingIdx >= 0 && chunkStreamingIdx < list.size) {
+                    val a = list[chunkStreamingIdx] as ChatItem.Assistant
+                    list[chunkStreamingIdx] = ChatItem.Assistant(a.key, a.text + chunkBuf.toString(), streaming = true)
+                } else {
+                    list.add(ChatItem.Assistant(nextKey(), chunkBuf.toString(), streaming = true))
+                }
+                chunkBuf.clear()
+                chunkStreamingIdx = -1
+            }
             h.events.forEach { entry ->
                 val e = entry.event
                 when (e.type) {
                     DshEventTypes.USER_MESSAGE -> {
+                        flushChunks()
                         val t = textBlocks(e.data.jsonObject["content"])
                         if (t.isNotBlank()) list.add(ChatItem.User(nextKey(), t))
                     }
                     DshEventTypes.ASSISTANT_MESSAGE -> {
+                        // 完整消息到达：丢弃已收集的 chunk（其内容已包含在消息全文里）
+                        chunkBuf.clear()
+                        chunkStreamingIdx = -1
                         val t = assistantTextOf(e.data)
                         val idx = list.indexOfLast { it is ChatItem.Assistant && it.streaming }
                         if (idx >= 0) {
@@ -218,17 +239,12 @@ class SessionChatState(
                             list.add(ChatItem.Assistant(nextKey(), t))
                         }
                     }
-                    // 尾页可能落在进行中的回合：chunk 先攒成流式占位，assistant/message 到达后替换
                     DshEventTypes.ASSISTANT_CHUNK -> {
                         val d = chunkTextOf(e.data)
                         if (d.isNotEmpty()) {
                             val idx = list.indexOfLast { it is ChatItem.Assistant && it.streaming }
-                            if (idx >= 0) {
-                                val a = list[idx] as ChatItem.Assistant
-                                list[idx] = ChatItem.Assistant(a.key, a.text + d, streaming = true)
-                            } else {
-                                list.add(ChatItem.Assistant(nextKey(), d, streaming = true))
-                            }
+                            if (idx >= 0 && chunkStreamingIdx < 0) chunkStreamingIdx = idx
+                            chunkBuf.append(d)
                         }
                     }
                     DshEventTypes.TOOL_CALL -> {
@@ -256,6 +272,8 @@ class SessionChatState(
                     else -> {}
                 }
             }
+            // 循环尾：flush 进行中回合残留的 chunk 尾部
+            flushChunks()
             _items.value = list
         } catch (e: Exception) {
             _items.value = listOf(ChatItem.Notice(nextKey(), "加载历史失败：${e.message}", true))
@@ -274,7 +292,7 @@ class SessionChatState(
     suspend fun loadMore() {
         val before = oldestSeq ?: return
         try {
-            val h = connection.history(sessionId, beforeSeq = before, maxMessages = 10)
+            val h = connection.history(sessionId, beforeSeq = before, maxMessages = 5)
             oldestSeq = h.events.firstOrNull()?.event?.seq
             hasMore = h.hasMore && h.events.isNotEmpty()
             val list = mutableListOf<ChatItem>()
