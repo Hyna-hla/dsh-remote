@@ -31,8 +31,10 @@ import com.dsh.mobile.ui.theme.DshSuccess
 import com.dsh.mobile.ui.theme.DshWarn
 import com.dsh.mobile.ui.theme.DshShape
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 import java.text.SimpleDateFormat
 import java.util.*
@@ -95,16 +97,30 @@ fun HomeScreen(
 
     val connState by connection.state.collectAsState()
 
+    /** 后台预取最近 3 个会话首屏进内存缓存：点开即消费（SessionChatState.load 取走），跳过网络等待 */
+    fun prefetchRecent(list: List<SessionSummary>) {
+        scope.launch(Dispatchers.Default) {
+            list.take(3).forEach { s ->
+                if (HistoryMemoryCache.history(s.sessionId) == null) {
+                    runCatching { connection.history(s.sessionId, maxMessages = 3) }
+                        .getOrNull()?.let { HistoryMemoryCache.putPrefetch(s.sessionId, it) }
+                }
+            }
+        }
+    }
+
     fun refreshSessions() {
-        // 冷热分离：先渲染 gzip 本地缓存（秒开），再刷网络
-        val cached = cache.loadSessionList()
-        if (!cached.isNullOrEmpty()) sessions = cached
+        // 冷热分离：先渲染本地缓存（秒开；gzip 解压+解码移出主线程），再刷网络
         scope.launch {
+            val cached = withContext(Dispatchers.Default) { cache.loadSessionList() }
+            if (!cached.isNullOrEmpty()) sessions = cached
             try {
-                sessions = connection.listSessions()
+                val net = connection.listSessions()
                     .sortedByDescending { it.updatedAt }
-                cache.saveSessionList(sessions)
+                sessions = net
+                withContext(Dispatchers.Default) { cache.saveSessionList(net) }
                 listError = null
+                prefetchRecent(net)
             } catch (e: Exception) {
                 if (cached.isNullOrEmpty()) {
                     listError = "会话列表加载失败：" + e.message

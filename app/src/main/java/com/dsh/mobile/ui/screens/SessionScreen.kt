@@ -34,10 +34,12 @@ import com.dsh.mobile.data.*
 import com.dsh.mobile.ui.components.MarkdownText
 import com.dsh.mobile.ui.theme.*
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 
 /** 判定「复杂任务」的关键词（命中即用 Pro） */
@@ -58,13 +60,16 @@ private const val STREAM_TAIL_CHARS = 8000
 
 sealed interface ChatItem {
     val key: String
+    /** 服务端消息序号：缓存/网络首屏合并去重、排序用 */
+    val seq: Long?
 
-    data class User(override val key: String, val text: String) : ChatItem
+    data class User(override val key: String, val text: String, override val seq: Long? = null) : ChatItem
     data class Assistant(
         override val key: String,
         val text: String,
         val streaming: Boolean = false,
         val thinkSeconds: Long? = null,
+        override val seq: Long? = null,
     ) : ChatItem
     data class Tool(
         override val key: String,
@@ -74,28 +79,29 @@ sealed interface ChatItem {
         val status: String = "running",
         val result: String? = null,
         val isError: Boolean = false,
+        override val seq: Long? = null,
     ) : ChatItem
 
-    data class Notice(override val key: String, val text: String, val isError: Boolean = false) : ChatItem
+    data class Notice(override val key: String, val text: String, val isError: Boolean = false, override val seq: Long? = null) : ChatItem
 }
 
 /** 缓存互转：UI 条目 ↔ gzip 磁盘条目 */
 private fun ChatItem.toCached(): CachedItem = when (this) {
-    is ChatItem.User -> CachedItem(kind = "user", text = text)
+    is ChatItem.User -> CachedItem(kind = "user", text = text, seq = seq)
     is ChatItem.Assistant -> CachedItem(
-        kind = "assistant", text = text, thinkSeconds = thinkSeconds, streaming = streaming,
+        kind = "assistant", text = text, thinkSeconds = thinkSeconds, streaming = streaming, seq = seq,
     )
     is ChatItem.Tool -> CachedItem(
-        kind = "tool", name = name, args = args, status = status, result = result, isError = isError,
+        kind = "tool", name = name, args = args, status = status, result = result, isError = isError, seq = seq,
     )
-    is ChatItem.Notice -> CachedItem(kind = "notice", text = text, isError = isError)
+    is ChatItem.Notice -> CachedItem(kind = "notice", text = text, isError = isError, seq = seq)
 }
 
 private fun CachedItem.toChatItem(key: String): ChatItem = when (kind) {
-    "user" -> ChatItem.User(key, text)
-    "assistant" -> ChatItem.Assistant(key, text, streaming = streaming, thinkSeconds = thinkSeconds)
-    "tool" -> ChatItem.Tool(key, callId = key, name = name, args = args, status = status, result = result, isError = isError)
-    else -> ChatItem.Notice(key, text, isError = isError)
+    "user" -> ChatItem.User(key, text, seq = seq)
+    "assistant" -> ChatItem.Assistant(key, text, streaming = streaming, thinkSeconds = thinkSeconds, seq = seq)
+    "tool" -> ChatItem.Tool(key, callId = key, name = name, args = args, status = status, result = result, isError = isError, seq = seq)
+    else -> ChatItem.Notice(key, text, isError = isError, seq = seq)
 }
 
 private fun textBlocks(content: JsonElement?): String {
@@ -185,19 +191,21 @@ class SessionChatState(
     var hasMore = false
     private var oldestSeq: Long? = null
     private var streamStart: Long? = null
-    private var counter = 0L
+    /** key 生成线程安全：load() 解析在 Default 线程、实时事件在主线程，并发自增不得冲突 */
+    private val counter = java.util.concurrent.atomic.AtomicLong(0)
 
     // 流式增量缓冲：chunk 先攒在这里，50ms 批量 flush 一次列表
     private val pendingChunk = StringBuilder()
     private var flushJob: Job? = null
     private var cacheJob: Job? = null
 
-    /** 温缓存延迟写盘（3s 防抖，gzip 压缩） */
+    /** 温缓存延迟写盘（3s 防抖，gzip 压缩；快照拷贝在 Default 线程） */
     private fun scheduleCacheSave() {
         cacheJob?.cancel()
         cacheJob = scope.launch {
             delay(3_000)
-            cache.saveHistory(sessionId, _items.value.map { it.toCached() })
+            val snapshot = withContext(Dispatchers.Default) { _items.value.map { it.toCached() } }
+            cache.saveHistory(sessionId, snapshot)
         }
     }
 
@@ -206,7 +214,7 @@ class SessionChatState(
     private var loaded = false
     private val preloadBuffer = mutableListOf<SessionEventWire>()
 
-    private fun nextKey() = "k${counter++}"
+    private fun nextKey() = "k${counter.getAndIncrement()}"
 
     private fun flushPendingChunk() {
         flushJob?.cancel()
@@ -234,8 +242,10 @@ class SessionChatState(
     }
 
     suspend fun load() {
-        // 冷热分离：先渲染 gzip 本地温缓存（秒开），再刷网络冷数据
-        val cachedItems = cache.loadHistory(sessionId)?.mapIndexed { i, c -> c.toChatItem(nextKey()) }
+        // 冷热分离：先渲染本地温缓存（秒开；gzip 解压+解码移出主线程），再刷网络冷数据
+        val cachedItems = withContext(Dispatchers.Default) {
+            cache.loadHistory(sessionId)?.mapIndexed { i, c -> c.toChatItem(nextKey()) }
+        }
         if (!cachedItems.isNullOrEmpty()) {
             _items.value = cachedItems
             hasMore = true
@@ -243,83 +253,92 @@ class SessionChatState(
         try {
             // 首屏只取最近 3 条消息：服务端把 assistant/chunk 全量回传（约占 payload 98%），
             // maxMessages=10 时载荷可达 1MB+，手机端传输+解码+拼接就是"加载慢"的来源。
-            val h = connection.history(sessionId, maxMessages = 3)
+            // Home 后台预取命中时零网络直接消费。
+            val h = HistoryMemoryCache.takePrefetch(sessionId)
+                ?: connection.history(sessionId, maxMessages = 3)
             oldestSeq = h.events.firstOrNull()?.event?.seq
             hasMore = h.hasMore
             parseMeta(h.projections)
-            val list = mutableListOf<ChatItem>()
-            // 历史 chunk 只保留"进行中回合"的尾部：其余 chunk 被 assistant/message 完整文本覆盖。
-            // 用 StringBuilder 线性合并，避免逐条 a.text + d 的 O(n²) 拷贝。
-            val chunkBuf = StringBuilder()
-            var chunkStreamingIdx = -1
-            fun flushChunks() {
-                if (chunkBuf.isEmpty()) return
-                if (chunkStreamingIdx >= 0 && chunkStreamingIdx < list.size) {
-                    val a = list[chunkStreamingIdx] as ChatItem.Assistant
-                    list[chunkStreamingIdx] = ChatItem.Assistant(a.key, a.text + chunkBuf.toString(), streaming = true)
-                } else {
-                    list.add(ChatItem.Assistant(nextKey(), chunkBuf.toString(), streaming = true))
+            // 历史事件解析与拼接在 Default 线程完成（JSON 遍历 + StringBuilder 线性合并）
+            val net = withContext(Dispatchers.Default) {
+                val list = mutableListOf<ChatItem>()
+                // 历史 chunk 只保留"进行中回合"的尾部：其余 chunk 被 assistant/message 完整文本覆盖。
+                // 用 StringBuilder 线性合并，避免逐条 a.text + d 的 O(n²) 拷贝。
+                val chunkBuf = StringBuilder()
+                var chunkStreamingIdx = -1
+                fun flushChunks() {
+                    if (chunkBuf.isEmpty()) return
+                    if (chunkStreamingIdx >= 0 && chunkStreamingIdx < list.size) {
+                        val a = list[chunkStreamingIdx] as ChatItem.Assistant
+                        list[chunkStreamingIdx] = ChatItem.Assistant(a.key, a.text + chunkBuf.toString(), streaming = true, seq = a.seq)
+                    } else {
+                        list.add(ChatItem.Assistant(nextKey(), chunkBuf.toString(), streaming = true))
+                    }
+                    chunkBuf.clear()
+                    chunkStreamingIdx = -1
                 }
-                chunkBuf.clear()
-                chunkStreamingIdx = -1
-            }
-            h.events.forEach { entry ->
-                val e = entry.event
-                when (e.type) {
-                    DshEventTypes.USER_MESSAGE -> {
-                        flushChunks()
-                        val t = textBlocks(e.data.jsonObject["content"])
-                        if (t.isNotBlank()) list.add(ChatItem.User(nextKey(), t))
-                    }
-                    DshEventTypes.ASSISTANT_MESSAGE -> {
-                        // 完整消息到达：丢弃已收集的 chunk（其内容已包含在消息全文里）
-                        chunkBuf.clear()
-                        chunkStreamingIdx = -1
-                        val t = assistantTextOf(e.data)
-                        val idx = list.indexOfLast { it is ChatItem.Assistant && it.streaming }
-                        if (idx >= 0) {
-                            list[idx] = ChatItem.Assistant(list[idx].key, t)
-                        } else if (t.isNotBlank()) {
-                            list.add(ChatItem.Assistant(nextKey(), t))
+                h.events.forEach { entry ->
+                    val e = entry.event
+                    when (e.type) {
+                        DshEventTypes.USER_MESSAGE -> {
+                            flushChunks()
+                            val t = textBlocks(e.data.jsonObject["content"])
+                            if (t.isNotBlank()) list.add(ChatItem.User(nextKey(), t, seq = e.seq))
                         }
-                    }
-                    DshEventTypes.ASSISTANT_CHUNK -> {
-                        val d = chunkTextOf(e.data)
-                        if (d.isNotEmpty()) {
+                        DshEventTypes.ASSISTANT_MESSAGE -> {
+                            // 完整消息到达：丢弃已收集的 chunk（其内容已包含在消息全文里）
+                            chunkBuf.clear()
+                            chunkStreamingIdx = -1
+                            val t = assistantTextOf(e.data)
                             val idx = list.indexOfLast { it is ChatItem.Assistant && it.streaming }
-                            if (idx >= 0 && chunkStreamingIdx < 0) chunkStreamingIdx = idx
-                            chunkBuf.append(d)
+                            if (idx >= 0) {
+                                list[idx] = ChatItem.Assistant(list[idx].key, t, seq = e.seq)
+                            } else if (t.isNotBlank()) {
+                                list.add(ChatItem.Assistant(nextKey(), t, seq = e.seq))
+                            }
                         }
-                    }
-                    DshEventTypes.TOOL_CALL -> {
-                        val d = e.data.jsonObject
-                        list.add(
-                            ChatItem.Tool(
-                                key = nextKey(),
-                                callId = d["callId"]?.jsonPrimitive?.contentOrNull ?: "",
-                                name = d["name"]?.jsonPrimitive?.contentOrNull ?: "tool",
-                                args = d["arguments"]?.jsonPrimitive?.contentOrNull ?: "",
+                        DshEventTypes.ASSISTANT_CHUNK -> {
+                            val d = chunkTextOf(e.data)
+                            if (d.isNotEmpty()) {
+                                val idx = list.indexOfLast { it is ChatItem.Assistant && it.streaming }
+                                if (idx >= 0 && chunkStreamingIdx < 0) chunkStreamingIdx = idx
+                                chunkBuf.append(d)
+                            }
+                        }
+                        DshEventTypes.TOOL_CALL -> {
+                            val d = e.data.jsonObject
+                            list.add(
+                                ChatItem.Tool(
+                                    key = nextKey(),
+                                    callId = d["callId"]?.jsonPrimitive?.contentOrNull ?: "",
+                                    name = d["name"]?.jsonPrimitive?.contentOrNull ?: "tool",
+                                    args = d["arguments"]?.jsonPrimitive?.contentOrNull ?: "",
+                                    seq = e.seq,
+                                )
                             )
-                        )
+                        }
+                        DshEventTypes.TOOL_RESULT -> attachResult(list, e.data)
+                        "permission/preset" -> {
+                            e.data.jsonObject["preset"]?.jsonPrimitive?.contentOrNull?.let { currentMode.value = it }
+                        }
+                        DshEventTypes.SESSION_TITLE -> {
+                            e.data.jsonObject["title"]?.jsonPrimitive?.contentOrNull?.let { title.value = it }
+                        }
+                        DshEventTypes.AGENT_ERROR -> {
+                            val msg = e.data.jsonObject["error"]?.toString() ?: "智能体出错"
+                            list.add(ChatItem.Notice(nextKey(), msg, true, seq = e.seq))
+                        }
+                        else -> {}
                     }
-                    DshEventTypes.TOOL_RESULT -> attachResult(list, e.data)
-                    "permission/preset" -> {
-                        e.data.jsonObject["preset"]?.jsonPrimitive?.contentOrNull?.let { currentMode.value = it }
-                    }
-                    DshEventTypes.SESSION_TITLE -> {
-                        e.data.jsonObject["title"]?.jsonPrimitive?.contentOrNull?.let { title.value = it }
-                    }
-                    DshEventTypes.AGENT_ERROR -> {
-                        val msg = e.data.jsonObject["error"]?.toString() ?: "智能体出错"
-                        list.add(ChatItem.Notice(nextKey(), msg, true))
-                    }
-                    else -> {}
                 }
+                // 循环尾：flush 进行中回合残留的 chunk 尾部
+                flushChunks()
+                list
             }
-            // 循环尾：flush 进行中回合残留的 chunk 尾部
-            flushChunks()
-            _items.value = list
-            cache.saveHistory(sessionId, list.map { it.toCached() })
+            // 缓存 + 网络合并：按 seq 拼接，避免网络 3 条到达后整页替换导致内容闪跳丢失
+            val merged = withContext(Dispatchers.Default) { mergeCachedWithNet(cachedItems, net) }
+            _items.value = merged
+            withContext(Dispatchers.Default) { cache.saveHistory(sessionId, merged.map { it.toCached() }) }
         } catch (e: Exception) {
             if (cachedItems.isNullOrEmpty()) {
                 _items.value = listOf(ChatItem.Notice(nextKey(), "加载历史失败：" + e.message, true))
@@ -337,6 +356,19 @@ class SessionChatState(
         }
     }
 
+    /**
+     * 缓存与网络首屏合并：新格式缓存（带 seq）按序号去重拼接——
+     * 缓存中早于网络首条的条目保留，网络条目覆盖尾部；旧格式缓存（seq 全 null，
+     * 一次性过渡）直接追加，尾部可能重复一次，随后写盘升级为新格式。
+     */
+    private fun mergeCachedWithNet(cached: List<ChatItem>?, net: List<ChatItem>): List<ChatItem> {
+        if (cached.isNullOrEmpty()) return net
+        val cacheHasSeq = cached.any { it.seq != null }
+        if (!cacheHasSeq) return cached + net
+        val netMinSeq = net.mapNotNull { it.seq }.minOrNull() ?: return cached + net
+        return cached.filter { item -> val s = item.seq; s == null || s < netMinSeq } + net
+    }
+
     /** 加载更早的消息（按 seq 前插） */
     suspend fun loadMore() {
         val before = oldestSeq ?: return
@@ -344,41 +376,46 @@ class SessionChatState(
             val h = connection.history(sessionId, beforeSeq = before, maxMessages = 5)
             oldestSeq = h.events.firstOrNull()?.event?.seq
             hasMore = h.hasMore && h.events.isNotEmpty()
-            val list = mutableListOf<ChatItem>()
-            h.events.forEach { entry ->
-                val e = entry.event
-                when (e.type) {
-                    DshEventTypes.USER_MESSAGE -> {
-                        val t = textBlocks(e.data.jsonObject["content"])
-                        if (t.isNotBlank()) list.add(ChatItem.User(nextKey(), t))
-                    }
-                    DshEventTypes.ASSISTANT_MESSAGE -> {
-                        val t = assistantTextOf(e.data)
-                        if (t.isNotBlank()) list.add(ChatItem.Assistant(nextKey(), t))
-                    }
-                    DshEventTypes.TOOL_CALL -> {
-                        val d = e.data.jsonObject
-                        list.add(
-                            ChatItem.Tool(
-                                key = nextKey(),
-                                callId = d["callId"]?.jsonPrimitive?.contentOrNull ?: "",
-                                name = d["name"]?.jsonPrimitive?.contentOrNull ?: "tool",
-                                args = d["arguments"]?.jsonPrimitive?.contentOrNull ?: "",
+            // 解析与拼接移出主线程
+            val list = withContext(Dispatchers.Default) {
+                val out = mutableListOf<ChatItem>()
+                h.events.forEach { entry ->
+                    val e = entry.event
+                    when (e.type) {
+                        DshEventTypes.USER_MESSAGE -> {
+                            val t = textBlocks(e.data.jsonObject["content"])
+                            if (t.isNotBlank()) out.add(ChatItem.User(nextKey(), t, seq = e.seq))
+                        }
+                        DshEventTypes.ASSISTANT_MESSAGE -> {
+                            val t = assistantTextOf(e.data)
+                            if (t.isNotBlank()) out.add(ChatItem.Assistant(nextKey(), t, seq = e.seq))
+                        }
+                        DshEventTypes.TOOL_CALL -> {
+                            val d = e.data.jsonObject
+                            out.add(
+                                ChatItem.Tool(
+                                    key = nextKey(),
+                                    callId = d["callId"]?.jsonPrimitive?.contentOrNull ?: "",
+                                    name = d["name"]?.jsonPrimitive?.contentOrNull ?: "tool",
+                                    args = d["arguments"]?.jsonPrimitive?.contentOrNull ?: "",
+                                    seq = e.seq,
+                                )
                             )
-                        )
+                        }
+                        DshEventTypes.TOOL_RESULT -> attachResult(out, e.data)
+                        "permission/preset" -> {
+                            e.data.jsonObject["preset"]?.jsonPrimitive?.contentOrNull?.let { currentMode.value = it }
+                        }
+                        DshEventTypes.SESSION_TITLE -> {
+                            e.data.jsonObject["title"]?.jsonPrimitive?.contentOrNull?.let { title.value = it }
+                        }
+                        else -> {}
                     }
-                    DshEventTypes.TOOL_RESULT -> attachResult(list, e.data)
-                    "permission/preset" -> {
-                        e.data.jsonObject["preset"]?.jsonPrimitive?.contentOrNull?.let { currentMode.value = it }
-                    }
-                    DshEventTypes.SESSION_TITLE -> {
-                        e.data.jsonObject["title"]?.jsonPrimitive?.contentOrNull?.let { title.value = it }
-                    }
-                    else -> {}
                 }
+                out
             }
             if (list.isNotEmpty()) _items.value = list + _items.value
-            cache.saveHistory(sessionId, _items.value.map { it.toCached() })
+            withContext(Dispatchers.Default) { cache.saveHistory(sessionId, _items.value.map { it.toCached() }) }
         } catch (_: Exception) {}
     }
 
@@ -417,7 +454,7 @@ class SessionChatState(
         when (e.type) {
             DshEventTypes.USER_MESSAGE -> {
                 val t = textBlocks(e.data.jsonObject["content"])
-                if (t.isNotBlank()) cur.add(ChatItem.User(nextKey(), t))
+                if (t.isNotBlank()) cur.add(ChatItem.User(nextKey(), t, seq = e.seq))
             }
 
             DshEventTypes.ASSISTANT_MESSAGE -> {
@@ -425,9 +462,9 @@ class SessionChatState(
                 val secs = streamStart?.let { (e.time - it) / 1000 }
                 val idx = cur.indexOfLast { it is ChatItem.Assistant && it.streaming }
                 if (idx >= 0) {
-                    cur[idx] = ChatItem.Assistant(cur[idx].key, t, thinkSeconds = secs)
+                    cur[idx] = ChatItem.Assistant(cur[idx].key, t, thinkSeconds = secs, seq = e.seq)
                 } else if (t.isNotBlank()) {
-                    cur.add(ChatItem.Assistant(nextKey(), t, thinkSeconds = secs))
+                    cur.add(ChatItem.Assistant(nextKey(), t, thinkSeconds = secs, seq = e.seq))
                 }
                 streamStart = null
             }
@@ -440,6 +477,7 @@ class SessionChatState(
                         callId = d["callId"]?.jsonPrimitive?.contentOrNull ?: "",
                         name = d["name"]?.jsonPrimitive?.contentOrNull ?: "tool",
                         args = d["arguments"]?.jsonPrimitive?.contentOrNull ?: "",
+                        seq = e.seq,
                     )
                 )
             }
@@ -459,6 +497,7 @@ class SessionChatState(
                         nextKey(),
                         e.data.jsonObject["error"]?.toString() ?: "智能体出错",
                         true,
+                        seq = e.seq,
                     )
                 )
             }
@@ -469,7 +508,7 @@ class SessionChatState(
                 val idx = cur.indexOfLast { it is ChatItem.Assistant && it.streaming }
                 if (idx >= 0) {
                     val a = cur[idx] as ChatItem.Assistant
-                    cur[idx] = ChatItem.Assistant(a.key, a.text, streaming = false)
+                    cur[idx] = ChatItem.Assistant(a.key, a.text, streaming = false, seq = a.seq)
                 }
             }
 
