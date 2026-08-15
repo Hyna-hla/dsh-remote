@@ -84,8 +84,8 @@ object OkHttpClientFactory {
             builder.hostnameVerifier { _, _ -> true }
         } else if (ca != null) {
             val bytes = runCatching { java.io.File(ca).readBytes() }.getOrNull()
-            val ctx = bytes?.let { mergedCaContext(it) }
-            if (ctx != null) builder.sslSocketFactory(ctx.socketFactory, compositeX509()!!)
+            val merged = bytes?.let { mergedCaContext(it) }
+            if (merged != null) builder.sslSocketFactory(merged.first.socketFactory, merged.second)
         }
         buildProxy(profile.proxy)?.let { builder.proxy(it) }
         profile.proxy?.takeIf { it.username.isNotBlank() }?.let { p ->
@@ -101,7 +101,7 @@ object OkHttpClientFactory {
     }
 
     /** 系统链 + 导入 CA 合成；CA 无法解析返回 null（回退系统默认） */
-    internal fun mergedCaContext(caBytes: ByteArray): SSLContext? = runCatching {
+    internal fun mergedCaContext(caBytes: ByteArray): Pair<SSLContext, X509TrustManager>? = runCatching {
         val ca = parseCaCertificate(caBytes) ?: return null
         val imported = KeyStore.getInstance(KeyStore.getDefaultType()).apply {
             load(null, null)
@@ -114,12 +114,8 @@ object OkHttpClientFactory {
         val composite = CompositeTrustManager(systemTmf, importedTmf)
         val ctx = SSLContext.getInstance("TLS")
         ctx.init(null, arrayOf<TrustManager>(composite), SecureRandom())
-        lastComposite = composite
-        ctx
+        ctx to composite
     }.getOrNull()
-
-    @Volatile private var lastComposite: X509TrustManager? = null
-    private fun compositeX509(): X509TrustManager? = lastComposite
 
     private class CompositeTrustManager(
         private val primary: X509TrustManager,

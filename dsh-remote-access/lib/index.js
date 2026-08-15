@@ -2,8 +2,9 @@
 // 微信桥：扫码登录微信 iLink Bot → 微信里给自己发消息遥控 DSH（会话注入、流式回复、审批、图片）
 // cpolar：网页版备选。内置一键安装（官网自动下载）、注册引导、authtoken 保存，无需手动装 cpolar
 import { execFile } from "node:child_process";
+import { readdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import { ILinkClient } from "./ilink.js";
 import { createBridge } from "./bridge.js";
@@ -265,6 +266,27 @@ export const apply = (ctx) => {
         json(res, 200, { ok: true, dataUrl });
       } catch (err) {
         json(res, 500, { error: String(err?.message ?? err) });
+      }
+    },
+  });
+
+  // 目录浏览（移动端任选 PC 目录作工作区，不限于 DSH 已划定的工作区）：只读列举子目录，限 200 条
+  reg({
+    kind: "exact",
+    path: "/api/remote-access/fs/list",
+    handler: async (req, res) => {
+      if (req.method !== "GET") return json(res, 405, { error: "method not allowed" });
+      const u = new URL(req.url, "http://localhost");
+      const p = u.searchParams.get("path") ?? "";
+      if (!isAbsolute(p)) return json(res, 400, { error: "需要绝对路径" });
+      try {
+        const dirs = readdirSync(p, { withFileTypes: true })
+          .filter((d) => d.isDirectory())
+          .slice(0, 200)
+          .map((d) => d.name);
+        json(res, 200, { ok: true, path: p, dirs });
+      } catch (err) {
+        json(res, 200, { ok: false, error: String(err?.message ?? err) });
       }
     },
   });

@@ -70,3 +70,27 @@ Commit: `3c694c6 feat(s1): 按主机 OkHttp 客户端工厂（自签名信任/CA
    若要按 brief 意图「系统链 + 导入 CA 合成」生效，`mergedCaContext` 应改为 `ctx.init(null, arrayOf<TrustManager>(lastComposite), null)` 后再返回 ctx。**我未擅自修改**——严格按控制器裁定的「最终设计」逐字转录，此问题交由控制器/后续 Task 8（用 `build` 做 TLS 诊断）裁决是否修正。
 
 2. 观测到仓库存在**并行提交**：工作期间出现了 `b90bbf6 v1.2.1: 修复 Pro 计费漏洞 + ChatGPT 空态文案`（非本任务、非 S1 计划）。经 `git show --stat` 确认我的提交 `3c694c6` 仅含本任务 2 个文件，未受污染。
+
+---
+
+## Fix (控制器复核后修复 Concern 1)
+
+按控制器要求修复「导入私有 CA 不参与握手信任」缺陷：
+
+1. **`mergedCaContext` 重构为纯函数**：`internal fun mergedCaContext(caBytes: ByteArray): SSLContext?`
+   - URI 文件读取移出，改为接收字节数组。
+   - `val composite = CompositeTrustManager(systemTmf, importedTmf)` → `ctx.init(null, arrayOf<TrustManager>(composite), SecureRandom())` → `lastComposite = composite` → 返回 ctx。
+   - **删除** `ctx.init(null, null, null)`（原来回退系统默认信任，导致导入 CA 不进握手信任链）。
+2. **`newClient` CA 分支**：`val bytes = runCatching { java.io.File(ca).readBytes() }.getOrNull()` → `mergedCaContext(bytes)`；null 则保持默认链，非 null 则 `builder.sslSocketFactory(ctx.socketFactory, compositeX509()!!)`。
+   - 说明：控制器原文写 `val bytes = java.io.File(ca).readBytes()`；我额外用 `runCatching { ... }.getOrNull()` 包裹文件读取，以保留原 brief「CA 文件读取失败回退系统默认」语义（文件缺失/不可读时不再抛 IOException 崩溃，而是回落默认链）。若控制器不认可此兜底，可去掉 runCatching。
+3. **补测试** `mergedCaContextGarbageReturnsNull`：`OkHttpClientFactory.mergedCaContext("not a pem".toByteArray())` 与 `byteArrayOf()` 均返回 null（注意：`mergedCaContext` 是 object 成员，测试里以 `OkHttpClientFactory.mergedCaContext(...)` 限定调用）。
+
+### 验证结果
+
+- 定向：`.\gradlew.bat :app:testDebugUnitTest --tests "com.dsh.mobile.data.OkHttpClientFactoryTest"` → BUILD SUCCESSFUL，XML `tests="4" failures="0" errors="0"`。
+- 全量单测：`.\gradlew.bat :app:testDebugUnitTest` → BUILD SUCCESSFUL，EXITCODE=0；聚合 4 个测试类 / 24 tests / 0 failures / 0 errors。
+
+### 修复提交
+
+- `089f389 fix(s1): mergedCaContext 真正合并系统链与导入 CA（CompositeTrustManager 进入 SSLContext）`
+- 仅含 `OkHttpClientFactory.kt`（16 行变更）+ `OkHttpClientFactoryTest.kt`（+6 行）。

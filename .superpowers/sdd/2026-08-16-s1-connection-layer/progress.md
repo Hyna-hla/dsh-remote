@@ -63,3 +63,6 @@ Task 3: fix round 1/5 (1 addressed, 0 open — writeProfiles 迁移覆盖; commi
 Task 3: complete (commits 62eb722..472e080, review clean, 3 deferred minors)
 
 Task 4: 实现者 DONE_WITH_CONCERNS——CA 合成正确性疑虑。Ruling: 计划裁定版仍有缺陷（ctx.init(null,null,null) 使导入 CA 不参与握手信任），spec §5.3 权威：改为 CompositeTrustManager 传入 ctx.init + bytes 版纯函数 mergedCaContext；评审前先修（fix round 0）。
+
+Task 4: 评审 Spec ✅，Important 1 条：mergedCaContext 修复无正向测试（垃圾输入→null 旧版也能过），CA 合入信任链的行为无回归保护。进入 fix round 1。
+Task 4: minor (deferred): lastComposite 隐藏返回通道（@Volatile 字段跨方法传值）；compositeX509()!! 潜在 NPE；getAcceptedIssuers 空数组（Android conscrypt 下无碍）；trustAll/buildProxy 测试仅为冒烟。注：若 fix round 按 Pair 返回重构，minor 2/3 顺带解决。

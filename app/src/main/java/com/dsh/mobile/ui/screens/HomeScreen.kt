@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -96,6 +97,37 @@ fun HomeScreen(
     var newWsTitle by remember { mutableStateOf("") }
     var wsBusy by remember { mutableStateOf(false) }
     var wsError by remember { mutableStateOf<String?>(null) }
+
+    // —— 浏览 PC 目录（任选目录作工作区，不限于 DSH 已划定的）——
+    var browseOpen by remember { mutableStateOf(false) }
+    var browsePath by remember { mutableStateOf("C:\\") }
+    var browseDirs by remember { mutableStateOf<List<String>>(emptyList()) }
+    var browseLoading by remember { mutableStateOf(false) }
+    var browseError by remember { mutableStateOf<String?>(null) }
+
+    fun loadBrowseDir(path: String) {
+        browseLoading = true
+        browseError = null
+        scope.launch {
+            val dirs = connection.listDirectory(path)
+            browsePath = path
+            browseDirs = dirs
+            browseLoading = false
+        }
+    }
+
+    fun enterBrowseDir(name: String) {
+        loadBrowseDir(browsePath.trimEnd('\\') + "\\" + name)
+    }
+
+    fun browseUp() {
+        var p = browsePath.trimEnd('\\')
+        if (p.length <= 3) return // 盘符根（如 C:\）无上级
+        val idx = p.lastIndexOf('\\')
+        if (idx < 0) return
+        val parent = p.substring(0, idx + 1)
+        loadBrowseDir(parent)
+    }
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -244,6 +276,37 @@ fun HomeScreen(
                     wsBusy = wsBusy,
                     wsError = wsError,
                     onSetError = { wsError = it },
+                    // —— 浏览 PC 目录 ——
+                    browseOpen = browseOpen,
+                    onBrowseOpen = {
+                        browseOpen = true
+                        loadBrowseDir(browsePath)
+                    },
+                    browsePath = browsePath,
+                    browseDirs = browseDirs,
+                    browseLoading = browseLoading,
+                    browseError = browseError,
+                    onBrowseEnter = { enterBrowseDir(it) },
+                    onBrowseUp = { browseUp() },
+                    onBrowseBack = { browseOpen = false },
+                    onBrowsePick = {
+                        // 选中当前浏览目录 → 创建为工作区并选中
+                        val path = browsePath.trimEnd('\\')
+                        val title = path.substringAfterLast('\\')
+                        wsBusy = true
+                        scope.launch {
+                            try {
+                                connection.createWorkspace(path, title.ifBlank { null })
+                                refreshArchived()
+                                browseOpen = false
+                                workspaceSheet = false
+                            } catch (e: Exception) {
+                                browseError = e.message
+                            } finally {
+                                wsBusy = false
+                            }
+                        }
+                    },
                     onPickDefault = {
                         selectedWorkspaceId = ""
                         scope.launch { settingsStore.setWorkspaceId("") }
@@ -861,6 +924,16 @@ private fun WorkspaceSheetContent(
     wsBusy: Boolean,
     wsError: String?,
     onSetError: (String?) -> Unit,
+    browseOpen: Boolean,
+    onBrowseOpen: () -> Unit,
+    browsePath: String,
+    browseDirs: List<String>,
+    browseLoading: Boolean,
+    browseError: String?,
+    onBrowseEnter: (String) -> Unit,
+    onBrowseUp: () -> Unit,
+    onBrowseBack: () -> Unit,
+    onBrowsePick: () -> Unit,
     onPickDefault: () -> Unit,
     onPickWorkspace: (String) -> Unit,
     onCreateWorkspace: (String, String) -> Unit,
@@ -871,17 +944,137 @@ private fun WorkspaceSheetContent(
             .padding(horizontal = 20.dp),
     ) {
         Text(
-            "新对话工作区",
+            if (browseOpen) "浏览电脑目录" else "新对话工作区",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
         )
         Spacer(Modifier.height(6.dp))
         Text(
-            "新对话将创建在所选工作区（PC 端目录）下，切换后自动记住。",
+            if (browseOpen) "任意选择一个 PC 端文件夹作为工作区（不限于 DSH 已划定的工作区）。"
+            else "新对话将创建在所选工作区（PC 端目录）下，切换后自动记住。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(14.dp))
+
+        if (browseOpen) {
+            // ── 目录浏览器 ──
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(
+                    onClick = onBrowseUp,
+                    enabled = !browseLoading,
+                ) {
+                    Icon(Icons.Default.ArrowUpward, null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("上级")
+                }
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    browsePath,
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            browseError?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                Spacer(Modifier.height(6.dp))
+            }
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 240.dp),
+            ) {
+                if (browseLoading) {
+                    Box(
+                        Modifier.fillMaxWidth().padding(16.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator(Modifier.size(22.dp))
+                    }
+                } else if (browseDirs.isEmpty()) {
+                    Box(
+                        Modifier.fillMaxWidth().padding(16.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "（没有子目录，或 PC 端插件未更新）",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
+                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                        browseDirs.forEach { name ->
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onBrowseEnter(name) }
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    Icons.Default.Folder,
+                                    null,
+                                    Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                Text(
+                                    name,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            Button(
+                onClick = onBrowsePick,
+                enabled = !wsBusy && !browseLoading,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                if (wsBusy) {
+                    CircularProgressIndicator(
+                        Modifier.size(16.dp),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    Icon(Icons.Default.Check, null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("选这个目录作为工作区")
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            TextButton(
+                onClick = onBrowseBack,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("返回") }
+            Spacer(Modifier.height(28.dp))
+            return@Column
+        }
+
+        // 浏览入口（不限于 DSH 已划定工作区）
+        WorkspaceRow(
+            icon = Icons.Default.FolderOpen,
+            title = "浏览电脑目录…",
+            subtitle = "任选 PC 端文件夹作为工作区",
+            selected = false,
+            onClick = onBrowseOpen,
+        )
 
         // 默认工作区
         WorkspaceRow(

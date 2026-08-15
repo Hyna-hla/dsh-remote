@@ -549,6 +549,31 @@ class DshConnection {
         })
     }
 
+    /**
+     * 浏览 PC 端任意目录（依赖 PC 端插件 dsh-remote-access 的 fs/list 端点）：
+     * 返回子目录名列表；插件未安装/不可用时返回空列表（UI 回退到手动输入路径）。
+     */
+    suspend fun listDirectory(path: String): List<String> {
+        return try {
+            val text = withContext(Dispatchers.IO) {
+                val encoded = java.net.URLEncoder.encode(path, "UTF-8")
+                val request = Request.Builder()
+                    .url("$baseUrl/api/remote-access/fs/list?path=$encoded")
+                    .get()
+                    .build()
+                unaryClient.newCall(request).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withContext ""
+                    resp.body?.string().orEmpty()
+                }
+            }
+            val obj = json.parseToJsonElement(text).jsonObject
+            if (obj["ok"]?.jsonPrimitive?.booleanOrNull != true) return emptyList()
+            obj["dirs"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
     /** 归档会话（从会话列表移除，进入已归档区） */
     suspend fun archiveSession(sessionId: String) {
         call(DshEndpoints.WORKSPACE_ARCHIVE_SESSION, buildJsonObject { put("sessionId", sessionId) })
