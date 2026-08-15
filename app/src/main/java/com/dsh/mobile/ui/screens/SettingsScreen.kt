@@ -10,6 +10,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.rememberScrollState
@@ -57,6 +58,7 @@ fun SettingsScreen(
     var autoModel by remember { mutableStateOf(true) }
     var notifGranted by remember { mutableStateOf(true) }
     var themeImportError by remember { mutableStateOf<String?>(null) }
+    var showAppearanceDetail by remember { mutableStateOf(false) }
     val customThemes by ThemeRepository.themes.collectAsState()
     val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { g ->
         notifGranted = g
@@ -235,101 +237,6 @@ fun SettingsScreen(
                         }
                     }
 
-                    // 一键预设（对齐桌面端）
-                    Text(
-                        "一键预设",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf(
-                            BgPreset("通透玻璃", 80f, 4f, 0.2f, 1.1f),
-                            BgPreset("电影质感", 40f, 0f, 0.55f, 1.2f),
-                            BgPreset("纯净原图", 95f, 0f, 0.08f, 1f),
-                            BgPreset("柔和梦境", 65f, 12f, 0.25f, 1.05f),
-                        ).forEach { (name, glass, blur, dim, saturate) ->
-                            AssistChip(
-                                onClick = {
-                                    persist(
-                                        appearance.copy(
-                                            bgOpacity = 1f,
-                                            bgBlur = blur,
-                                            bgDim = dim,
-                                            bgSaturate = saturate,
-                                            panelGlass = glass,
-                                        ),
-                                    )
-                                },
-                                label = { Text(name, style = MaterialTheme.typography.labelSmall) },
-                            )
-                        }
-                    }
-
-                    Text(
-                        "图像不透明度：${(appearance.bgOpacity * 100).toInt()}%",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Slider(
-                        value = appearance.bgOpacity,
-                        onValueChange = { persist(appearance.copy(bgOpacity = it)) },
-                        valueRange = 0.05f..1f,
-                    )
-                    Text(
-                        "模糊：${appearance.bgBlur.toInt()}px",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Slider(
-                        value = appearance.bgBlur,
-                        onValueChange = { persist(appearance.copy(bgBlur = it)) },
-                        valueRange = 0f..30f,
-                    )
-                    Text(
-                        "蒙层浓度：${(appearance.bgDim * 100).toInt()}%",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Slider(
-                        value = appearance.bgDim,
-                        onValueChange = { persist(appearance.copy(bgDim = it)) },
-                        valueRange = 0f..0.85f,
-                    )
-                    Text(
-                        "饱和度：${(appearance.bgSaturate * 100).toInt()}%",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Slider(
-                        value = appearance.bgSaturate,
-                        onValueChange = { persist(appearance.copy(bgSaturate = it)) },
-                        valueRange = 0.5f..1.5f,
-                    )
-                    Text(
-                        "面板通透：${appearance.panelGlass.toInt()}%",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Slider(
-                        value = appearance.panelGlass,
-                        onValueChange = { persist(appearance.copy(panelGlass = it)) },
-                        valueRange = 0f..100f,
-                    )
-                    Text(
-                        "屏幕亮度：${(appearance.brightness * 100).toInt()}%",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Slider(
-                        value = appearance.brightness,
-                        onValueChange = { persist(appearance.copy(brightness = it)) },
-                        valueRange = 0.4f..1f,
-                    )
-                    Text(
-                        "背景图满清晰度显示，蒙层独立压暗/提亮保证文字可读；面板通透越高界面越透明。亮度调低 = 夜间模式（整屏变暗，不挡操作）",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                     HorizontalDivider(
                         modifier = Modifier.padding(vertical = 4.dp),
                         color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
@@ -354,6 +261,132 @@ fun SettingsScreen(
                                 autoModel = it
                                 scope.launch { settingsStore.setAutoModel(it) }
                             },
+                        )
+                    }
+
+                    // 具体外观细节默认折叠，避免设置页冗杂
+                    if (showAppearanceDetail) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(vertical = 4.dp),
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                        )
+                        Text(
+                            "一键预设",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf(
+                                BgPreset("通透玻璃", 80f, 4f, 0.2f, 1.1f),
+                                BgPreset("电影质感", 40f, 0f, 0.55f, 1.2f),
+                                BgPreset("纯净原图", 95f, 0f, 0.08f, 1f),
+                                BgPreset("柔和梦境", 65f, 12f, 0.25f, 1.05f),
+                            ).forEach { (name, glass, blur, dim, saturate) ->
+                                AssistChip(
+                                    onClick = {
+                                        persist(
+                                            appearance.copy(
+                                                bgOpacity = 1f,
+                                                bgBlur = blur,
+                                                bgDim = dim,
+                                                bgSaturate = saturate,
+                                                panelGlass = glass,
+                                            ),
+                                        )
+                                    },
+                                    label = { Text(name, style = MaterialTheme.typography.labelSmall) },
+                                )
+                            }
+                        }
+                        Text(
+                            "图像不透明度：${(appearance.bgOpacity * 100).toInt()}%",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Slider(
+                            value = appearance.bgOpacity,
+                            onValueChange = { persist(appearance.copy(bgOpacity = it)) },
+                            valueRange = 0.05f..1f,
+                        )
+                        Text(
+                            "模糊：${appearance.bgBlur.toInt()}px",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Slider(
+                            value = appearance.bgBlur,
+                            onValueChange = { persist(appearance.copy(bgBlur = it)) },
+                            valueRange = 0f..30f,
+                        )
+                        Text(
+                            "蒙层浓度：${(appearance.bgDim * 100).toInt()}%",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Slider(
+                            value = appearance.bgDim,
+                            onValueChange = { persist(appearance.copy(bgDim = it)) },
+                            valueRange = 0f..0.85f,
+                        )
+                        Text(
+                            "饱和度：${(appearance.bgSaturate * 100).toInt()}%",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Slider(
+                            value = appearance.bgSaturate,
+                            onValueChange = { persist(appearance.copy(bgSaturate = it)) },
+                            valueRange = 0.5f..1.5f,
+                        )
+                        Text(
+                            "面板通透：${appearance.panelGlass.toInt()}%",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Slider(
+                            value = appearance.panelGlass,
+                            onValueChange = { persist(appearance.copy(panelGlass = it)) },
+                            valueRange = 0f..100f,
+                        )
+                        Text(
+                            "屏幕亮度：${(appearance.brightness * 100).toInt()}%",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Slider(
+                            value = appearance.brightness,
+                            onValueChange = { persist(appearance.copy(brightness = it)) },
+                            valueRange = 0.4f..1f,
+                        )
+                        Text(
+                            "背景图满清晰度显示，蒙层独立压暗/提亮保证文字可读；面板通透越高界面越透明。亮度调低 = 夜间模式（整屏变暗，不挡操作）",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
+                    // 折叠开关：卡片最底部的向下/向上小箭头
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 4.dp),
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showAppearanceDetail = !showAppearanceDetail },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        Text(
+                            if (showAppearanceDetail) "收起外观细节" else "更多外观设置",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Icon(
+                            if (showAppearanceDetail) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            null,
+                            Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
