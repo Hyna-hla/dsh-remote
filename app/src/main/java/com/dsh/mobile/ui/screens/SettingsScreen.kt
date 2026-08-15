@@ -181,7 +181,13 @@ fun SettingsScreen(
             Text("关于", style = MaterialTheme.typography.titleMedium)
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    SettingInfoRow("应用", "DSH Remote v1.0.4")
+                    // 版本号从系统包信息读取，避免硬编码不同步
+                    val versionName = remember {
+                        runCatching {
+                            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+                        }.getOrNull() ?: "?"
+                    }
+                    SettingInfoRow("应用", "DSH Remote v$versionName")
                     SettingInfoRow("协议", "dsh-api (client-request / WS+SSE mux)")
                     SettingInfoRow("后端", "DeepSeek Harness")
                     SettingInfoRow("主题", "DSH 深色 · 背景图/亮度可调")
