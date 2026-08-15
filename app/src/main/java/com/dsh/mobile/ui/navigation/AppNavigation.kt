@@ -20,6 +20,7 @@ sealed class Screen(val route: String) {
         fun createRoute(sessionId: String) = "session/$sessionId"
     }
     data object Settings : Screen("settings")
+    data object Pro : Screen("pro")
 }
 
 @Composable
@@ -69,6 +70,7 @@ fun AppNavigation(
                 connection = connection,
                 onSessionClick = { id -> navController.navigate(Screen.Session.createRoute(id)) },
                 onSettings = { navController.navigate(Screen.Settings.route) },
+                onUpgrade = { navController.navigate(Screen.Pro.route) },
                 onDisconnect = { onUserDisconnect() },
             )
         }
@@ -86,8 +88,12 @@ fun AppNavigation(
             SettingsScreen(
                 connection = connection,
                 onBack = { navController.popBackStack() },
+                onUpgrade = { navController.navigate(Screen.Pro.route) },
                 onDisconnect = { onUserDisconnect() },
             )
+        }
+        composable(Screen.Pro.route) {
+            ProScreen(onBack = { navController.popBackStack() })
         }
     }
 }

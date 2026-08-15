@@ -14,6 +14,18 @@ data class ConnectionConfig(
     val autoConnect: Boolean = true,
 )
 
+/** 假 Pro 订阅状态（趣味彩蛋：真实 token 消耗扣减假订阅额度） */
+data class ProState(
+    /** 当前套餐 id（空 = 未订阅） */
+    val plan: String = "",
+    /** 剩余 token（可扣成负数 = 欠费） */
+    val balance: Long = 0L,
+    /** 累计消耗 token */
+    val consumed: Long = 0L,
+    /** 订阅时间戳 */
+    val since: Long = 0L,
+)
+
 data class AppearanceConfig(
     val bgUri: String? = null,
     /** 图像不透明度 0.05–1（默认 100%，清晰可见） */
@@ -49,6 +61,10 @@ class SettingsStore(private val context: Context) {
         private val WORKSPACE_ID_KEY = stringPreferencesKey("workspace_id")
         private val UI_FONT_KEY = stringPreferencesKey("ui_font")
         private val CODE_FONT_KEY = stringPreferencesKey("code_font")
+        private val PRO_PLAN_KEY = stringPreferencesKey("pro_plan")
+        private val PRO_BALANCE_KEY = longPreferencesKey("pro_balance")
+        private val PRO_CONSUMED_KEY = longPreferencesKey("pro_consumed")
+        private val PRO_SINCE_KEY = longPreferencesKey("pro_since")
     }
 
     val connectionConfig: Flow<ConnectionConfig> = context.dataStore.data.map { prefs ->
@@ -87,6 +103,27 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setCodeFont(family: String) {
         context.dataStore.edit { it[CODE_FONT_KEY] = family }
+    }
+
+    // ── 假 Pro 订阅（趣味彩蛋）──
+
+    /** 假订阅状态：plan 空 = 未订阅 */
+    val proState: Flow<ProState> = context.dataStore.data.map { prefs ->
+        ProState(
+            plan = prefs[PRO_PLAN_KEY] ?: "",
+            balance = prefs[PRO_BALANCE_KEY] ?: 0L,
+            consumed = prefs[PRO_CONSUMED_KEY] ?: 0L,
+            since = prefs[PRO_SINCE_KEY] ?: 0L,
+        )
+    }
+
+    suspend fun saveProState(state: ProState) {
+        context.dataStore.edit { prefs ->
+            prefs[PRO_PLAN_KEY] = state.plan
+            prefs[PRO_BALANCE_KEY] = state.balance
+            prefs[PRO_CONSUMED_KEY] = state.consumed
+            prefs[PRO_SINCE_KEY] = state.since
+        }
     }
 
     /** 新对话默认工作区（空 = 用 DSH 默认工作区） */

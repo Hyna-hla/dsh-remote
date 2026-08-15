@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import com.dsh.mobile.data.DshConnection
 import com.dsh.mobile.data.HistoryCache
+import com.dsh.mobile.data.ProTokenBank
 
 class DshApplication : Application() {
 
@@ -15,6 +16,8 @@ class DshApplication : Application() {
         createNotificationChannels()
         // 启动时清理过期会话缓存（7 天前历史、1 天前会话列表），防磁盘膨胀
         runCatching { HistoryCache(this).prune() }
+        // 假 Pro 订阅银行初始化（读持久化状态）
+        ProTokenBank.init(this)
         // 注：资源更新检查在 MainActivity 的 UpdatePromptOverlay 里做（有更新弹窗询问，无更新静默）
     }
 

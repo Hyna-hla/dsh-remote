@@ -52,6 +52,7 @@ import kotlinx.coroutines.launch
 fun SettingsScreen(
     connection: DshConnection,
     onBack: () -> Unit,
+    onUpgrade: () -> Unit,
     onDisconnect: () -> Unit,
 ) {
     val connState by connection.state.collectAsState()
@@ -554,6 +555,35 @@ fun SettingsScreen(
                     }
                     SettingInfoRow("应用", "DSH Remote v$versionName")
                     UpdateSection(currentVersion = versionName, context = context, scope = scope)
+                    // 趣味彩蛋入口：假 Pro 订阅中心
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onUpgrade() }
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.WorkspacePremium,
+                                null,
+                                Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                "Pro 订阅（趣味彩蛋）",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Text(
+                            "¥0.00",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                     SettingInfoRow("协议", "dsh-api (client-request / WS+SSE mux)")
                     SettingInfoRow("后端", "DeepSeek Harness")
                     SettingInfoRow("主题", "DSH 浅色/深色 · 背景图/蒙层/面板通透可调")

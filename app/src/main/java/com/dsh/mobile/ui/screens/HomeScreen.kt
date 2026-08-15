@@ -69,6 +69,7 @@ fun HomeScreen(
     connection: DshConnection,
     onSessionClick: (String) -> Unit,
     onSettings: () -> Unit,
+    onUpgrade: () -> Unit,
     onDisconnect: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -293,6 +294,7 @@ fun HomeScreen(
             onRemoveImage = { i -> pendingImages = pendingImages.filterIndexed { j, _ -> j != i } },
             onSessionClick = onSessionClick,
             onSettings = onSettings,
+            onUpgrade = onUpgrade,
             onRefresh = {
                 refreshSessions()
                 refreshArchived()
@@ -340,6 +342,7 @@ fun HomeScreen(
             },
             onSessionClick = onSessionClick,
             onSettings = onSettings,
+            onUpgrade = onUpgrade,
             onRefresh = {
                 refreshSessions()
                 refreshArchived()
@@ -1183,6 +1186,7 @@ private fun ClaudeHomeLayout(
     onNewChat: () -> Unit,
     onSessionClick: (String) -> Unit,
     onSettings: () -> Unit,
+    onUpgrade: () -> Unit,
     onRefresh: () -> Unit,
     onRestoreArchived: (String) -> Unit,
 ) {
@@ -1496,6 +1500,35 @@ private fun ClaudeHomeLayout(
                     .padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
             ) {
                 Column(Modifier.padding(12.dp)) {
+                    // 1. Pro 入口行（有实际功能：进入趣味假订阅中心）
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { onUpgrade() }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            "Get more with DSH",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFFA8A29E),
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.WorkspacePremium,
+                                null,
+                                Modifier.size(14.dp),
+                                tint = Color(0xFFA78BFA),
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                "Upgrade to Pro",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFFA78BFA),
+                            )
+                        }
+                    }
                     // 2. 多行文本输入区（无边框无背景，17sp 一级文本，橙色光标）
                     BasicTextField(
                         value = input,
@@ -2111,6 +2144,7 @@ private fun ChatGptHomeLayout(
     onRemoveImage: (Int) -> Unit,
     onSessionClick: (String) -> Unit,
     onSettings: () -> Unit,
+    onUpgrade: () -> Unit,
     onRefresh: () -> Unit,
     onRestoreArchived: (String) -> Unit,
 ) {
@@ -2200,6 +2234,10 @@ private fun ChatGptHomeLayout(
                     Triple(Icons.Default.MenuBook, "技能") {
                         Toast.makeText(context, "技能请在会话内选择", Toast.LENGTH_SHORT).show()
                         closeDrawer()
+                    },
+                    Triple(Icons.Default.WorkspacePremium, "Pro 订阅") {
+                        closeDrawer()
+                        onUpgrade()
                     },
                     Triple(Icons.Default.Archive, "已归档") {
                         showArchived = !showArchived

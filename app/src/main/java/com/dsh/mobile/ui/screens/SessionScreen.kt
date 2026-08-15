@@ -241,6 +241,22 @@ class SessionChatState(
     private var flushJob: Job? = null
     private var cacheJob: Job? = null
 
+    // ── 回合 token 统计（假 Pro 订阅扣费用）──
+    /** 本回合输入字符数（估算用） */
+    private var turnInputChars = 0L
+    /** 本回合输出字符数（估算用） */
+    private var turnOutputChars = 0L
+    /** 回合结束时的实际消耗回调（服务端 usage 优先，缺失按字符/4 估算） */
+    var onUsage: ((Long) -> Unit)? = null
+
+    /** 服务端 usage 字段提取：data.usage.{inputTokens,outputTokens} */
+    private fun usageOf(data: JsonElement): Long {
+        val u = data.jsonObject["usage"]?.jsonObject ?: return 0L
+        val input = u["inputTokens"]?.jsonPrimitive?.longOrNull ?: 0L
+        val output = u["outputTokens"]?.jsonPrimitive?.longOrNull ?: 0L
+        return input + output
+    }
+
     /** 温缓存延迟写盘（3s 防抖，gzip 压缩；快照拷贝在 Default 线程） */
     private fun scheduleCacheSave() {
         cacheJob?.cancel()
@@ -511,6 +527,7 @@ class SessionChatState(
             if (streamStart == null) streamStart = e.time
             val delta = chunkTextOf(e.data)
             if (delta.isNotEmpty()) {
+                turnOutputChars += delta.length
                 pendingChunk.append(delta)
                 if (flushJob == null) {
                     flushJob = scope.launch {
@@ -530,10 +547,13 @@ class SessionChatState(
                 if (uc.text.isNotBlank() || uc.images.isNotEmpty()) {
                     cur.add(ChatItem.User(nextKey(), uc.text, seq = e.seq, images = uc.images))
                 }
+                // 回合 token 统计：输入字符 + 每图约 85 token
+                turnInputChars += uc.text.length + uc.images.size * 340L
             }
 
             DshEventTypes.ASSISTANT_MESSAGE -> {
                 val t = assistantTextOf(e.data)
+                turnOutputChars += t.length
                 val secs = streamStart?.let { (e.time - it) / 1000 }
                 val idx = cur.indexOfLast { it is ChatItem.Assistant && it.streaming }
                 if (idx >= 0) {
@@ -577,6 +597,12 @@ class SessionChatState(
                 )
             }
 
+            DshEventTypes.TURN_START -> {
+                // 回合开始：重置 token 统计
+                turnInputChars = 0L
+                turnOutputChars = 0L
+            }
+
             DshEventTypes.TURN_END -> {
                 streamStart = null
                 // 一轮结束：结束任何残留的流式占位
@@ -585,6 +611,13 @@ class SessionChatState(
                     val a = cur[idx] as ChatItem.Assistant
                     cur[idx] = ChatItem.Assistant(a.key, a.text, streaming = false, seq = a.seq)
                 }
+                // 假 Pro 扣费：服务端 usage 优先，缺失按字符/4 估算
+                val real = usageOf(e.data)
+                val estimate = (turnInputChars + turnOutputChars) / 4 + 1
+                val tokens = if (real > 0) real else estimate
+                if (tokens > 0) onUsage?.invoke(tokens)
+                turnInputChars = 0L
+                turnOutputChars = 0L
             }
 
             else -> {}
@@ -621,7 +654,12 @@ fun SessionScreen(
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val state = remember(sessionId) { SessionChatState(scope, connection, sessionId, HistoryCache(context)) }
+    val state = remember(sessionId) {
+        SessionChatState(scope, connection, sessionId, HistoryCache(context)).also {
+            // 假 Pro 扣费：每回合实际消耗回调
+            it.onUsage = { tokens -> ProTokenBank.consume(tokens) }
+        }
+    }
     val items by state.items.collectAsState()
     val title by state.title.collectAsState()
     val running by state.running.collectAsState()
