@@ -1103,31 +1103,42 @@ fun SessionScreen(
             }
         }
 
-        // 输入栏（ChatGPT 风格：52dp 胶囊容器 #1C1C1E 圆角26 + 底部安全区；其余风格保持原样）
+        // 输入栏（ChatGPT/Claude 风格胶囊化；其余风格保持原样）
+        val modernInput = DshThemeStyle == ThemeStyle.CHATGPT || DshThemeStyle == ThemeStyle.CLAUDE
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            tonalElevation = if (DshThemeStyle == ThemeStyle.CHATGPT) 0.dp else 3.dp,
-            shadowElevation = if (DshThemeStyle == ThemeStyle.CHATGPT) 0.dp else 8.dp,
+            tonalElevation = if (modernInput) 0.dp else 3.dp,
+            shadowElevation = if (modernInput) 0.dp else 8.dp,
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .then(
-                        if (DshThemeStyle == ThemeStyle.CHATGPT) {
-                            Modifier
-                                .navigationBarsPadding()
-                                .padding(start = 16.dp, end = 16.dp, bottom = 16.dp, top = 4.dp)
-                                .height(52.dp)
-                                .clip(RoundedCornerShape(26.dp))
-                                .background(MaterialTheme.colorScheme.surface)
-                                .padding(horizontal = 12.dp)
+                        if (modernInput) {
+                            if (DshThemeStyle == ThemeStyle.CHATGPT) {
+                                Modifier
+                                    .navigationBarsPadding()
+                                    .padding(start = 16.dp, end = 16.dp, bottom = 16.dp, top = 4.dp)
+                                    .height(52.dp)
+                                    .clip(RoundedCornerShape(26.dp))
+                                    .background(MaterialTheme.colorScheme.surface)
+                                    .padding(horizontal = 12.dp)
+                            } else {
+                                // Claude：28px 超大圆角，自适应高度
+                                Modifier
+                                    .navigationBarsPadding()
+                                    .padding(start = 16.dp, end = 16.dp, bottom = 16.dp, top = 4.dp)
+                                    .clip(RoundedCornerShape(28.dp))
+                                    .background(MaterialTheme.colorScheme.surface)
+                                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                            }
                         } else {
                             Modifier
                                 .padding(horizontal = 12.dp, vertical = 8.dp)
                                 .imePadding()
                         },
                     ),
-                verticalAlignment = if (DshThemeStyle == ThemeStyle.CHATGPT) Alignment.CenterVertically else Alignment.Bottom,
+                verticalAlignment = if (modernInput) Alignment.CenterVertically else Alignment.Bottom,
             ) {
                 IconButton(onClick = { imagePicker.launch("image/*") }) {
                     Icon(Icons.Default.AttachFile, null)
@@ -1153,16 +1164,21 @@ fun SessionScreen(
                             when {
                                 DshThemeStyle == ThemeStyle.CODEX -> "> 消息…"
                                 DshThemeStyle == ThemeStyle.CHATGPT -> "询问 DSH…"
+                                DshThemeStyle == ThemeStyle.CLAUDE -> "给 DSH 发消息…"
                                 else -> "给智能体发消息…"
                             },
                         )
                     },
-                    maxLines = if (DshThemeStyle == ThemeStyle.CHATGPT) 1 else 4,
+                    maxLines = when {
+                        DshThemeStyle == ThemeStyle.CHATGPT -> 1
+                        DshThemeStyle == ThemeStyle.CLAUDE -> 3
+                        else -> 4
+                    },
                     shape = RoundedCornerShape(22.dp),
                 )
                 Spacer(Modifier.width(8.dp))
-                if (DshThemeStyle == ThemeStyle.CHATGPT) {
-                    // ChatGPT 规格：麦克风位置映射为 ⚡ 插话图标（24px 白）
+                if (DshThemeStyle == ThemeStyle.CHATGPT || DshThemeStyle == ThemeStyle.CLAUDE) {
+                    // 麦克风位置映射为 ⚡ 插话图标（24px）
                     Icon(
                         Icons.Default.Bolt,
                         "插话",
@@ -1191,7 +1207,12 @@ fun SessionScreen(
                 if (running) {
                     FilledIconButton(
                         onClick = { stopRun() },
-                        modifier = Modifier.size(if (DshThemeStyle == ThemeStyle.CHATGPT) 40.dp else 46.dp),
+                        modifier = Modifier.size(
+                            when (DshThemeStyle) {
+                                ThemeStyle.CHATGPT, ThemeStyle.CLAUDE -> 40.dp
+                                else -> 46.dp
+                            },
+                        ),
                         colors = IconButtonDefaults.filledIconButtonColors(
                             containerColor = MaterialTheme.colorScheme.error,
                         ),
@@ -1201,12 +1222,14 @@ fun SessionScreen(
                 } else {
                     FilledIconButton(
                         onClick = { send() },
-                        modifier = if (DshThemeStyle == ThemeStyle.CHATGPT) {
-                            Modifier
+                        modifier = when (DshThemeStyle) {
+                            ThemeStyle.CHATGPT -> Modifier
                                 .size(40.dp)
                                 .background(DshBrand, CircleShape)
-                        } else {
-                            Modifier
+                            ThemeStyle.CLAUDE -> Modifier
+                                .size(44.dp)
+                                .background(DshBrand, CircleShape)
+                            else -> Modifier
                                 .size(46.dp)
                                 .background(brandGradient(), CircleShape)
                         },
@@ -1222,6 +1245,9 @@ fun SessionScreen(
                                 color = MaterialTheme.colorScheme.onPrimary,
                                 strokeWidth = 2.dp,
                             )
+                        } else if (DshThemeStyle == ThemeStyle.CLAUDE) {
+                            // Claude 规格：向上箭头
+                            Icon(Icons.Default.ArrowUpward, null, Modifier.size(20.dp))
                         } else {
                             Icon(Icons.Default.Send, null, Modifier.size(20.dp))
                         }

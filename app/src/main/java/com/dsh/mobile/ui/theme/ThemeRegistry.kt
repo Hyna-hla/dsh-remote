@@ -36,8 +36,10 @@ data class ThemeColors(
  * - CODEX：Codex CLI 终端风格（全局等宽字体 + 方角 + 终端装饰）
  * - CYBERPUNK：夜之城风格（切角按钮 + 霓虹强调 + HUD 装饰）
  * - CHATGPT：ChatGPT 移动端深色风格（纯黑扁平 + 胶囊输入栏 + 侧边抽屉）
+ * - CLAUDE：Claude 移动端暖调深色风格（衬线大标题 + 28px 超大圆角输入容器 + 陶土橙）
+ * - DEEPLOOK：DeepSeek 移动端风格（iOS 分组列表 + 品牌蓝 #4D6BFE + 深蓝黑选中态，浅色为主含深色变体）
  */
-enum class ThemeStyle { STANDARD, CODEX, CYBERPUNK, CHATGPT }
+enum class ThemeStyle { STANDARD, CODEX, CYBERPUNK, CHATGPT, CLAUDE, DEEPLOOK }
 
 data class ThemeDef(
     val id: String,
@@ -129,11 +131,50 @@ object ThemeRegistry {
         style = ThemeStyle.CHATGPT,
     )
 
+    /** Claude 移动端暖调深色：暖炭黑 + 陶土橙 #E8755A + 淡紫 #A78BFA + 衬线大标题（1:1 设计令牌） */
+    val claude = ThemeDef(
+        "claude", "Claude 暖调", light = false,
+        ThemeColors(
+            background = Color(0xFF171716), surface = Color(0xFF242423), surfaceHigh = Color(0xFF2A2A29),
+            brand = Color(0xFFE8755A), brandSoft = Color(0xFFA78BFA),
+            textPrimary = Color(0xFFF5F5F4), textSecondary = Color(0xFFA8A29E), border = Color(0xFF2A2A29),
+            success = Color(0xFF7BC8A4), warn = Color(0xFFE8C36A), error = Color(0xFFE8715A),
+        ),
+        version = "1.0",
+        style = ThemeStyle.CLAUDE,
+    )
+
+    /** DeepLook 浅色：DeepSeek 移动端 1:1 设计令牌（#f8f8f8 背景 + 纯白分组卡片 + 品牌蓝，见 design/dsh-mobile-ui-spec.md） */
+    val deeplook = ThemeDef(
+        "deeplook", "DeepLook", light = true,
+        ThemeColors(
+            background = Color(0xFFF8F8F8), surface = Color(0xFFFFFFFF), surfaceHigh = Color(0xFFECECEC),
+            brand = Color(0xFF4D6BFE), brandSoft = Color(0xFF6D8BFF),
+            textPrimary = Color(0xFF081018), textSecondary = Color(0xFF585858), border = Color(0xFFE2E2E2),
+            success = Color(0xFF1F9D71), warn = Color(0xFFB07C10), error = Color(0xFFE5484D),
+        ),
+        version = "1.0",
+        style = ThemeStyle.DEEPLOOK,
+    )
+
+    /** DeepLook 深色变体：按规范 7.3 预留方案（#0d1117 底 + #161b22 卡片，品牌蓝不变） */
+    val deeplookDark = ThemeDef(
+        "deeplook-dark", "DeepLook 深色", light = false,
+        ThemeColors(
+            background = Color(0xFF0D1117), surface = Color(0xFF161B22), surfaceHigh = Color(0xFF21262D),
+            brand = Color(0xFF4D6BFE), brandSoft = Color(0xFF6D8BFF),
+            textPrimary = Color(0xFFE6EDF3), textSecondary = Color(0xFF9AA4B2), border = Color(0xFF21262D),
+            success = Color(0xFF3FB68B), warn = Color(0xFFE6B455), error = Color(0xFFE06C6C),
+        ),
+        version = "1.0",
+        style = ThemeStyle.DEEPLOOK,
+    )
+
     /**
-     * 内置主题只有 6 套：每套都有真实的观感差异，不再提供"只换颜色"的皮肤。
+     * 内置主题 9 套：每套都有真实的观感差异，不再提供"只换颜色"的皮肤。
      * 旧皮肤 id（aurora/ocean/... ）不再内置，已选旧皮肤的用户自动回落到深蓝。
      */
-    private val builtins = listOf(blue, black, warm, codex, cyberpunk, chatgpt)
+    private val builtins = listOf(blue, black, warm, codex, cyberpunk, chatgpt, claude, deeplook, deeplookDark)
     val builtinIds: Set<String> = builtins.map { it.id }.toSet()
 
     fun available(custom: List<ThemeDef>): List<ThemeDef> = builtins + custom

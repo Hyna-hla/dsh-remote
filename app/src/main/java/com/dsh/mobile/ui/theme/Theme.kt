@@ -130,6 +130,24 @@ private fun applyShapeStyle(style: ThemeStyle) {
             DshShape.card = RoundedCornerShape(16.dp)
             DshShape.small = RoundedCornerShape(8.dp)
         }
+        ThemeStyle.CLAUDE -> {
+            // Claude 移动端：输入主容器 28px 超大圆角、胶囊 = 高度/2、列表点击态 12px
+            DshShape.bubble = RoundedCornerShape(16.dp)
+            DshShape.userBubble = RoundedCornerShape(16.dp)
+            DshShape.assistantBubble = RoundedCornerShape(16.dp)
+            DshShape.pill = RoundedCornerShape(50)
+            DshShape.card = RoundedCornerShape(28.dp)
+            DshShape.small = RoundedCornerShape(12.dp)
+        }
+        ThemeStyle.DEEPLOOK -> {
+            // DeepSeek 移动端：气泡 16 全圆（扁平 iOS 感）、胶囊 = 高度/2、分组卡片 16、小件 9
+            DshShape.bubble = RoundedCornerShape(16.dp)
+            DshShape.userBubble = RoundedCornerShape(16.dp)
+            DshShape.assistantBubble = RoundedCornerShape(16.dp)
+            DshShape.pill = RoundedCornerShape(50)
+            DshShape.card = RoundedCornerShape(16.dp)
+            DshShape.small = RoundedCornerShape(9.dp)
+        }
     }
 }
 
@@ -169,31 +187,55 @@ private fun dshTypography(style: ThemeStyle, fonts: FontConfig = FontConfig()): 
     val bodySize = when (style) {
         ThemeStyle.CYBERPUNK -> 15.5.sp
         ThemeStyle.CHATGPT -> 17.sp
+        ThemeStyle.DEEPLOOK -> 16.sp
         else -> 15.sp
     }
     val bodyLine = when (style) {
         ThemeStyle.CYBERPUNK -> 23.sp
         ThemeStyle.CHATGPT -> 24.sp
+        ThemeStyle.DEEPLOOK -> 23.sp
         else -> 22.sp
     }
     // ChatGPT 令牌：大标题 28/700、菜单 18/400、按钮 17/500、输入 17/400
-    val headlineLargeSize = if (style == ThemeStyle.CHATGPT) 28.sp else 27.sp
-    val bodyLargeWeight = if (style == ThemeStyle.CHATGPT) FontWeight.Normal else FontWeight.Normal
-    val bodyLargeSize = if (style == ThemeStyle.CHATGPT) 18.sp else 16.sp
-    val labelLargeSize = if (style == ThemeStyle.CHATGPT) 17.sp else 14.sp
-    val labelLargeWeight = if (style == ThemeStyle.CHATGPT) FontWeight.Medium else FontWeight.Medium
+    // Claude 令牌：侧边栏大标题 32/600 衬线、空态标语 36/500 衬线、菜单 18/400、分区 16/500、按钮 16/500、输入 17/400
+    // DeepLook 令牌：大标题 28/700、正文 16/23、行标题 16/500、按钮 16/500、副文案 12.5
+    val isClaude = style == ThemeStyle.CLAUDE
+    val isDeepLook = style == ThemeStyle.DEEPLOOK
+    val serif = if (isClaude) FontFamily.Serif else base
+    val headlineLargeSize = when (style) {
+        ThemeStyle.CHATGPT -> 28.sp
+        ThemeStyle.CLAUDE -> 32.sp
+        ThemeStyle.DEEPLOOK -> 28.sp
+        else -> 27.sp
+    }
+    val headlineLargeFamily = if (isClaude) serif else base
+    val headlineMediumSize = if (isClaude) 36.sp else 23.sp
+    val headlineMediumWeight = if (isClaude) FontWeight.Medium else titleWeight
+    val headlineMediumFamily = if (isClaude) serif else base
+    val bodyLargeSize = when (style) {
+        ThemeStyle.CHATGPT, ThemeStyle.CLAUDE -> 18.sp
+        ThemeStyle.DEEPLOOK -> 17.sp
+        else -> 16.sp
+    }
+    val labelLargeSize = when (style) {
+        ThemeStyle.CHATGPT -> 17.sp
+        ThemeStyle.CLAUDE -> 16.sp
+        ThemeStyle.DEEPLOOK -> 16.sp
+        else -> 14.sp
+    }
+    val titleMediumWeight = if (isClaude || isDeepLook) FontWeight.Medium else FontWeight.SemiBold
     return Typography(
         displayLarge = TextStyle(fontFamily = base, fontSize = 34.sp, fontWeight = FontWeight.Bold, lineHeight = 40.sp, letterSpacing = (-0.5).sp),
-        headlineLarge = TextStyle(fontFamily = base, fontSize = headlineLargeSize, fontWeight = titleWeight, lineHeight = 33.sp, letterSpacing = titleSpacing),
-        headlineMedium = TextStyle(fontFamily = base, fontSize = 23.sp, fontWeight = titleWeight, lineHeight = 29.sp, letterSpacing = (-0.2).sp),
+        headlineLarge = TextStyle(fontFamily = headlineLargeFamily, fontSize = headlineLargeSize, fontWeight = titleWeight, lineHeight = 33.sp, letterSpacing = titleSpacing),
+        headlineMedium = TextStyle(fontFamily = headlineMediumFamily, fontSize = headlineMediumSize, fontWeight = headlineMediumWeight, lineHeight = 42.sp, letterSpacing = (-0.2).sp),
         headlineSmall = TextStyle(fontFamily = base, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, lineHeight = 25.sp),
         titleLarge = TextStyle(fontFamily = base, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, lineHeight = 24.sp),
-        titleMedium = TextStyle(fontFamily = base, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, lineHeight = 22.sp),
+        titleMedium = TextStyle(fontFamily = base, fontSize = 16.sp, fontWeight = titleMediumWeight, lineHeight = 22.sp),
         titleSmall = TextStyle(fontFamily = base, fontSize = 14.sp, fontWeight = FontWeight.Medium, lineHeight = 20.sp, letterSpacing = 0.1.sp),
-        bodyLarge = TextStyle(fontFamily = base, fontSize = bodyLargeSize, fontWeight = bodyLargeWeight, lineHeight = 24.sp),
+        bodyLarge = TextStyle(fontFamily = base, fontSize = bodyLargeSize, fontWeight = FontWeight.Normal, lineHeight = 24.sp),
         bodyMedium = TextStyle(fontFamily = base, fontSize = bodySize, fontWeight = FontWeight.Normal, lineHeight = bodyLine),
         bodySmall = TextStyle(fontFamily = base, fontSize = 12.5.sp, fontWeight = FontWeight.Normal, lineHeight = 18.sp),
-        labelLarge = TextStyle(fontFamily = base, fontSize = labelLargeSize, fontWeight = labelLargeWeight, lineHeight = 20.sp),
+        labelLarge = TextStyle(fontFamily = base, fontSize = labelLargeSize, fontWeight = FontWeight.Medium, lineHeight = 20.sp),
         labelMedium = TextStyle(fontFamily = base, fontSize = 12.sp, fontWeight = FontWeight.Medium, lineHeight = 16.sp, letterSpacing = 0.3.sp),
         labelSmall = TextStyle(fontFamily = base, fontSize = 11.sp, fontWeight = FontWeight.Medium, lineHeight = 15.sp, letterSpacing = 0.4.sp),
     ).also { _ -> codeFamily = code }
@@ -234,6 +276,22 @@ private fun dshShapes(style: ThemeStyle): Shapes = when (style) {
         medium = RoundedCornerShape(12.dp),
         large = RoundedCornerShape(16.dp),
         extraLarge = RoundedCornerShape(26.dp),
+    )
+    ThemeStyle.CLAUDE -> Shapes(
+        // Claude 令牌：输入容器 28，列表点击态 12
+        extraSmall = RoundedCornerShape(12.dp),
+        small = RoundedCornerShape(12.dp),
+        medium = RoundedCornerShape(16.dp),
+        large = RoundedCornerShape(20.dp),
+        extraLarge = RoundedCornerShape(28.dp),
+    )
+    ThemeStyle.DEEPLOOK -> Shapes(
+        // DeepLook 令牌：分组卡片 16、主按钮 13、胶囊 9、输入容器 24、列表点击态 8
+        extraSmall = RoundedCornerShape(8.dp),
+        small = RoundedCornerShape(9.dp),
+        medium = RoundedCornerShape(13.dp),
+        large = RoundedCornerShape(16.dp),
+        extraLarge = RoundedCornerShape(24.dp),
     )
 }
 

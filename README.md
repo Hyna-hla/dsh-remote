@@ -21,6 +21,11 @@
 
 ## 更新日志
 
+- **v1.1.3**：Claude 移动端暖调深色 UI 主题包（1:1 按设计令牌落地）——
+  - **设计令牌**：暖炭黑 `#171716` + 次级 `#242423` + 三级 `#2A2A29` + 陶土橙 `#E8755A` + 淡紫 `#A78BFA` + 暖白 `#F5F5F4` / 暖灰 `#A8A29E` / 弱化 `#78716C`；**衬线大标题**（32/600 侧边栏、36/500 空态标语）+ 无衬线正文（菜单 18/400、分区 16/500、输入 17/400、按钮 16/500）；圆角（输入容器 **28px 超大圆角**、胶囊=高/2、列表点击态 12）
+  - **对话主界面**：极简顶部导航 56dp（纯图标无背景：汉堡 24 + 幽灵星芒 28，无中间标题）；空状态居中 64×64 陶土橙星芒 + 衬线 36sp 标语（间距 32）；底部输入容器三层结构（Pro 提示行「Get more with DSH / Upgrade to Pro」淡紫 → 无边框多行输入（橙色光标）→ 操作栏：+ 40 圆 / 模型胶囊 40 / 插话 40 圆 / 发送 **44×44 圆陶土橙向上箭头**）；会话页同步（28 圆角容器 + 箭头发送钮）
+  - **侧边抽屉栏**：85% 宽 + 50% 遮罩；衬线大标题 32/600 + 「New chat」橙色加号入口；Chats / Projects / Artifacts 菜单（56dp、图标 24、文字 18）；1px 细分割线 `#2A2A29`；Recents 分区（16/500 暖灰标题、48dp 会话项）；底部用户栏（40 圆字母头像 + 用户名 + 24 齿轮无背景）
+  - 设置 → 外观 → 选「Claude 暖调」即切换（与其他主题并存）
 - **v1.1.2**：ChatGPT 移动端深色 UI 主题包（1:1 按设计令牌落地）——
   - **设计令牌**：纯黑 `#000000` 底 + 次级 `#1C1C1E` + 品牌蓝 `#3B82F6` + 强调 `#60A5FA` + 二级文本 `#9CA3AF`；排版按规格（大标题 28/700、菜单 18/400、分区标题 16/600、按钮 17/500、输入 17/400）；圆角（胶囊=高度/2、主按钮 16、列表点击态 8）
   - **对话主界面**：顶部导航栏 56dp（40×40 圆形汉堡钮 + 中间胶囊 pill（预设名 #60A5FA 星标，映射「获取Plus」）+ 右侧新对话圆钮）；底部输入栏 52dp 胶囊容器（+ 图标 / 无边框白字输入灰占位 / ⚡插话图标（映射麦克风位）/ 40×40 圆发送钮 #3B82F6）+ 底部安全区适配；会话页同样胶囊化 + 用户气泡 #1C1C1E 白字
@@ -76,10 +81,10 @@
 
 ## 安装（APK）
 
-- 仓库内提供 R8 精简版：[release/DSH-Remote-v1.1.2-min.apk](release/DSH-Remote-v1.1.2-min.apk)（已签名，约 4.6MB，可直接安装）
-- **debug 主包（约 62MB，与历次安装包一致）**：因 GitHub 单文件 >50MB 限制不进仓库，本地留档于 `release/DSH-Remote-v1.1.2.apk`（构建产物亦在 `app/build/outputs/apk/debug/`）；分发走 GitHub Release 附件或 Google Play
+- 仓库内提供 R8 精简版：[release/DSH-Remote-v1.1.3-min.apk](release/DSH-Remote-v1.1.3-min.apk)（已签名，约 4.6MB，可直接安装）
+- **debug 主包（约 62MB，与历次安装包一致）**：因 GitHub 单文件 >50MB 限制不进仓库，本地留档于 `release/DSH-Remote-v1.1.3.apk`（构建产物亦在 `app/build/outputs/apk/debug/`）；分发走 GitHub Release 附件或 Google Play
 - 传到手机 → 允许「未知来源」安装 → 填服务器地址 → 连接
-- Google Play 上架包（已签名 AAB）：[release/DSH-Remote-v1.1.2.aab](release/DSH-Remote-v1.1.2.aab)；上架清单见 [docs/play-listing.md](docs/play-listing.md)
+- Google Play 上架包（已签名 AAB）：[release/DSH-Remote-v1.1.3.aab](release/DSH-Remote-v1.1.3.aab)；上架清单见 [docs/play-listing.md](docs/play-listing.md)
 - 自定义主题包格式与示例：[docs/theme-package-format.md](docs/theme-package-format.md)、[docs/aurora.dshTheme.zip](docs/aurora.dshTheme.zip)
 
 ## PC 端使用

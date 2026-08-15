@@ -269,6 +269,53 @@ fun HomeScreen(
         return
     }
 
+    // Claude 移动端布局：暖炭黑 + 极简顶部导航（无背景图标）+ 28px 超大圆角输入容器 + 衬线空态标语 + 侧边抽屉
+    if (DshThemeStyle == ThemeStyle.CLAUDE) {
+        ClaudeHomeLayout(
+            sessions = sessions,
+            archivedIds = archivedIds,
+            input = input,
+            onInputChange = { input = it },
+            sending = sending,
+            onSend = { send() },
+            sendError = sendError,
+            preset = preset,
+            presets = presets,
+            presetMenu = presetMenu,
+            onPresetMenuChange = { presetMenu = it },
+            pendingImages = pendingImages,
+            onPickImage = { imagePicker.launch("image/*") },
+            onRemoveImage = { i -> pendingImages = pendingImages.filterIndexed { j, _ -> j != i } },
+            onNewChat = {
+                input = ""
+                pendingImages = emptyList()
+            },
+            onSessionClick = onSessionClick,
+            onSettings = onSettings,
+            onRefresh = {
+                refreshSessions()
+                refreshArchived()
+            },
+            onRestoreArchived = { id ->
+                scope.launch {
+                    val ws = workspaces.firstOrNull()?.workspaceId
+                    if (ws.isNullOrBlank()) {
+                        listError = "没有可用工作区，无法恢复"
+                    } else {
+                        try {
+                            connection.restoreSession(ws, id)
+                            refreshSessions()
+                            refreshArchived()
+                        } catch (e: Exception) {
+                            listError = e.message
+                        }
+                    }
+                }
+            },
+        )
+        return
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -1036,6 +1083,475 @@ private fun SessionCard(
             color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
             thickness = 0.5.dp,
         )
+    }
+}
+
+// ════════════════════════ Claude 移动端布局（主题包风格）════════════════════════
+// 按用户提供的 1:1 设计令牌落地：
+// 暖炭黑 #171716 / 次级 #242423 / 三级 #2A2A29 / 陶土橙 #E8755A / 淡紫 #A78BFA
+// 衬线大标题 32/600、空态标语 36/500、输入容器 28px 超大圆角、极简顶部导航（无背景图标）
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ClaudeHomeLayout(
+    sessions: List<SessionSummary>,
+    archivedIds: List<String>,
+    input: String,
+    onInputChange: (String) -> Unit,
+    sending: Boolean,
+    onSend: () -> Unit,
+    sendError: String?,
+    preset: String,
+    presets: List<Pair<String, String>>,
+    presetMenu: Boolean,
+    onPresetMenuChange: (Boolean) -> Unit,
+    pendingImages: List<DshConnection.ImagePart>,
+    onPickImage: () -> Unit,
+    onRemoveImage: (Int) -> Unit,
+    onNewChat: () -> Unit,
+    onSessionClick: (String) -> Unit,
+    onSettings: () -> Unit,
+    onRefresh: () -> Unit,
+    onRestoreArchived: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+    val closeDrawer: () -> Unit = { scope.launch { drawerState.close() } }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        scrimColor = Color.Black.copy(alpha = 0.5f),
+        drawerContent = {
+            Column(
+                Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(0.85f)
+                    .background(Color(0xFF171716)),
+            ) {
+                // ── 顶部标题区：衬线大标题 32/600 + New chat（橙色加号 24 + 18sp）──
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(start = 20.dp, end = 20.dp, top = 24.dp),
+                ) {
+                    Text(
+                        "DSH Remote",
+                        style = MaterialTheme.typography.headlineLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFFF5F5F4),
+                    )
+                    Spacer(Modifier.height(24.dp))
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable {
+                                closeDrawer()
+                                onNewChat()
+                            }
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Default.AddComment,
+                            null,
+                            Modifier.size(24.dp),
+                            tint = Color(0xFFE8755A),
+                        )
+                        Spacer(Modifier.width(16.dp))
+                        Text(
+                            "New chat",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Medium,
+                            color = Color(0xFFE8755A),
+                        )
+                    }
+                }
+
+                // ── 功能菜单区：Chats / Projects / Artifacts（56dp、图标 24、文字 18）──
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 20.dp),
+                ) {
+                    val menuItems = listOf(
+                        Triple(Icons.Default.ChatBubbleOutline, "Chats") { closeDrawer() },
+                        Triple(Icons.Default.Folder, "Projects") {
+                            Toast.makeText(context, "移动端暂未开放", Toast.LENGTH_SHORT).show()
+                        },
+                        Triple(Icons.Default.Category, "Artifacts") {
+                            Toast.makeText(context, "移动端暂未开放", Toast.LENGTH_SHORT).show()
+                        },
+                    )
+                    menuItems.forEach { (icon, label, action) ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(56.dp)
+                                .padding(horizontal = 12.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { action() },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(icon, null, Modifier.size(24.dp), tint = Color(0xFFF5F5F4))
+                            Spacer(Modifier.width(16.dp))
+                            Text(
+                                label,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = Color(0xFFF5F5F4),
+                            )
+                        }
+                    }
+                }
+
+                // ── 1px 细分割线 #2A2A29 ──
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 4.dp)
+                        .height(1.dp)
+                        .background(Color(0xFF2A2A29)),
+                )
+
+                // ── Recents 分区（可滚动）：16/500 二级文本标题，48dp 项 ──
+                Text(
+                    "Recents",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = Color(0xFFA8A29E),
+                    modifier = Modifier.padding(start = 32.dp, top = 16.dp, bottom = 8.dp),
+                )
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    if (sessions.isEmpty() && archivedIds.isEmpty()) {
+                        Text(
+                            "暂无会话",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color(0xFF78716C),
+                            modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp),
+                        )
+                    }
+                    sessions.forEach { s ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .padding(horizontal = 32.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    closeDrawer()
+                                    onSessionClick(s.sessionId)
+                                },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                chatGptTitleOf(s),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color(0xFFF5F5F4),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                    if (archivedIds.isNotEmpty()) {
+                        Text(
+                            "已归档",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = Color(0xFFA8A29E),
+                            modifier = Modifier.padding(start = 32.dp, top = 12.dp, bottom = 4.dp),
+                        )
+                        archivedIds.forEach { id ->
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                                    .padding(horizontal = 32.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    "会话 ${id.take(8)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFFA8A29E),
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                TextButton(onClick = { onRestoreArchived(id) }) { Text("恢复") }
+                            }
+                        }
+                    }
+                }
+
+                // ── 底部用户栏：40 圆头像（浅灰底深灰字母）+ 用户名 + 齿轮 24 无背景 ──
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier
+                                .size(40.dp)
+                                .background(Color(0xFF2A2A29), CircleShape),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                "D",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = Color(0xFF78716C),
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            "DSH Remote",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = Color(0xFFF5F5F4),
+                        )
+                    }
+                    Icon(
+                        Icons.Default.Settings,
+                        "设置",
+                        Modifier
+                            .size(24.dp)
+                            .clickable {
+                                closeDrawer()
+                                onSettings()
+                            },
+                        tint = Color(0xFFA8A29E),
+                    )
+                }
+            }
+        },
+    ) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .background(Color(0xFF171716)),
+        ) {
+            // ── 顶部极简导航 56dp：纯图标无背景（汉堡 24 / 幽灵星芒 28），无中间标题 ──
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .padding(horizontal = 20.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Icon(
+                    Icons.Default.Menu,
+                    "菜单",
+                    Modifier
+                        .size(24.dp)
+                        .clickable { scope.launch { drawerState.open() } },
+                    tint = Color(0xFFF5F5F4),
+                )
+                Icon(
+                    Icons.Default.AutoAwesome,
+                    "Claude 风格品牌图标",
+                    Modifier
+                        .size(28.dp)
+                        .clickable { onRefresh() },
+                    tint = Color(0xFFF5F5F4),
+                )
+            }
+
+            // ── 内容空状态：垂直居中——64×64 陶土橙星芒 + 衬线 36sp 标语（间距 32）──
+            Column(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Icon(
+                    Icons.Default.AutoAwesome,
+                    null,
+                    Modifier.size(64.dp),
+                    tint = Color(0xFFE8755A),
+                )
+                Spacer(Modifier.height(32.dp))
+                Text(
+                    "今天有什么可以帮你的？",
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = Color(0xFFF5F5F4),
+                )
+                if (pendingImages.isNotEmpty()) {
+                    Spacer(Modifier.height(20.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        pendingImages.forEachIndexed { i, _ ->
+                            AssistChip(
+                                onClick = { onRemoveImage(i) },
+                                label = { Text("图片 ${i + 1}") },
+                                trailingIcon = {
+                                    Icon(Icons.Default.Close, null, Modifier.size(14.dp))
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+
+            // ── 底部输入容器：16 外边距 + 安全区；#242423 圆角 28 内边距 12，三层结构 ──
+            sendError?.let {
+                Text(
+                    it,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
+                )
+            }
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                color = Color(0xFF242423),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
+            ) {
+                Column(Modifier.padding(12.dp)) {
+                    // 1. Pro 提示行（两端对齐：二级文本 + 淡紫 500）
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            "Get more with DSH",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFFA8A29E),
+                        )
+                        Text(
+                            "Upgrade to Pro",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Medium,
+                            color = Color(0xFFA78BFA),
+                        )
+                    }
+                    // 2. 多行文本输入区（无边框无背景，17sp 一级文本，橙色光标）
+                    BasicTextField(
+                        value = input,
+                        onValueChange = onInputChange,
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(color = Color(0xFFF5F5F4)),
+                        cursorBrush = SolidColor(Color(0xFFE8755A)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 8.dp),
+                        minLines = 2,
+                        maxLines = 6,
+                        decorationBox = { inner ->
+                            Box {
+                                if (input.isEmpty()) {
+                                    Text(
+                                        "给 DSH 发消息…",
+                                        color = Color(0xFFA8A29E),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                }
+                                inner()
+                            }
+                        },
+                    )
+                    // 3. 底部操作栏：+ 40 圆 / 模型胶囊 40 / 麦克风位插话 40 圆 / 发送 44 圆橙箭头
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Box(
+                            Modifier
+                                .size(40.dp)
+                                .background(Color(0xFF2A2A29), CircleShape)
+                                .clickable { onPickImage() },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.Default.Add, null, Modifier.size(20.dp), tint = Color(0xFFF5F5F4))
+                        }
+                        // 模型选择胶囊（映射 "Sonnet 5 Thinking" = 预设名）
+                        Box {
+                            Row(
+                                Modifier
+                                    .height(40.dp)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(Color(0xFF2A2A29))
+                                    .clickable { onPresetMenuChange(true) }
+                                    .padding(horizontal = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    presets.firstOrNull { it.first == preset }?.second ?: preset,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFFA8A29E),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = presetMenu,
+                                onDismissRequest = { onPresetMenuChange(false) },
+                            ) {
+                                presets.forEach { (id, name) ->
+                                    DropdownMenuItem(
+                                        text = { Text(name) },
+                                        onClick = { onPresetMenuChange(false) },
+                                    )
+                                }
+                            }
+                        }
+                        Box(
+                            Modifier
+                                .size(40.dp)
+                                .background(Color(0xFF2A2A29), CircleShape),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.Default.Bolt,
+                                "插话",
+                                Modifier.size(20.dp),
+                                tint = Color(0xFFF5F5F4),
+                            )
+                        }
+                        Spacer(Modifier.weight(1f))
+                        Box(
+                            Modifier
+                                .size(44.dp)
+                                .background(
+                                    if (input.isNotBlank() || pendingImages.isNotEmpty()) Color(0xFFE8755A)
+                                    else Color(0xFF2A2A29),
+                                    CircleShape,
+                                )
+                                .clickable(
+                                    enabled = (input.isNotBlank() || pendingImages.isNotEmpty()) && !sending,
+                                ) { onSend() },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (sending) {
+                                CircularProgressIndicator(
+                                    Modifier.size(18.dp),
+                                    color = Color(0xFFF5F5F4),
+                                    strokeWidth = 2.dp,
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Default.ArrowUpward,
+                                    null,
+                                    Modifier.size(20.dp),
+                                    tint = Color(0xFFF5F5F4),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
