@@ -27,6 +27,8 @@ cpolar 公网隧道降级为「网页版」备选。
 
 ## 更新日志
 
+- **v1.2.1**：装机自检 —— DSH 启动后若检测到 cpolar 未安装，延迟 10s 后台预下载，
+  打开设置页时大概率已就绪；已装旧版（E:\coplar / PATH）则跳过，不重复下载
 - **v1.2.0**：cpolar 一键供应 —— 插件内自动下载/解压 cpolar（无需手动安装）、注册引导 + authtoken
   保存、登录态识别（`~/.cpolar/cpolar.yml`）；路由注册改挂 `ctx.effect`（热重载不再残留路由，
   `dev_reload_package` 可直接热更新）
