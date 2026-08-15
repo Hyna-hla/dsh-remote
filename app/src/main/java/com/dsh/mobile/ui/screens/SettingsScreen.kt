@@ -27,17 +27,23 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import com.dsh.mobile.data.AppearanceConfig
 import com.dsh.mobile.data.DshConnection
+import com.dsh.mobile.data.ReleaseInfo
 import com.dsh.mobile.data.SettingsStore
+import com.dsh.mobile.data.UpdateChecker
 import com.dsh.mobile.service.DshConnectionService
+import com.dsh.mobile.ui.theme.DshBrand
 import com.dsh.mobile.ui.theme.DshError
 import com.dsh.mobile.ui.theme.DshSuccess
 import com.dsh.mobile.ui.theme.ThemeRegistry
 import com.dsh.mobile.ui.theme.ThemeRepository
 import com.dsh.mobile.ui.theme.ThemeStore
+import java.io.File
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -508,6 +514,7 @@ fun SettingsScreen(
                         }.getOrNull() ?: "?"
                     }
                     SettingInfoRow("应用", "DSH Remote v$versionName")
+                    UpdateSection(currentVersion = versionName, context = context, scope = scope)
                     SettingInfoRow("协议", "dsh-api (client-request / WS+SSE mux)")
                     SettingInfoRow("后端", "DeepSeek Harness")
                     SettingInfoRow("主题", "DSH 浅色/深色 · 背景图/蒙层/面板通透可调")
@@ -540,5 +547,128 @@ private fun SettingInfoRow(label: String, value: String) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(value, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+/**
+ * 应用内检查更新：
+ *   idle → checking → latest / found → downloading → downloaded →（系统安装器）
+ * 检查走 GitHub Releases latest API；下载取 release 的 -min.apk 资产（流式带进度）；
+ * 安装经 FileProvider 交给系统安装器（用户确认，无需额外权限）。
+ */
+@Composable
+private fun UpdateSection(
+    currentVersion: String,
+    context: android.content.Context,
+    scope: kotlinx.coroutines.CoroutineScope,
+) {
+    var phase by remember { mutableStateOf("idle") } // idle/checking/latest/found/downloading/downloaded/error
+    var info by remember { mutableStateOf<ReleaseInfo?>(null) }
+    var progress by remember { mutableFloatStateOf(0f) }
+    var err by remember { mutableStateOf<String?>(null) }
+    var apkFile by remember { mutableStateOf<File?>(null) }
+
+    val check: () -> Unit = {
+        phase = "checking"
+        err = null
+        scope.launch {
+            val r = UpdateChecker.checkLatest()
+            if (r == null) {
+                phase = "error"; err = "无法连接更新服务器（GitHub Releases）"
+            } else if (UpdateChecker.isNewer(r.tagName, currentVersion)) {
+                info = r; phase = "found"
+            } else {
+                phase = "latest"
+            }
+        }
+    }
+    val download: () -> Unit = {
+        val asset = UpdateChecker.pickApk(info?.assets ?: emptyList())
+        if (asset == null) {
+            phase = "error"; err = "发布中没有可安装的 APK"
+        } else {
+            phase = "downloading"; progress = 0f
+            val target = File(context.cacheDir, "update/" + asset.name)
+            scope.launch {
+                try {
+                    UpdateChecker.downloadApk(asset.browserDownloadUrl, target) { p -> progress = p }
+                    apkFile = target
+                    phase = "downloaded"
+                } catch (e: Exception) {
+                    phase = "error"; err = e.message
+                }
+            }
+        }
+    }
+    val install: () -> Unit = {
+        val f = apkFile
+        if (f != null && f.exists()) {
+            runCatching {
+                val uri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", f)
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, "application/vnd.android.package-archive")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(intent)
+            }.onFailure {
+                phase = "error"; err = "打开安装器失败：" + it.message
+            }
+        }
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "更新",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        when (phase) {
+            "idle" -> TextButton(onClick = check) { Text("检查更新") }
+            "checking" -> Text("检查中…", style = MaterialTheme.typography.bodyMedium)
+            "latest" -> Text("已是最新版本", style = MaterialTheme.typography.bodyMedium, color = DshSuccess)
+            "found" -> Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    "发现新版本 v${info?.tagName?.removePrefix("v")}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = DshBrand,
+                )
+                TextButton(onClick = download) { Text("下载更新") }
+            }
+            "downloading" -> Column(horizontalAlignment = Alignment.End) {
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.width(120.dp).height(4.dp),
+                )
+                Text(
+                    "下载中 ${(progress * 100).toInt()}%",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            "downloaded" -> Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    "下载完成 v${info?.tagName?.removePrefix("v")}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = DshSuccess,
+                )
+                TextButton(onClick = install) { Text("安装") }
+            }
+            else -> Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    err ?: "更新失败",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = DshError,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                TextButton(onClick = check) { Text("重试") }
+            }
+        }
     }
 }

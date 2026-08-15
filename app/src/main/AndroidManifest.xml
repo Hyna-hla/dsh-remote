@@ -44,5 +44,16 @@
             android:screenOrientation="fullSensor"
             android:theme="@style/zxing_CaptureTheme"
             tools:replace="android:theme,android:screenOrientation" />
+
+        <!-- 应用内更新：下载的 APK 经 FileProvider 交给系统安装器 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>
