@@ -589,6 +589,23 @@ fun SettingsScreen(
                     SettingInfoRow("主题", "DSH 浅色/深色 · 背景图/蒙层/面板通透可调")
                 }
             }
+
+            Text("开发人员", style = MaterialTheme.typography.titleMedium)
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    SettingInfoRow("开发", "残星会虚质空间分部 达妮娅同学")
+                    SettingInfoRow("B站", "最喜欢达妮娅了")
+                    SettingInfoRow("签名", "CN=残星会虚质空间分部达妮娅同学")
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "© 2026 残星会·虚质空间分部。本应用及其全部界面设计、主题素材与代码版权归开发者所有；" +
+                            "未经授权禁止商用、二传或冒名分发。鲸鱼娘素材（CC BY-NC-SA 4.0）署名链见 README。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = MaterialTheme.typography.bodySmall.lineHeight * 1.5,
+                    )
+                }
+            }
         }
     }
 

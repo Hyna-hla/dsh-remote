@@ -2,6 +2,10 @@
 
 > ⚠️ **非官方项目**：本仓库是个人开发的第三方客户端，与 DeepSeek 官方无关，未使用其商标、未经授权背书，仅供个人学习与自用。
 
+> ✍️ **开发人员**：残星会·虚质空间分部 达妮娅同学（B站：**最喜欢达妮娅了**）。
+> 应用及全部界面设计、主题素材与代码版权归开发者所有，未经授权禁止商用、二传或冒名分发；
+> APK 签名证书 DN = `CN=残星会虚质空间分部达妮娅同学, OU=残星会, O=虚质空间分部`。
+
 把 DeepSeek Harness 装进口袋：手机 App 连接你电脑上正在运行的 DSH 服务，
 随时随地给智能体派任务、看进展、批审批。UI 对齐桌面端 DSH 风格，交互参考 Trae 移动端。
 
@@ -21,6 +25,10 @@
 
 ## 更新日志
 
+- **v1.2.0**：镜像偏好 + 开发者署名——
+  - **记住上次镜像**：更新检查与 APK 下载会记住上次成功的镜像节点，下次自动优先使用（失败仍自动切换其他源/直连兜底）；偏好持久化
+  - **开发者署名**：APK 签名证书身份改为 `CN=残星会虚质空间分部达妮娅同学`（全新密钥库 `dsh-remote-daniya.jks`）；设置 → 关于 新增「开发人员」卡片（开发：残星会虚质空间分部 达妮娅同学 / B站：最喜欢达妮娅了 / 版权声明）
+  - ⚠️ 签名变更：与旧版（upload.jks 签名）不兼容，**需先卸载旧版再安装 v1.2.0**
 - **v1.1.9**：假 Pro 计费全局化——PC 端正在运行的会话消耗也会计数（挂在全局事件流 TokenUsageWatcher，App 主连接 + 后台服务连接双挂载，按 session+seq 去重防重复扣费；App 被清理后前台服务继续计费；服务端 usage 优先，缺失按字符估算）
 - **v1.1.8**：DeepLook 工作区显示修复——默认工作区不再误显示为「标准模式」，与工作区选择面板口径统一（显示「默认工作区」；已选工作区显示其标题/路径）
 - **v1.1.7**：假 Pro 订阅中心（趣味彩蛋）——
@@ -146,8 +154,10 @@ cpolar/DSH 端口探测带缓存，通道生成更快。详见
     $env:JAVA_HOME = "C:\Program Files\Microsoft\jdk-17.0.20.8-hotspot"
     Set-Location "E:\AI搓的小东西\harness-remote"
     .\gradlew.bat assembleRelease
-    # 产物 app/build/outputs/apk/release/app-release-unsigned.apk
-    # 用 apksigner（debug.keystore，密码 android）签名后安装
+
+签名：`local.properties` 指向发布密钥库 `C:\Users\Administrator\.android\dsh-remote-daniya.jks`
+（alias `daniya`；证书 DN = `CN=残星会虚质空间分部达妮娅同学, OU=残星会, O=虚质空间分部`），
+构建产物自动签名。旧版 upload.jks 仅保留用于历史版本校验与 Play 上架迁移参考。
 
 或用 Android Studio 打开本目录直接构建。
 

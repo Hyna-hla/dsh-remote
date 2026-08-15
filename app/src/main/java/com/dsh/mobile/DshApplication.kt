@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import com.dsh.mobile.data.DshConnection
 import com.dsh.mobile.data.HistoryCache
 import com.dsh.mobile.data.ProTokenBank
+import com.dsh.mobile.data.UpdateChecker
 
 class DshApplication : Application() {
 
@@ -18,6 +19,8 @@ class DshApplication : Application() {
         runCatching { HistoryCache(this).prune() }
         // 假 Pro 订阅银行初始化（读持久化状态）
         ProTokenBank.init(this)
+        // 更新镜像偏好初始化（记住上次成功的镜像，下次优先）
+        UpdateChecker.init(this)
         // 注：资源更新检查在 MainActivity 的 UpdatePromptOverlay 里做（有更新弹窗询问，无更新静默）
     }
 

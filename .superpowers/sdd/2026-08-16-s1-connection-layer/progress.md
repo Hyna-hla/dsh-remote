@@ -27,3 +27,18 @@
 - Ruling T6: 服务端 onAttempt 仅在 errorCode != null 时 markAttempt → 成功尝试不刷新 lastUsedAt（deferred minor，最终评审裁决）。若错：连接历史排序在纯后台连接场景下不更新。
 
 ## 任务进度
+
+## 任务进度
+
+Task 1: 实现完成（DONE_WITH_CONCERNS）——代码被并发 agent 扫入 2f82027（v1.1.8）并推送 origin/main，归属错乱；4 文件内容完好（HostProfile.kt 54 行 / HostProfileTest.kt 45 行 / 两处构建文件）。测试 4/4 PASS。评审补做中（路径限定包 review-task-1.md）。
+- 环境事实：并发 agent Hyna-hla 持续提交推送（v1.1.4 DeepLook 主题也扫走了本会话早先未提交的 DeepLook 改动），5 分钟内三版；用户已决定：等其干完再继续 S1。
+- 环境事实：非 ASCII 仓库路径破坏 Gradle 测试 worker（ClassNotFoundException），后续任务统一经 ASCII junction C:\hremote 跑 Gradle（mklink /J C:\hremote <repo>）。
+- 状态：PAUSED —— 待 (a) Task 1 评审闭环 (b) 用户确认并发 agent 收工，再启 Task 2。
+
+Task 2-9: pending（未派发）
+
+Task 1: minor (deferred): runCatching 捕获 Throwable 过宽（brief 规定代码，非实现者偏差）
+Task 1: minor (deferred): codecDefaults 只断言 3 个默认字段，建议全结构断言
+Task 1: minor (deferred): 错误 JSON 形状输入（[1,2,3] / {}）无测试覆盖
+Task 1: complete (commits 440e339..bbede81, review clean, 3 deferred minors；代码实际位于并发 agent 的 2f82027，归属已注明)
+- 并发 agent 仍在活动（工作树 versionCode 37 / versionName 1.2.0，继续等待用户确认收工）

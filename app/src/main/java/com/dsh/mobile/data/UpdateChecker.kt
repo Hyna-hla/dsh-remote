@@ -92,9 +92,9 @@ object UpdateChecker {
             (a.first == b.first && a.second == b.second && a.third > b.third)
     }
 
-    /** 检查最新 release（多镜像依次尝试，最后直连；全部失败返回 null） */
+    /** 检查最新 release（镜像按「上次成功的镜像优先」排序，最后直连；全部失败返回 null） */
     suspend fun checkLatest(): ReleaseInfo? = withContext(Dispatchers.IO) {
-        for (prefix in UpdateMirrors.API_MIRRORS) {
+        for (prefix in orderedMirrors(UpdateMirrors.API_MIRRORS)) {
             val url = if (prefix.isEmpty()) API_LATEST else prefix + API_LATEST
             val r = runCatching {
                 val request = Request.Builder().url(url).header("User-Agent", USER_AGENT).build()
@@ -105,10 +105,42 @@ object UpdateChecker {
                     json.decodeFromString<ReleaseInfo>(resp.body?.string() ?: return@use null)
                 }
             }.getOrNull()
-            if (r != null) return@withContext r
+            if (r != null) {
+                saveLastMirror(prefix)
+                return@withContext r
+            }
         }
         null
     }
+
+    // ── 镜像偏好：记住上次成功的镜像，下次优先 ──
+
+    @Volatile
+    private var lastMirror: String? = null
+    private var mirrorPrefs: android.content.SharedPreferences? = null
+
+    /** 初始化镜像偏好（App 启动时调用一次） */
+    fun init(context: Context) {
+        if (mirrorPrefs != null) return
+        mirrorPrefs = context.getSharedPreferences("dsh_update", Context.MODE_PRIVATE)
+        lastMirror = mirrorPrefs?.getString("last_mirror", null)
+    }
+
+    private fun saveLastMirror(prefix: String) {
+        lastMirror = prefix
+        mirrorPrefs?.edit()?.putString("last_mirror", prefix)?.apply()
+    }
+
+    /** 上次成功的镜像排最前；其余按原顺序 */
+    fun orderedMirrors(list: List<String>): List<String> {
+        val saved = lastMirror
+        return if (saved != null && list.contains(saved)) {
+            listOf(saved) + list.filter { it != saved }
+        } else list
+    }
+
+    /** 当前记住的镜像显示名（无则 null） */
+    fun lastMirrorName(): String? = lastMirror?.let { mirrorName(it) }
 
     /** 启动自动检查：距上次检查超过 1 天才真正请求 GitHub（省电省流量） */
     suspend fun autoCheck(context: Context): ReleaseInfo? {
@@ -157,7 +189,8 @@ object UpdateChecker {
     fun downloadApkFlow(url: String, dest: File): Flow<DownloadEvent> = flow {
         var lastErr: IOException? = null
         val tmp = File(dest.parentFile, dest.name + ".part")
-        UpdateMirrors.DOWNLOAD_MIRRORS.forEachIndexed { index, prefix ->
+        // 上次成功的镜像优先
+        orderedMirrors(UpdateMirrors.DOWNLOAD_MIRRORS).forEachIndexed { index, prefix ->
             val target = if (prefix.isEmpty()) url else prefix + url
             val name = mirrorName(prefix)
             emit(DownloadEvent(PHASE_CONNECTING, index, name, target))
@@ -173,6 +206,7 @@ object UpdateChecker {
                 }
                 if (tmp.length() > 0) {
                     tmp.renameTo(dest)
+                    saveLastMirror(prefix)
                     emit(DownloadEvent(PHASE_DONE, index, name, target, 1f))
                     return@flow
                 }
