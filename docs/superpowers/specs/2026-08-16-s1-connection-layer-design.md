@@ -97,8 +97,8 @@ enum class ConnectionErrorCode {
   - `trustSelfSigned=true`：自定义 `X509TrustManager`（全接受）+ `HostnameVerifier`（全通过）。
   - `caCertUri != null`：读取 PEM/DER → 与系统默认信任链合并（`KeyStore` + `X509TrustManagerFactory`）。
   - 默认：系统链。
-- 代理：`ProxyConfig` → `Proxy(HTTP|SOCKS)` + `ProxyAuthenticator`（仅账号密码非空时挂）。
-- 客户端实例按 profile 缓存（LRU，切换主机后旧实例释放），避免每连接新建线程池。
+- 代理：`ProxyConfig` → `Proxy(HTTP|SOCKS)` + `ProxyAuthenticator`（仅账号密码非空时挂；处理 407 补鉴权）。
+- 客户端实例缓存挂 `DshApplication` **进程级单例**（按 profile id 键控），主连接与后台 watcher 共享同一实例（连接池复用）；切换活跃主机时**显式释放**旧 profile 客户端（在旧连接 disconnect 完成后），不做定时/LRU 回收，避免误释放 watcher 正在使用的实例。
 
 ### 5.4 DshConnection 扩展
 
@@ -106,10 +106,14 @@ enum class ConnectionErrorCode {
 - `State.Error(message, code: ConnectionErrorCode?, profileId: String?)`；连接尝试结果通过回调 `onAttempt: (profileId: String, errorCode: ConnectionErrorCode?, hostVersion: String?) -> Unit` 通知上层（用于写回 lastUsedAt/lastErrorCode，不引入反向依赖）。
 - **错误分类**：`call()` 与探测链路统一 `catch` → 按异常类型映射：
   - `UnknownHostException` → DNS_UNREACHABLE
-  - `ConnectException` / 连接超时 `SocketTimeoutException` → PORT_UNREACHABLE（若配置了代理 → PROXY_FAILED）
+  - `ConnectException` → PORT_UNREACHABLE（若配置了代理 → PROXY_FAILED）
+  - `SocketTimeoutException` 按**阶段**区分（OkHttp 连接超时与读超时同异常类）：连接阶段（message 含 "connect"）→ PORT_UNREACHABLE（配代理 → PROXY_FAILED）；已建连后的读超时（如 60s 读超时的大响应）→ PROTOCOL_ERROR（服务无响应）。判定依据 = 异常 message + 调用阶段标记
   - `SSLHandshakeException` / `SSLPeerUnverifiedException` / 含 "CertPath" 的 SSL 异常 → TLS_CERT_FAILED
   - HTTP 401/403 → AUTH_FAILED；HTTP 5xx / 解析失败 / RPC ok=false → PROTOCOL_ERROR
-- **版本兼容**：探测成功后解析 `host.describe.version`（semver 容错解析），与 App 内置 `MIN_DSH_VERSION` 比较；低于最低版本 → VERSION_MISMATCH，不进入 Connected。`MIN_DSH_VERSION` 默认取宽松值 `0.1.0`（当前协议族均可连），实现时若协议考古发现实际下界更高则收紧；版本号不可解析时宽容放行（不阻断，仅记录）。
+- **版本兼容（宽容策略）**：`host.describe.version` 目前是 PC 端硬编码占位符 `"0.0.1"`（dsh-host-apiproxy/lib/index.js L3199，未读真实版本；协议本身无版本协商——"client and host ship together"），**不能用于阻断判断**。实现为：
+  - `MIN_DSH_VERSION = "0.0.0"`（默认全放行）；
+  - `"0.0.1"` 与不可解析版本 → 标记「版本未知」，正常进入 Connected，仅在横幅/关于页展示，不阻断；
+  - 仅当版本可解析且明确低于 MIN → VERSION_MISMATCH（当前实际不可达，为未来协议演进保留路径）。
 - **重连策略**：
   - 可恢复错误（DNS/PORT/TLS/PROXY/PROTOCOL）：指数退避 3→6→12→24→30s 封顶（沿用现状）；PORT/DNS 走快速档 3→6→9s 封顶。
   - 不可恢复错误（AUTH_FAILED / VERSION_MISMATCH）：停止自动重连，UI 持久横幅提示（改配置 / 升级）。
@@ -145,7 +149,7 @@ enum class ConnectionErrorCode {
 | DNS_UNREACHABLE | 域名无法解析 | 检查地址拼写；局域网场景改用 IP |
 | PORT_UNREACHABLE | 端口不可达（连接被拒绝/超时） | 确认 PC 端 DSH 已启动、端口正确、防火墙放行 |
 | TLS_CERT_FAILED | HTTPS 证书校验失败 | 若为自签名证书，在本主机配置里开启「信任自签名」或导入其 CA |
-| AUTH_FAILED | 凭证无效（401/403） | 重新获取 Token 或检查服务器鉴权配置 |
+| AUTH_FAILED | 前置网关鉴权失败（401/403） | DSH 本机直连无鉴权；检查自建反代/网关的鉴权配置或凭证 |
 | VERSION_MISMATCH | 移动端与 PC 端版本不兼容 | 升级 DSH 或本 App；具体版本号显示在横幅 |
 | PROXY_FAILED | 代理不可达 | 检查代理地址/端口/账号，或关闭该主机的代理 |
 | PROTOCOL_ERROR | 服务响应异常 | 确认地址指向 DSH web 服务；导出日志排查 |
@@ -154,7 +158,7 @@ enum class ConnectionErrorCode {
 ## 7. 迁移与兼容
 
 - 旧单地址数据自动迁移（§5.2），升级后用户无感。
-- S1 完成时所有读取点（ConnectScreen / DshConnectionService / MainActivity）已切换为新模型，旧 `server_url`/`auto_connect` key 与 `ConnectionConfig` 类随 S1 一并移除（不留过渡读取）。
+- S1 完成时所有读取点（ConnectScreen / DshConnectionService / MainActivity）已切换为新模型；**迁移完成后立即删除旧 `server_url`/`auto_connect` key**（与 §5.2 一致），`ConnectionConfig` 类随 S1 移除（不留过渡读取）。
 - 对旧版 DSH 主机（host.describe 无版本字段或版本不可解析）保持可连（宽容版本检查）。
 
 ## 8. 测试与验收
@@ -163,7 +167,8 @@ enum class ConnectionErrorCode {
 2. 真机验收清单：
    - 多主机：保存 ≥3 条配置（含备注），切换即时生效，后台通知跟随当前主机。
    - 历史：列表按最近使用排序，上次错误码徽标正确。
-   - 错误场景复现：错域名（DNS）、错端口（PORT）、自签 HTTPS（TLS_CERT_FAILED→开启信任后连通）、版本不兼容（VERSION_MISMATCH，用旧版 DSH 或 mock 验证）。
+   - 错误场景复现：错域名（DNS）、错端口（PORT）、自签 HTTPS（TLS_CERT_FAILED→开启信任后连通）。
+   - 版本兼容宽容策略：真实主机（version=0.0.1 占位符）正常进入 Connected 且横幅标「版本未知」；mock 一个低于 MIN 的版本 → 触发 VERSION_MISMATCH 横幅且不阻断（仅 mock 可验证，真实协议无版本协商）。
    - 网络切换：WiFi↔蜂窝切换后 ≤3s 自动恢复连接（静默）。
    - 代理：HTTP/SOCKS5 各验证一次（含账号密码）。
    - 迁移：装旧版连过一次再升级 → 旧地址出现在配置列表首位且自动连接。
@@ -174,11 +179,11 @@ enum class ConnectionErrorCode {
 
 | 项 | 说明 | 处置 |
 | :-- | :-- | :-- |
-| MIN_DSH_VERSION 取值 | 协议兼容下界需按 App 实际依赖确定 | 实现时从 dsh-client-connection 兼容性确认，先取宽松值 |
+| 版本字段是占位符 | host.describe.version 恒为 "0.0.1"，协议无版本协商 | 宽容策略：MIN=0.0.0，占位符/不可解析标「版本未知」不阻断（§5.4） |
 | 代理密码明文 | DataStore 明文存储 | TODO-S3 迁 Keystore |
 | 信任自签名的安全暴露 | 跳过校验仅限该主机 | UI 常驻 ⚠ 警示徽标 |
 | 网络回调的机型差异 | 部分 ROM 回调延迟 | 保留退避兜底（不依赖回调才能恢复） |
-| 服务/主连接双实例 | 两份 DshConnection 共享客户端工厂 | 连接池复用，切换时统一经由 activeProfileId 驱动 |
+| 服务/主连接双实例 | 两份 DshConnection 共享进程级客户端缓存 | 连接池复用；切换统一经 activeProfileId 驱动，旧客户端在断开完成后显式释放 |
 
 ## 10. 影响文件清单
 
