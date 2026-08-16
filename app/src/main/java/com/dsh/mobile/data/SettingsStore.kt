@@ -86,8 +86,7 @@ class SettingsStore(
         context.dataStore.edit { prefs ->
             applyLegacyMigration(prefs)
             val current = ProfileCodec.decode(prefs[PROFILE_LIST_KEY] ?: "")
-            val newList = current.filterNot { it.id == profile.id } + profile
-            prefs[PROFILE_LIST_KEY] = ProfileCodec.encode(newList.map { encryptProfileForStorage(it, secretBox) })
+            prefs[PROFILE_LIST_KEY] = ProfileCodec.encode(upsertProfileInStore(current, profile, secretBox))
         }
     }
 
@@ -257,6 +256,17 @@ internal fun encryptProfileForStorage(p: HostProfile, box: SecretBox): HostProfi
     if (pw.isNullOrBlank()) return p
     return p.copy(proxy = p.proxy.copy(password = box.encrypt(pw)))
 }
+
+/**
+ * upsert 语义的落盘合并：current 是存储形态（已密文），incoming 是明文形态。
+ * 只对 incoming 加密，幸存条目保持密文不变，避免二次加密。
+ */
+internal fun upsertProfileInStore(
+    current: List<HostProfile>,
+    incoming: HostProfile,
+    box: SecretBox,
+): List<HostProfile> =
+    current.filterNot { it.id == incoming.id } + encryptProfileForStorage(incoming, box)
 
 /** 读出后解密代理密码；解密失败 = 旧明文，按原样读（下次写重加密）。 */
 internal fun decryptProfileFromStorage(p: HostProfile, box: SecretBox): HostProfile {

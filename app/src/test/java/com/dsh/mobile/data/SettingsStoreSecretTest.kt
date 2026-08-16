@@ -59,4 +59,17 @@ class SettingsStoreSecretTest {
         assertNotEquals("secret123", back.proxy!!.password) // 落盘形态是密文
         assertEquals("secret123", decryptProfileFromStorage(back, FakeBox()).proxy!!.password)
     }
+
+    @Test
+    fun twoSequentialUpsertsKeepFirstPasswordIntact() {
+        val box = FakeBox()
+        val a = profileWithProxy().copy(id = "pa")
+        val b = HostProfile(id = "pb", remark = "b", url = "http://x:2",
+            proxy = ProxyConfig(type = "http", host = "1.2.3.4", port = 1, password = "pwB"))
+        val afterA = upsertProfileInStore(emptyList(), a, box)
+        val afterB = upsertProfileInStore(afterA, b, box)
+        val aStored = afterB.first { it.id == "pa" }
+        assertEquals("secret123", decryptProfileFromStorage(aStored, box).proxy!!.password)
+        assertEquals("pwB", decryptProfileFromStorage(afterB.first { it.id == "pb" }, box).proxy!!.password)
+    }
 }
