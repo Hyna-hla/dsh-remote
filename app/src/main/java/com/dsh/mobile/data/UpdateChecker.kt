@@ -59,12 +59,12 @@ object UpdateMirrors {
 
 /**
  * 应用内检查更新 + 下载：
- * - 检查：GET api.github.com/repos/Hyna-hla/harness-remote/releases/latest（多镜像）
+ * - 检查：GET api.github.com/repos/Hyna-hla/dsh-remote/releases/latest（多镜像）
  * - 下载：GitHub release 资产直链（多镜像失败切换），流式写盘带进度
  * - 安装：由调用方用 FileProvider/系统安装器完成
  */
 object UpdateChecker {
-    private const val REPO = "Hyna-hla/harness-remote"
+    private const val REPO = "Hyna-hla/dsh-remote"
     private const val API_LATEST = "https://api.github.com/repos/$REPO/releases/latest"
     private const val USER_AGENT = "DSH-Remote-Updater/1.0"
     /** 启动自动检查的最小间隔（24h），避免每次打开都打 GitHub */

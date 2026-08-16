@@ -1,4 +1,4 @@
-# harness-remote — 第三方 DeepSeek Harness 手机遥控端
+# dsh-remote — 第三方 DeepSeek Harness 手机遥控端
 
 > ⚠️ **非官方项目**：本仓库是个人开发的社区第三方客户端，基于 DeepSeek Harness 构建，并非 DeepSeek 官方产品，未使用其商标、未经授权背书。项目遵循 [MIT License](LICENSE) 且完全开源免费；如有人向您以任何形式出售本软件，请拒绝交易。
 
@@ -26,6 +26,10 @@
 
 ## 更新日志
 
+- **v1.3.4**：远程通道 token 鉴权（安全）+ 仓库更名——
+  - **通道鉴权**：PC 端插件给 `/api`（含 events.mux WebSocket）加 Bearer token 门禁——本机浏览器放行（loopback 且无 X-Forwarded-For），cpolar 隧道与局域网直连一律要求 token；token 首次自动生成（`remote-access/channel-token`），配对通过后经 `pair/check` 下发到 App，密文落盘、请求时动态携带（注册表热生效，配对完成即刻生效无需重连）；配对握手与 `host.describe` 探测豁免（未配对手机先完成引导）；拿到公网地址的陌生人从此无法遥控你的 DSH
+  - **仓库更名**：harness-remote → **dsh-remote**（旧地址自动重定向）；应用内更新通道已同步新仓库名
+  - ⚠️ 需同步更新 PC 端 dsh-remote-access 插件并重启 DSH；旧 App（无 token 支持）连新插件会在配对外请求上收到 401，更新 App 即可
 - **v1.3.3**：体验打磨第一批——
   - **代码块升级**（MarkdownText）：解析围栏语言标识，头部条显示语言角标 + 一键复制（「已复制 ✓」1.5s 反馈），头部条配色随主题走
   - **会话首屏骨架屏**：空列表加载中显示 3 条呼吸动画占位气泡（错落宽度 + 呼吸透明度），替代空白等待
@@ -135,7 +139,7 @@
 ## 安装（APK）
 
 - **推荐：应用内更新**——App 启动自动检查 GitHub Releases（每天最多一次），有新版弹窗询问后直接下载安装（多镜像加速、断源自动切换），**优先下载 debug 主包**（约 68MB，功能最全），无主包时回退 -min 精简包
-- **手动安装**：从 [Releases](https://github.com/Hyna-hla/harness-remote/releases) 下载 `DSH-Remote-vX.Y.Z.apk`（debug 主包）；仓库 `release/` 目录另存各版本 R8 精简版 `-min.apk`（约 4.6MB，已签名）
+- **手动安装**：从 [Releases](https://github.com/Hyna-hla/dsh-remote/releases) 下载 `DSH-Remote-vX.Y.Z.apk`（debug 主包）；仓库 `release/` 目录另存各版本 R8 精简版 `-min.apk`（约 4.6MB，已签名）
 - 传到手机 → 允许「未知来源」安装 → 填服务器地址 → 连接
 - ⚠️ v1.2.0 起更换签名证书，旧版（upload.jks 签名）需卸载重装；debug 包与 release 签名包互不兼容，升级请走同一通道
 - 自定义主题包格式与示例：[docs/theme-package-format.md](docs/theme-package-format.md)、[docs/aurora.dshTheme.zip](docs/aurora.dshTheme.zip)

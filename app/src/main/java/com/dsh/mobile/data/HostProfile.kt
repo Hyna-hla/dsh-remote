@@ -35,6 +35,8 @@ data class HostProfile(
     val lastUsedAt: Long = 0,
     val lastErrorCode: String? = null,
     val paired: Boolean = false,
+    /** 远程通道 token（配对通过后由 pair/check 下发；密文落盘，请求时以 Bearer 头携带） */
+    val channelToken: String = "",
 )
 
 /**

@@ -49,8 +49,11 @@ class HttpPairingRpc(
     override suspend fun status(): String =
         get("/api/remote-access/pair/status")
 
+    /** pair/check 结果：paired + 通道 token（仅已配对设备下发；旧插件无 token 字段为 null） */
+    data class CheckResult(val paired: Boolean, val token: String?)
+
     /** 回查该设备在 PC 端是否仍配对（撤销后 App 重新握手）；失败抛异常由调用方 runCatching 兜底。 */
-    suspend fun check(deviceId: String): Boolean = withContext(Dispatchers.IO) {
+    suspend fun check(deviceId: String): CheckResult = withContext(Dispatchers.IO) {
         val encoded = java.net.URLEncoder.encode(deviceId, "UTF-8")
         val req = Request.Builder()
             .url(connection.baseUrl() + "/api/remote-access/pair/check?deviceId=" + encoded)
@@ -59,7 +62,8 @@ class HttpPairingRpc(
         client.newCall(req).execute().use { resp ->
             val text = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}")
-            JSONObject(text).optBoolean("paired", false)
+            val obj = JSONObject(text)
+            CheckResult(obj.optBoolean("paired", false), obj.optString("token", "").ifBlank { null })
         }
     }
 }

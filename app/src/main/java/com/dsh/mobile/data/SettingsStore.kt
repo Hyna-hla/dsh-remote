@@ -354,9 +354,16 @@ internal fun isCiphertextShape(value: String): Boolean = runCatching {
 /** 写入前加密代理密码：已是密文形态（密钥丢失残存密文）原样返回，不再二次加密；无代理或空密码原样返回。 */
 internal fun encryptProfileForStorage(p: HostProfile, box: SecretBox): HostProfile {
     val pw = p.proxy?.password
-    if (pw.isNullOrBlank()) return p
-    if (isCiphertextShape(pw)) return p // 密钥丢失残存密文：不再二次加密
-    return p.copy(proxy = p.proxy.copy(password = box.encrypt(pw)))
+    var out = p
+    if (!pw.isNullOrBlank() && !isCiphertextShape(pw)) {
+        out = out.copy(proxy = out.proxy?.copy(password = box.encrypt(pw)))
+    }
+    // 通道 token 与代理密码同规格加密（空值跳过；已是密文形态不再二次加密）
+    val tk = p.channelToken
+    if (!tk.isBlank() && !isCiphertextShape(tk)) {
+        out = out.copy(channelToken = box.encrypt(tk))
+    }
+    return out
 }
 
 /**
@@ -370,18 +377,27 @@ internal fun upsertProfileInStore(
 ): List<HostProfile> =
     current.filterNot { it.id == incoming.id } + encryptProfileForStorage(incoming, box)
 
-/** 读出后解密代理密码；解密失败时按形态判定：合法 Base64 且长度>=28 视为「密文但密钥丢失」保留密文，否则按旧明文迁移。 */
+/** 读出后解密代理密码与通道 token；解密失败时按形态判定：合法 Base64 且长度>=28 视为「密文但密钥丢失」保留密文，否则按旧明文迁移。 */
 internal fun decryptProfileFromStorage(p: HostProfile, box: SecretBox): HostProfile {
     val pw = p.proxy?.password
-    if (pw.isNullOrBlank()) return p
-    val plain = box.decrypt(pw)
-    if (plain != null) return p.copy(proxy = p.proxy.copy(password = plain))
-    // 解密失败：形态判定——合法 Base64 且长度>=28（12 IV + 16 tag）视为「密文但密钥丢失」，
-    // 保留密文（UI 显示乱码，用户重输密码后自然重加密）；否则按旧明文迁移。
-    // 用 java.util.Base64（Android API 26+，minSdk 29 可用；JVM 单测也可用，android.util.Base64 在单测被 mock 抛异常）。
-    val looksCiphertext = runCatching {
-        val raw = java.util.Base64.getDecoder().decode(pw)
-        raw.size >= 28
-    }.getOrDefault(false)
-    return if (looksCiphertext) p else p.copy(proxy = p.proxy.copy(password = pw))
+    var out = p
+    if (!pw.isNullOrBlank()) {
+        val plain = box.decrypt(pw)
+        out = if (plain != null) out.copy(proxy = out.proxy?.copy(password = plain)) else {
+            // 解密失败：形态判定——合法 Base64 且长度>=28（12 IV + 16 tag）视为「密文但密钥丢失」，
+            // 保留密文（UI 显示乱码，用户重输密码后自然重加密）；否则按旧明文迁移。
+            // 用 java.util.Base64（Android API 26+，minSdk 29 可用；JVM 单测也可用，android.util.Base64 在单测被 mock 抛异常）。
+            val looksCiphertext = runCatching {
+                val raw = java.util.Base64.getDecoder().decode(pw)
+                raw.size >= 28
+            }.getOrDefault(false)
+            if (looksCiphertext) out else out.copy(proxy = out.proxy?.copy(password = pw))
+        }
+    }
+    val tk = p.channelToken
+    if (!tk.isBlank()) {
+        val tkPlain = box.decrypt(tk)
+        if (tkPlain != null) out = out.copy(channelToken = tkPlain)
+    }
+    return out
 }

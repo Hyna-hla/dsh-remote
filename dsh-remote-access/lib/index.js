@@ -2,6 +2,7 @@
 // 微信桥：扫码登录微信 iLink Bot → 微信里给自己发消息遥控 DSH（会话注入、流式回复、审批、图片）
 // cpolar：网页版备选。内置一键安装（官网自动下载）、注册引导、authtoken 保存，无需手动装 cpolar
 import { execFile } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import {
   closeSync,
   existsSync,
@@ -530,7 +531,9 @@ export const apply = (ctx) => {
       if (req.method !== "GET") return json(res, 405, { error: "method not allowed" });
       const u = new URL(req.url, "http://localhost");
       const deviceId = u.searchParams.get("deviceId") ?? "";
-      json(res, 200, { ok: true, paired: readPaired().some((d) => d.deviceId === deviceId) });
+      const paired = readPaired().some((d) => d.deviceId === deviceId);
+      // 已配对设备回查时下发通道 token（App 存入 HostProfile，此后所有请求带 Bearer 头）
+      json(res, 200, { ok: true, paired, token: paired ? channelToken() : undefined });
     },
   });
 
@@ -545,4 +548,109 @@ export const apply = (ctx) => {
       json(res, 200, { ok: true });
     },
   });
+
+  // ---------- 远程通道 token 鉴权 ----------
+  // 远程通道此前无鉴权（已知限制）：拿到 cpolar/局域网地址的任何人都能遥控 DSH。
+  // 本层给 /api 加 Bearer token 门禁，规则：
+  //   - 本机浏览器放行：loopback 远端且无 X-Forwarded-For（cpolar 隧道虽从 127.0.0.1
+  //     连入，但携带 XFF/x-real-ip 头，据此与真本机请求区分）；
+  //   - 局域网直连（非 loopback 远端）一律要求 token；
+  //   - 引导通道豁免：/api/remote-access/pair/*（配对握手）与 /api/host.describe
+  //     （连接探测）——未配对手机先完成配对、经 pair/check 拿到 token 后才有完整访问；
+  //   - token 首次加载时自动生成，存放 $DSH_HOME/remote-access/channel-token。
+  //   - WebSocket 升级（events.mux）同样校验：未带 token 的握手直接 401 断开。
+  const tokenFile = join(home, "remote-access", "channel-token");
+  let cachedToken = null;
+  const channelToken = () => {
+    if (cachedToken) return cachedToken;
+    try {
+      const t = readFileSync(tokenFile, "utf8").trim();
+      if (/^[0-9a-f]{32,}$/.test(t)) return (cachedToken = t);
+    } catch {}
+    try {
+      mkdirSync(join(home, "remote-access"), { recursive: true });
+      const t = randomBytes(24).toString("hex");
+      writeFileSync(tokenFile, t, "utf8");
+      log("已生成远程通道 token（remote-access/channel-token）");
+      return (cachedToken = t);
+    } catch (e) {
+      log("channel-token 生成失败，鉴权不启用", e);
+      return null;
+    }
+  };
+
+  const isLoopback = (addr) =>
+    addr === "127.0.0.1" || addr === "::1" || addr === "::ffff:127.0.0.1" || addr === "::ffff:7f00:1";
+  const authExempt = (path) =>
+    path.startsWith("/api/remote-access/pair/") || path === "/api/host.describe";
+  const unauthorized = (req) => {
+    const tok = channelToken();
+    if (!tok) return false; // token 不可用时不设防（降级可用性优先）
+    const p = String(req.url ?? "").split("?")[0];
+    if (!p.startsWith("/api") || authExempt(p)) return false;
+    if (isLoopback(req.socket?.remoteAddress ?? "") && !req.headers?.["x-forwarded-for"]) return false;
+    return String(req.headers?.authorization ?? "") !== `Bearer ${tok}`;
+  };
+
+  const rejectHttp = (res) => {
+    res.statusCode = 401;
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.end(JSON.stringify({ error: "unauthorized", hint: "channel token required" }));
+  };
+  const rejectUpgrade = (socket) => {
+    socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+    socket.destroy();
+  };
+
+  // 包裹既有与未来注册的 /api 路由与 WS 升级：核心 /api（client-connection）在本插件
+  // 之后惰性挂载，靠 proxy set 陷阱兜住晚注册；分发侧 match() 动态读表属性，换表即生效。
+  // 注意：ctx.effect(fn) 是「立即执行 fn、返回值作清理器」——恢复逻辑必须以返回值形式
+  // 注册（写成立即执行会在挂载瞬间就把代理表撤掉）。
+  const wrapHttp = (route) => ({
+    ...route,
+    handler: (req, res) => {
+      if (unauthorized(req)) return rejectHttp(res);
+      return route.handler(req, res);
+    },
+  });
+  const wrapUpgrade = (route) => ({
+    ...route,
+    handler: (req, socket, head) => {
+      if (unauthorized(req)) return rejectUpgrade(socket);
+      return route.handler(req, socket, head);
+    },
+  });
+  const proxyTable = (table, wrap) =>
+    new Proxy(table, {
+      get(target, key) {
+        if (key === "set") return (path, route) => target.set(path, wrap(route));
+        const value = Reflect.get(target, key);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+  if (typeof webServer.exact?.set === "function" && typeof webServer.prefixes?.set === "function") {
+    const table0exact = webServer.exact;
+    const table0prefixes = webServer.prefixes;
+    const table0upgrades = webServer.upgrades;
+    for (const [path, route] of [...webServer.exact]) webServer.exact.set(path, wrapHttp(route));
+    for (const [path, route] of [...webServer.prefixes]) webServer.prefixes.set(path, wrapHttp(route));
+    if (typeof webServer.upgrades?.set === "function") {
+      for (const [path, route] of [...webServer.upgrades]) webServer.upgrades.set(path, wrapUpgrade(route));
+      webServer.upgrades = proxyTable(webServer.upgrades, wrapUpgrade);
+    }
+    webServer.exact = proxyTable(webServer.exact, wrapHttp);
+    webServer.prefixes = proxyTable(webServer.prefixes, wrapHttp);
+    ctx.effect(
+      () => () => {
+        // 恢复原始表引用（已包裹的 handler 随各自路由注销清理）
+        webServer.exact = table0exact;
+        webServer.prefixes = table0prefixes;
+        if (typeof table0upgrades?.set === "function") webServer.upgrades = table0upgrades;
+      },
+      "dsh-remote-access: channel auth"
+    );
+    log("远程通道 token 鉴权已挂载");
+  } else {
+    log("webServer 路由表结构未知，token 鉴权未挂载");
+  }
 };

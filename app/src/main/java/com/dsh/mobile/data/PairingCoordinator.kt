@@ -30,13 +30,26 @@ class PairingCoordinator(
                 }
                 val profile = connection.currentProfile() ?: return@collect
                 if (profile.paired) {
-                    val stillPaired = runCatching {
+                    val still = runCatching {
                         HttpPairingRpc(connection, OkHttpClientFactory.build(profile).first)
                             .check(settingsStore.ensureDeviceId())
-                    }.getOrDefault(true) // 回查失败保守视为仍配对（网络错不打扰）
-                    if (stillPaired) return@collect
-                    settingsStore.upsertProfile(profile.copy(paired = false))
-                    // 继续走握手（不 return）
+                    }.getOrNull()
+                    when {
+                        // 回查失败保守视为仍配对（网络错不打扰、不触发重新握手）
+                        still == null -> return@collect
+                        !still.paired -> {
+                            settingsStore.upsertProfile(profile.copy(paired = false))
+                            // 继续走握手（不 return）
+                        }
+                        else -> {
+                            // 已配对：顺带刷新通道 token（PC 端重生成/本机丢失时静默补齐）
+                            still.token?.takeIf { it.isNotBlank() && it != profile.channelToken }?.let { tok ->
+                                settingsStore.upsertProfile(profile.copy(channelToken = tok))
+                                OkHttpClientFactory.ChannelTokenRegistry.set(profile.id, tok)
+                            }
+                            return@collect
+                        }
+                    }
                 }
                 if (handshakingFor == profile.id) return@collect
                 handshakingFor = profile.id
@@ -55,7 +68,20 @@ class PairingCoordinator(
                         _events.tryEmit("配对请求失败（网络或服务器错误），下次连接时重试")
                     }
                     PairingOutcome.PAIRED, PairingOutcome.APPROVED -> {
-                        settingsStore.upsertProfile(profile.copy(paired = true))
+                        // 配对通过后立即回查拿通道 token（Bearer 鉴权凭证），注册表热生效
+                        val tok = runCatching {
+                            HttpPairingRpc(connection, OkHttpClientFactory.build(profile).first)
+                                .check(settingsStore.ensureDeviceId()).token
+                        }.getOrNull()
+                        settingsStore.upsertProfile(
+                            profile.copy(paired = true, channelToken = tok ?: profile.channelToken)
+                        )
+                        if (!tok.isNullOrBlank()) {
+                            OkHttpClientFactory.ChannelTokenRegistry.set(profile.id, tok)
+                            _events.tryEmit("配对完成，已获取远程通道令牌")
+                        } else {
+                            _events.tryEmit("配对完成")
+                        }
                     }
                     PairingOutcome.SKIPPED -> {
                         settingsStore.upsertProfile(profile.copy(paired = true))

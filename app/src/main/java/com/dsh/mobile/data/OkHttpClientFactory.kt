@@ -50,8 +50,25 @@ object OkHttpClientFactory {
 
     private val cache = HashMap<String, ClientPair>()
 
+    /**
+     * 通道 token 注册表：拦截器在请求时动态读取（而非构建时固化），配对完成后
+     * 更新注册表即可让已缓存的 client（含 WS 流）立即带上 Bearer 头，无需重建连接。
+     */
+    object ChannelTokenRegistry {
+        private val tokens = HashMap<String, String>()
+
+        @Synchronized
+        fun set(profileId: String, token: String?) {
+            if (token.isNullOrBlank()) tokens.remove(profileId) else tokens[profileId] = token
+        }
+
+        @Synchronized
+        fun get(profileId: String): String? = tokens[profileId]
+    }
+
     @Synchronized
     fun build(profile: HostProfile): Pair<OkHttpClient, OkHttpClient> {
+        ChannelTokenRegistry.set(profile.id, profile.channelToken.ifBlank { null })
         cache[profile.id]?.let { return it.unary to it.stream }
         val pair = ClientPair(
             unary = newClient(profile, stream = false),
@@ -90,6 +107,14 @@ object OkHttpClientFactory {
         buildProxy(profile.proxy)?.let { builder.proxy(it) }
         profile.proxy?.takeIf { it.username.isNotBlank() }?.let { p ->
             builder.proxyAuthenticator(proxyAuthenticator(p.username, p.password))
+        }
+        // 远程通道 token：请求时从注册表动态取（配对下发后热生效；无 token 时不加头，
+        // 兼容未启用鉴权的旧 PC 端）
+        builder.addInterceptor { chain ->
+            val token = ChannelTokenRegistry.get(profile.id)
+            val req = if (token.isNullOrBlank()) chain.request()
+            else chain.request().newBuilder().header("Authorization", "Bearer $token").build()
+            chain.proceed(req)
         }
         return builder.build()
     }
