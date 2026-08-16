@@ -17,8 +17,9 @@ import com.dsh.mobile.ui.screens.*
 sealed class Screen(val route: String) {
     data object Connect : Screen("connect")
     data object Home : Screen("home")
-    data object Session : Screen("session/{sessionId}") {
-        fun createRoute(sessionId: String) = "session/$sessionId"
+    data object Session : Screen("session/{sessionId}?focusSeq={focusSeq}") {
+        fun createRoute(sessionId: String, focusSeq: Long? = null) =
+            "session/$sessionId" + (focusSeq?.let { "?focusSeq=$it" } ?: "")
     }
     data object Settings : Screen("settings")
     data object Pending : Screen("pending")
@@ -87,12 +88,18 @@ fun AppNavigation(
         }
         composable(
             route = Screen.Session.route,
-            arguments = listOf(navArgument("sessionId") { type = NavType.StringType }),
+            arguments = listOf(
+                navArgument("sessionId") { type = NavType.StringType },
+                navArgument("focusSeq") { type = NavType.StringType; defaultValue = "" },
+            ),
         ) {
             SessionScreen(
                 sessionId = it.arguments?.getString("sessionId") ?: "",
                 connection = connection,
+                approvalCenter = approvalCenter,
+                focusSeq = it.arguments?.getString("focusSeq")?.toLongOrNull(),
                 onBack = { navController.popBackStack() },
+                onPending = { navController.navigate(Screen.Pending.route) },
             )
         }
         composable(Screen.Pending.route) {
@@ -100,7 +107,7 @@ fun AppNavigation(
                 center = approvalCenter,
                 connection = connection,
                 onBack = { navController.popBackStack() },
-                onOpenSession = { sid, _ -> navController.navigate(Screen.Session.createRoute(sid)) },
+                onOpenSession = { sid, seq -> navController.navigate(Screen.Session.createRoute(sid, seq)) },
             )
         }
         composable(Screen.Settings.route) {

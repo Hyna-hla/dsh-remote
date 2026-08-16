@@ -44,7 +44,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dsh.mobile.data.*
 import com.dsh.mobile.ui.components.MarkdownText
-import com.dsh.mobile.ui.components.QuestionCard
 import com.dsh.mobile.ui.theme.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -620,7 +619,10 @@ class SessionChatState(
 fun SessionScreen(
     sessionId: String,
     connection: DshConnection,
+    approvalCenter: ApprovalCenter,
+    focusSeq: Long?,
     onBack: () -> Unit,
+    onPending: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -628,6 +630,12 @@ fun SessionScreen(
     val items by state.items.collectAsState()
     val title by state.title.collectAsState()
     val running by state.running.collectAsState()
+
+    // 本会话待办数量（审批 + 问答，异常不计入轻提示条）
+    val centerItems by approvalCenter.items.collectAsState()
+    val myPending = centerItems.count {
+        it.sessionId == sessionId && (it is PendingItem.Approval || it is PendingItem.Question)
+    }
 
     var input by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
@@ -639,8 +647,6 @@ fun SessionScreen(
     var skillsDialog by remember { mutableStateOf(false) }
     var skills by remember { mutableStateOf<List<DshConnection.SkillEntry>>(emptyList()) }
     var skillsLoading by remember { mutableStateOf(false) }
-    var approval by remember { mutableStateOf<DshConnection.Event.ApprovalRequested?>(null) }
-    var questions by remember { mutableStateOf<List<QuestionItem>?>(null) }
     var actionError by remember { mutableStateOf<String?>(null) }
     var workspaceLabel by remember { mutableStateOf<String?>(null) }
     var autoModelEnabled by remember { mutableStateOf(true) }
@@ -649,7 +655,11 @@ fun SessionScreen(
     var loadingAll by remember { mutableStateOf(false) }
     var renameDialog by remember { mutableStateOf(false) }
     var renameText by remember { mutableStateOf("") }
+    // focusSeq 定位：历史加载完成标志 + 短暂高亮的目标 seq
+    var historyReady by remember { mutableStateOf(false) }
+    var highlightedSeq by remember { mutableStateOf<Long?>(null) }
     val listState = rememberLazyListState()
+    val snackbarHostState = remember { SnackbarHostState() }
     val clipboard = LocalClipboardManager.current
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
@@ -677,6 +687,7 @@ fun SessionScreen(
 
     LaunchedEffect(sessionId) {
         state.load()
+        historyReady = true
         // 会话所属工作区（只读展示，切换入口在首页新对话）
         runCatching {
             val ws = connection.workspaceList().items
@@ -695,18 +706,6 @@ fun SessionScreen(
             when (ev) {
                 is DshConnection.Event.SessionEvent ->
                     if (ev.sessionId == sessionId) state.onSessionEvent(ev.event)
-
-                is DshConnection.Event.ApprovalRequested ->
-                    if (ev.sessionId == sessionId) approval = ev
-
-                is DshConnection.Event.ApprovalResolved ->
-                    if (ev.sessionId == sessionId && ev.approvalId == approval?.approvalId) approval = null
-
-                is DshConnection.Event.QuestionRequested ->
-                    if (ev.sessionId == sessionId) questions = ev.questions
-
-                is DshConnection.Event.QuestionResolved ->
-                    if (ev.sessionId == sessionId) questions = null
 
                 is DshConnection.Event.SessionStatus ->
                     if (ev.sessionId == sessionId) state.running.value = ev.status == "running"
@@ -745,12 +744,31 @@ fun SessionScreen(
     // 自动滚动到底部：仅在用户本来就停在底部时跟随（不抢用户上翻阅读），
     // 用无动画 scrollToItem；流式时按最后一条文本长度跟随增量
     val tailSig = items.lastOrNull()?.let { if (it is ChatItem.Assistant) it.text.length else 0 } ?: 0
-    LaunchedEffect(items.size, tailSig, approval, questions) {
+    LaunchedEffect(items.size, tailSig) {
         if (items.isEmpty()) return@LaunchedEffect
         val info = listState.layoutInfo
         val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
         val atBottom = info.totalItemsCount <= 0 || lastVisible >= info.totalItemsCount - 1
         if (atBottom) listState.scrollToItem(items.size - 1)
+    }
+
+    // focusSeq 定位：历史加载完成后，按事件 seq 直接映射到消息列表项，
+    // 找到 → 滚动定位 + 短暂高亮；未找到 → 停在顶部 + snackbar 提示。
+    LaunchedEffect(historyReady, focusSeq) {
+        val target = focusSeq ?: return@LaunchedEffect
+        if (!historyReady) return@LaunchedEffect
+        val idx = items.indexOfFirst { it.seq == target }
+        if (idx < 0) {
+            if (items.isNotEmpty()) listState.scrollToItem(0)
+            snackbarHostState.showSnackbar("目标位置不在已加载窗口")
+            return@LaunchedEffect
+        }
+        // LazyColumn 首项可能是「加载更早/全部」头部，消息列表下标需顺延一位
+        val listIdx = idx + (if (state.hasMore) 1 else 0)
+        listState.scrollToItem(listIdx)
+        highlightedSeq = target
+        delay(1500)
+        highlightedSeq = null
     }
 
     /** 自适应模型：短问答→flash，复杂/长文本→pro；模型列表不含对应档位时保持现状 */
@@ -808,29 +826,6 @@ fun SessionScreen(
                 connection.cancel(sessionId)
             } catch (_: Exception) {}
             state.running.value = false
-        }
-    }
-
-    fun answerApproval(outcome: String) {
-        val a = approval ?: return
-        scope.launch {
-            try {
-                connection.answerApproval(a.sessionId, a.approvalId, outcome)
-                approval = null
-            } catch (e: Exception) {
-                actionError = e.message
-            }
-        }
-    }
-
-    fun answerQuestions(answers: List<DshConnection.QuestionAnswer>) {
-        scope.launch {
-            try {
-                connection.answerQuestions(sessionId, answers)
-                questions = null
-            } catch (e: Exception) {
-                actionError = e.message
-            }
         }
     }
 
@@ -926,6 +921,23 @@ fun SessionScreen(
             }
         }
 
+        // 本会话待办轻提示条：审批/问答数量，异常不计入
+        if (myPending > 0) {
+            Surface(color = MaterialTheme.colorScheme.primaryContainer) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "本会话有 $myPending 条待办（审批/问答）",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = onPending) { Text("去处理") }
+                }
+            }
+        }
+
         LazyColumn(
             modifier = Modifier
                 .weight(1f)
@@ -969,15 +981,32 @@ fun SessionScreen(
             items(items, key = { it.key }) { item ->
                 // 新条目渐入：新消息平滑出现，不跳变（Telegram 式轻量动效）
                 androidx.compose.runtime.key(item.key) {
-                    when (item) {
-                        is ChatItem.User -> UserBubble(item, Modifier.animateItem())
-                        is ChatItem.Assistant -> AssistantCard(item, Modifier.animateItem())
-                        is ChatItem.Tool -> ToolCard(item, Modifier.animateItem())
-                        is ChatItem.Notice -> NoticeRow(item, Modifier.animateItem())
+                    val highlighted = highlightedSeq != null && item.seq == highlightedSeq
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .then(
+                                if (highlighted) {
+                                    Modifier
+                                        .background(DshWarn.copy(alpha = 0.18f), RoundedCornerShape(12.dp))
+                                        .padding(6.dp)
+                                } else {
+                                    Modifier
+                                },
+                            ),
+                    ) {
+                        when (item) {
+                            is ChatItem.User -> UserBubble(item, Modifier.animateItem())
+                            is ChatItem.Assistant -> AssistantCard(item, Modifier.animateItem())
+                            is ChatItem.Tool -> ToolCard(item, Modifier.animateItem())
+                            is ChatItem.Notice -> NoticeRow(item, Modifier.animateItem())
+                        }
                     }
                 }
             }
         }
+
+        SnackbarHost(hostState = snackbarHostState, modifier = Modifier.fillMaxWidth())
 
         actionError?.let {
             Text(
@@ -986,85 +1015,6 @@ fun SessionScreen(
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
-        }
-
-        // 审批横幅
-        approval?.let { a ->
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                border = BorderStroke(1.dp, DshWarn.copy(alpha = 0.5f)),
-            ) {
-                Column(Modifier.padding(12.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Security, null, Modifier.size(18.dp), tint = DshWarn)
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            "等待你的审批",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = DshWarn,
-                        )
-                    }
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        a.reason ?: "工具 ${a.toolName} 请求执行权限",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        OutlinedButton(
-                            onClick = { answerApproval("rejected") },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = DshError),
-                        ) {
-                            Text("拒绝")
-                        }
-                        Button(
-                            onClick = { answerApproval("allowed-once") },
-                            modifier = Modifier
-                                .weight(1f)
-                                .background(brandGradient(), DshShape.small),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color.Transparent,
-                                contentColor = MaterialTheme.colorScheme.onPrimary,
-                            ),
-                        ) {
-                            Text("允许一次")
-                        }
-                    }
-                }
-            }
-        }
-
-        // 问答题卡片
-        questions?.let { qs ->
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-            ) {
-                Column(Modifier.padding(12.dp)) {
-                    Text(
-                        "智能体需要你确认",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    QuestionCard(
-                        questions = qs,
-                        onSubmit = { answers -> answerQuestions(answers) },
-                        onSkip = {
-                            scope.launch {
-                                try {
-                                    connection.answerQuestions(sessionId, emptyList())
-                                } catch (_: Exception) {}
-                                questions = null
-                            }
-                        },
-                    )
-                }
-            }
         }
 
         // 待发送图片
