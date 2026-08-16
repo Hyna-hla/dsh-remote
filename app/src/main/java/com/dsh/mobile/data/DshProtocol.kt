@@ -226,6 +226,7 @@ object DshEndpoints {
     const val WORKSPACE_INSERT_SESSION_BEFORE = "workspace.insertSessionBefore"
     const val AGENT_PRESET_LIST = "agentPreset.list"
     const val HOST_DESCRIBE = "host.describe"
+    const val HOST_LIST_DIRECTORY = "host.listDirectory"
 }
 
 object DshEventTypes {

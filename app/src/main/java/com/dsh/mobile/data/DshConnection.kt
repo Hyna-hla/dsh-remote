@@ -616,10 +616,11 @@ class DshConnection(private val appContext: Context? = null) {
     }
 
     /**
-     * 浏览 PC 端任意目录（依赖 PC 端插件 dsh-remote-access 的 fs/list 端点）：
+     * 浏览 PC 端任意目录（插件 dsh-remote-access 的 fs/list 端点，listDirectory 的回退路径）：
      * 返回子目录名列表；插件未安装/不可用时返回空列表（UI 回退到手动输入路径）。
+     * 保留不破坏：host.listDirectory RPC 不可用时由 listDirectory 转调此方法。
      */
-    suspend fun listDirectory(path: String): List<String> {
+    suspend fun listWorkspaceDirs(path: String): List<String> {
         return try {
             val text = withContext(Dispatchers.IO) {
                 val encoded = java.net.URLEncoder.encode(path, "UTF-8")
@@ -638,6 +639,30 @@ class DshConnection(private val appContext: Context? = null) {
         } catch (e: Exception) {
             emptyList()
         }
+    }
+
+    /**
+     * 浏览 PC 端任意目录（直连 host.listDirectory RPC）：
+     * 返回 {path, crumbs 面包屑层级, entries 子目录（含 hidden 隐藏标记）, truncated 截断标记}。
+     * host RPC 不可用（老版本 host / 无 browse 能力 / 解析失败）时回退插件 fs/list
+     * （仅子目录名，无面包屑/隐藏/截断信息），保证旧体验不回归。
+     */
+    suspend fun listDirectory(path: String?): DirListing {
+        try {
+            val value = call(DshEndpoints.HOST_LIST_DIRECTORY, buildJsonObject {
+                path?.let { put("path", it) }
+            })
+            parseDirectoryList(value)?.let { return it }
+        } catch (e: Exception) {
+            // host RPC 失败/不支持 → 回退插件
+        }
+        val p = path ?: return DirListing("", emptyList(), emptyList(), false)
+        return DirListing(
+            path = p,
+            crumbs = deriveCrumbsFromPath(p),
+            entries = listWorkspaceDirs(p).map { DirEntry(it, p.trimEnd('\\') + "\\" + it, false) },
+            truncated = false,
+        )
     }
 
     /** 归档会话（从会话列表移除，进入已归档区） */

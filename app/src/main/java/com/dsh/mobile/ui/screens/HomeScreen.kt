@@ -12,6 +12,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
@@ -112,7 +113,7 @@ fun HomeScreen(
     // —— 浏览 PC 目录（任选目录作工作区，不限于 DSH 已划定的）——
     var browseOpen by remember { mutableStateOf(false) }
     var browsePath by remember { mutableStateOf("C:\\") }
-    var browseDirs by remember { mutableStateOf<List<String>>(emptyList()) }
+    var browseListing by remember { mutableStateOf<DirListing?>(null) }
     var browseLoading by remember { mutableStateOf(false) }
     var browseError by remember { mutableStateOf<String?>(null) }
 
@@ -120,15 +121,20 @@ fun HomeScreen(
         browseLoading = true
         browseError = null
         scope.launch {
-            val dirs = connection.listDirectory(path)
-            browsePath = path
-            browseDirs = dirs
-            browseLoading = false
+            try {
+                val listing = connection.listDirectory(path)
+                browsePath = listing.path.ifBlank { path }
+                browseListing = listing
+            } catch (e: Exception) {
+                browseError = e.message
+            } finally {
+                browseLoading = false
+            }
         }
     }
 
-    fun enterBrowseDir(name: String) {
-        loadBrowseDir(browsePath.trimEnd('\\') + "\\" + name)
+    fun enterBrowseDir(entry: DirEntry) {
+        loadBrowseDir(entry.path)
     }
 
     fun browseUp() {
@@ -305,7 +311,7 @@ fun HomeScreen(
                         loadBrowseDir(browsePath)
                     },
                     browsePath = browsePath,
-                    browseDirs = browseDirs,
+                    browseListing = browseListing,
                     browseLoading = browseLoading,
                     browseError = browseError,
                     onBrowseEnter = { enterBrowseDir(it) },
@@ -1067,10 +1073,10 @@ private fun WorkspaceSheetContent(
     browseOpen: Boolean,
     onBrowseOpen: () -> Unit,
     browsePath: String,
-    browseDirs: List<String>,
+    browseListing: DirListing?,
     browseLoading: Boolean,
     browseError: String?,
-    onBrowseEnter: (String) -> Unit,
+    onBrowseEnter: (DirEntry) -> Unit,
     onBrowseUp: () -> Unit,
     onBrowseBack: () -> Unit,
     onBrowsePick: () -> Unit,
@@ -1098,7 +1104,7 @@ private fun WorkspaceSheetContent(
         Spacer(Modifier.height(14.dp))
 
         if (browseOpen) {
-            // ── 目录浏览器 ──
+            // ── 目录浏览器（host.listDirectory：面包屑 + 隐藏项 + 截断提示）──
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedButton(
                     onClick = onBrowseUp,
@@ -1109,13 +1115,50 @@ private fun WorkspaceSheetContent(
                     Text("上级")
                 }
                 Spacer(Modifier.width(10.dp))
+                val crumbs = browseListing?.crumbs ?: emptyList()
+                if (crumbs.isEmpty()) {
+                    Text(
+                        browsePath,
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                } else {
+                    // 面包屑：当前路径层级标签（横向滚动）
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .horizontalScroll(rememberScrollState()),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        crumbs.forEachIndexed { i, crumb ->
+                            Text(
+                                crumb,
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                color = if (i == crumbs.lastIndex) MaterialTheme.colorScheme.onSurface
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            if (i != crumbs.lastIndex) {
+                                Text(
+                                    " › ",
+                                    color = MaterialTheme.colorScheme.outline,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            if (browseListing?.truncated == true) {
+                Spacer(Modifier.height(6.dp))
                 Text(
-                    browsePath,
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
+                    "结果已截断（目录过多，仅显示部分）",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.tertiary,
                 )
             }
             Spacer(Modifier.height(8.dp))
@@ -1127,6 +1170,7 @@ private fun WorkspaceSheetContent(
                 )
                 Spacer(Modifier.height(6.dp))
             }
+            val entries = browseListing?.entries ?: emptyList()
             Surface(
                 shape = MaterialTheme.shapes.small,
                 color = MaterialTheme.colorScheme.surfaceVariant,
@@ -1141,24 +1185,24 @@ private fun WorkspaceSheetContent(
                     ) {
                         CircularProgressIndicator(Modifier.size(22.dp))
                     }
-                } else if (browseDirs.isEmpty()) {
+                } else if (entries.isEmpty()) {
                     Box(
                         Modifier.fillMaxWidth().padding(16.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            "（没有子目录，或 PC 端插件未更新）",
+                            "（没有子目录）",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 } else {
                     Column(Modifier.verticalScroll(rememberScrollState())) {
-                        browseDirs.forEach { name ->
+                        entries.forEach { entry ->
                             Row(
                                 Modifier
                                     .fillMaxWidth()
-                                    .clickable { onBrowseEnter(name) }
+                                    .clickable { onBrowseEnter(entry) }
                                     .padding(horizontal = 14.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
@@ -1166,15 +1210,26 @@ private fun WorkspaceSheetContent(
                                     Icons.Default.Folder,
                                     null,
                                     Modifier.size(18.dp),
-                                    tint = MaterialTheme.colorScheme.primary,
+                                    tint = if (entry.hidden) MaterialTheme.colorScheme.onSurfaceVariant
+                                    else MaterialTheme.colorScheme.primary,
                                 )
                                 Spacer(Modifier.width(10.dp))
                                 Text(
-                                    name,
+                                    entry.name,
                                     style = MaterialTheme.typography.bodyMedium,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
+                                    color = if (entry.hidden) MaterialTheme.colorScheme.onSurfaceVariant
+                                    else MaterialTheme.colorScheme.onSurface,
                                 )
+                                if (entry.hidden) {
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        "隐藏",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
                             }
                         }
                     }
