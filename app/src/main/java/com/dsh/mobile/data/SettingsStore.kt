@@ -36,7 +36,10 @@ data class AppearanceConfig(
     val brightness: Float = 1f,
 )
 
-class SettingsStore(private val context: Context) {
+class SettingsStore(
+    private val context: Context,
+    private val secretBox: SecretBox = SecretCipher,
+) {
 
     companion object {
         private val DARK_MODE_KEY = booleanPreferencesKey("dark_mode")
@@ -63,6 +66,7 @@ class SettingsStore(private val context: Context) {
 
     val profiles: Flow<List<HostProfile>> = context.dataStore.data.map { prefs ->
         ProfileCodec.decode(prefs[PROFILE_LIST_KEY] ?: "")
+            .map { decryptProfileFromStorage(it, secretBox) }
     }
 
     val activeProfileId: Flow<String?> = context.dataStore.data.map { prefs ->
@@ -82,7 +86,8 @@ class SettingsStore(private val context: Context) {
         context.dataStore.edit { prefs ->
             applyLegacyMigration(prefs)
             val current = ProfileCodec.decode(prefs[PROFILE_LIST_KEY] ?: "")
-            prefs[PROFILE_LIST_KEY] = ProfileCodec.encode(current.filterNot { it.id == profile.id } + profile)
+            val newList = current.filterNot { it.id == profile.id } + profile
+            prefs[PROFILE_LIST_KEY] = ProfileCodec.encode(newList.map { encryptProfileForStorage(it, secretBox) })
         }
     }
 
@@ -244,4 +249,19 @@ internal fun applyLegacyMigration(prefs: MutablePreferences): Boolean {
     prefs.remove(stringPreferencesKey("server_url"))
     prefs.remove(booleanPreferencesKey("auto_connect"))
     return true
+}
+
+/** 写入前加密代理密码（无代理或空密码原样返回）。 */
+internal fun encryptProfileForStorage(p: HostProfile, box: SecretBox): HostProfile {
+    val pw = p.proxy?.password
+    if (pw.isNullOrBlank()) return p
+    return p.copy(proxy = p.proxy.copy(password = box.encrypt(pw)))
+}
+
+/** 读出后解密代理密码；解密失败 = 旧明文，按原样读（下次写重加密）。 */
+internal fun decryptProfileFromStorage(p: HostProfile, box: SecretBox): HostProfile {
+    val pw = p.proxy?.password
+    if (pw.isNullOrBlank()) return p
+    val plain = box.decrypt(pw) ?: pw
+    return p.copy(proxy = p.proxy.copy(password = plain))
 }
