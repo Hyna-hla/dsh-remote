@@ -26,6 +26,10 @@
 
 ## 更新日志
 
+- **v1.3.5**：桌面小部件 + Cloudflare Tunnel——
+  - **桌面小部件**：4x1 连接状态（鲸鱼 logo + 实时状态文字，点击拉起 App），RemoteViews 实现零新依赖，由前台服务驱动刷新；长按桌面添加「DSH Remote」
+  - **dsh-cloudflared.ps1**：Cloudflare quick tunnel 一键穿透（免登录、不限带宽；自动下载 cloudflared 走镜像兜底；--http-host-header 重写绕信任围栏；XFF 会触发 token 鉴权，App 需 v1.3.4+ 已配对）
+  - **HANDOFF.md**：接力开发文档（踩坑记录 + seq 增量同步实施方案）
 - **v1.3.4**：远程通道 token 鉴权（安全）+ 仓库更名——
   - **通道鉴权**：PC 端插件给 `/api`（含 events.mux WebSocket）加 Bearer token 门禁——本机浏览器放行（loopback 且无 X-Forwarded-For），cpolar 隧道与局域网直连一律要求 token；token 首次自动生成（`remote-access/channel-token`），配对通过后经 `pair/check` 下发到 App，密文落盘、请求时动态携带（注册表热生效，配对完成即刻生效无需重连）；配对握手与 `host.describe` 探测豁免（未配对手机先完成引导）；拿到公网地址的陌生人从此无法遥控你的 DSH
   - **仓库更名**：harness-remote → **dsh-remote**（旧地址自动重定向）；应用内更新通道已同步新仓库名

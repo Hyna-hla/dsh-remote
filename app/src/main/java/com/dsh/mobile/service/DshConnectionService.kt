@@ -139,6 +139,7 @@ class DshConnectionService : Service() {
                                 else -> "后台连接已开启"
                             }
                             updateForegroundText(text)
+                            WidgetState.push(this@DshConnectionService, text)
                         }
                     }
                     connection.connect(profile) { info ->

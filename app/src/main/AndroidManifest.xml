@@ -42,6 +42,18 @@
             android:foregroundServiceType="dataSync"
             android:exported="false" />
 
+        <!-- 桌面小部件：连接状态 4x1，点击拉起 App；状态由前台服务驱动 -->
+        <receiver
+            android:name=".service.DshRemoteWidget"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/dsh_widget_info" />
+        </receiver>
+
         <!-- 扫码组件（zxing-android-embedded），使用 AppCompat 主题避免崩溃 -->
         <activity
             android:name="com.journeyapps.barcodescanner.CaptureActivity"
