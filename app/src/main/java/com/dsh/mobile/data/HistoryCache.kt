@@ -25,6 +25,8 @@ data class CachedItem(
     val result: String? = null,
     val isError: Boolean = false,
     val thinkSeconds: Long? = null,
+    /** S5：思考链文本——reasoning-delta 流式累积；落盘缓存，冷启动旧消息恢复思考区（旧缓存无此字段，默认为空串） */
+    val thinkingText: String = "",
     val streaming: Boolean = false,
     /** 服务端消息序号：缓存与网络首屏合并去重用（旧缓存无此字段，默认为 null） */
     val seq: Long? = null,

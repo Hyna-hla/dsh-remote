@@ -141,7 +141,7 @@ private fun ChatItem.toCached(): CachedItem = when (this) {
         hasImages = images.isNotEmpty(),
     )
     is ChatItem.Assistant -> CachedItem(
-        kind = "assistant", text = text, thinkSeconds = thinkSeconds, streaming = streaming, seq = seq,
+        kind = "assistant", text = text, thinkSeconds = thinkSeconds, thinkingText = thinkingText, streaming = streaming, seq = seq,
     )
     is ChatItem.Tool -> CachedItem(
         kind = "tool", name = name, args = args, status = status, result = result, isError = isError, seq = seq,
@@ -154,7 +154,7 @@ private fun CachedItem.toChatItem(key: String): ChatItem = when (kind) {
         key, text, seq = seq,
         images = images.map { UserImage(it.mediaType, it.base64) },
     )
-    "assistant" -> ChatItem.Assistant(key, text, streaming = streaming, thinkSeconds = thinkSeconds, seq = seq)
+    "assistant" -> ChatItem.Assistant(key, text, streaming = streaming, thinkSeconds = thinkSeconds, thinkingText = thinkingText, seq = seq)
     "tool" -> ChatItem.Tool(key, callId = key, name = name, args = args, status = status, result = result, isError = isError, seq = seq)
     else -> ChatItem.Notice(key, text, isError = isError, seq = seq)
 }
