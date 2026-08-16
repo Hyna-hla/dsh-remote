@@ -54,6 +54,7 @@ class SettingsStore(
         private val BACKGROUND_NOTIFY_KEY = booleanPreferencesKey("background_notify")
         private val NOTIFY_APPROVALS_KEY = booleanPreferencesKey("notify_approvals")
         private val NOTIFY_COMPLETION_KEY = booleanPreferencesKey("notify_completion")
+        private val PINNED_SESSION_IDS_KEY = stringPreferencesKey("pinned_session_ids")
         private val AUTO_MODEL_KEY = booleanPreferencesKey("auto_model")
         private val THEME_MODE_KEY = stringPreferencesKey("theme_mode")
         private val WORKSPACE_ID_KEY = stringPreferencesKey("workspace_id")
@@ -239,6 +240,21 @@ class SettingsStore(
 
     suspend fun setNotifyCompletion(on: Boolean) {
         context.dataStore.edit { it[NOTIFY_COMPLETION_KEY] = on }
+    }
+
+    /** 置顶会话 id 集合（本地 pin，仅本机生效；JSON 数组存储，默认空） */
+    val pinnedSessionIds: Flow<Set<String>> = context.dataStore.data.map { prefs ->
+        decodePinnedIds(prefs[PINNED_SESSION_IDS_KEY])
+    }
+
+    /** 置顶/取消置顶：pinned=true 加入，false 移除（幂等） */
+    suspend fun setPinned(id: String, pinned: Boolean) {
+        context.dataStore.edit { prefs ->
+            val current = decodePinnedIds(prefs[PINNED_SESSION_IDS_KEY])
+            prefs[PINNED_SESSION_IDS_KEY] = encodePinnedIds(
+                if (pinned) current + id else current - id,
+            )
+        }
     }
 
     /** 自适应模型：按任务难度自动选择 Flash / Pro（默认开） */

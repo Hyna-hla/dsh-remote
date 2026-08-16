@@ -24,6 +24,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -86,11 +87,15 @@ fun HomeScreen(
     var archivedIds by remember { mutableStateOf<List<String>>(emptyList()) }
     var workspaces by remember { mutableStateOf<List<WorkspaceView>>(emptyList()) }
     var archiveTarget by remember { mutableStateOf<SessionSummary?>(null) }
+    // 长按会话弹出的操作菜单目标（sessionId；null = 无菜单打开）
+    var menuTarget by remember { mutableStateOf<String?>(null) }
     var listError by remember { mutableStateOf<String?>(null) }
     var pendingImages by remember { mutableStateOf<List<DshConnection.ImagePart>>(emptyList()) }
     val context = LocalContext.current
     val settingsStore = remember { SettingsStore(context) }
     val cache = remember { HistoryCache(context) }
+    // 置顶会话 id（本地 pin；列表排序置顶在前，长按菜单可切换）
+    val pinnedIds by settingsStore.pinnedSessionIds.collectAsState(initial = emptySet())
 
     // —— 新对话工作区选择 ——
     var selectedWorkspaceId by remember { mutableStateOf("") }
@@ -173,11 +178,11 @@ fun HomeScreen(
         // 冷热分离：先渲染本地缓存（秒开；gzip 解压+解码移出主线程），再刷网络
         scope.launch {
             val cached = withContext(Dispatchers.Default) { cache.loadSessionList() }
-            if (!cached.isNullOrEmpty()) sessions = cached
+            if (!cached.isNullOrEmpty()) sessions = sortSessionsWithPinned(cached, pinnedIds)
             try {
                 val net = connection.listSessions()
                     .sortedByDescending { it.updatedAt }
-                sessions = net
+                sessions = sortSessionsWithPinned(net, pinnedIds)
                 withContext(Dispatchers.Default) { cache.saveSessionList(net) }
                 listError = null
                 prefetchRecent(net)
@@ -214,6 +219,11 @@ fun HomeScreen(
         if (presets.none { it.first == preset }) {
             preset = presets.firstOrNull()?.first ?: preset
         }
+    }
+
+    // 置顶集合变化（初次从 DataStore 加载 / 长按切换）→ 就地重排当前列表，置顶立即生效
+    LaunchedEffect(pinnedIds) {
+        sessions = sortSessionsWithPinned(sessions, pinnedIds)
     }
 
     // 事件驱动的列表刷新（断线重连成功后立即补拉，避免列表停留在空态）
@@ -341,99 +351,140 @@ fun HomeScreen(
         }
     }
 
+    // 归档确认（所有布局分支共用的覆盖层：长按会话菜单「归档」统一走到这里）
+    val archiveDialogOverlay: @Composable () -> Unit = {
+        archiveTarget?.let { target ->
+            AlertDialog(
+                onDismissRequest = { archiveTarget = null },
+                title = { Text("归档会话") },
+                text = { Text("「${target.sessionId.take(8)}」将从会话列表移除，可在已归档区恢复。") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        scope.launch {
+                            try {
+                                connection.archiveSession(target.sessionId)
+                                archiveTarget = null
+                                refreshSessions()
+                                refreshArchived()
+                            } catch (e: Exception) {
+                                listError = e.message
+                                archiveTarget = null
+                            }
+                        }
+                    }) { Text("归档") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { archiveTarget = null }) { Text("取消") }
+                },
+            )
+        }
+    }
+
     // ChatGPT 移动端布局：纯黑扁平 + 顶部导航栏 + 侧边抽屉（85% 宽 + 遮罩）+ 底部胶囊输入栏
     if (DshThemeStyle == ThemeStyle.CHATGPT) {
-        ChatGptHomeLayout(
-            sessions = sessions,
-            archivedIds = archivedIds,
-            input = input,
-            onInputChange = { input = it },
-            sending = sending,
-            onSend = { send() },
-            sendError = sendError,
-            preset = preset,
-            presets = presets,
-            presetMenu = presetMenu,
-            onPresetMenuChange = { presetMenu = it },
-            pendingImages = pendingImages,
-            onPickImage = { imagePicker.launch("image/*") },
-            onRemoveImage = { i -> pendingImages = pendingImages.filterIndexed { j, _ -> j != i } },
-            onSessionClick = onSessionClick,
-            onSettings = onSettings,
-            onUpgrade = onUpgrade,
-            onPending = onPending,
-            pendingCount = pendingCount,
-            onRefresh = {
-                refreshSessions()
-                refreshArchived()
-            },
-            onRestoreArchived = { id ->
-                scope.launch {
-                    val ws = workspaces.firstOrNull()?.workspaceId
-                    if (ws.isNullOrBlank()) {
-                        listError = "没有可用工作区，无法恢复"
-                    } else {
-                        try {
-                            connection.restoreSession(ws, id)
-                            refreshSessions()
-                            refreshArchived()
-                        } catch (e: Exception) {
-                            listError = e.message
+        Box {
+            ChatGptHomeLayout(
+                sessions = sessions,
+                archivedIds = archivedIds,
+                input = input,
+                onInputChange = { input = it },
+                sending = sending,
+                onSend = { send() },
+                sendError = sendError,
+                preset = preset,
+                presets = presets,
+                presetMenu = presetMenu,
+                onPresetMenuChange = { presetMenu = it },
+                pendingImages = pendingImages,
+                onPickImage = { imagePicker.launch("image/*") },
+                onRemoveImage = { i -> pendingImages = pendingImages.filterIndexed { j, _ -> j != i } },
+                onSessionClick = onSessionClick,
+                onSettings = onSettings,
+                onUpgrade = onUpgrade,
+                onPending = onPending,
+                pendingCount = pendingCount,
+                onRefresh = {
+                    refreshSessions()
+                    refreshArchived()
+                },
+                onRestoreArchived = { id ->
+                    scope.launch {
+                        val ws = workspaces.firstOrNull()?.workspaceId
+                        if (ws.isNullOrBlank()) {
+                            listError = "没有可用工作区，无法恢复"
+                        } else {
+                            try {
+                                connection.restoreSession(ws, id)
+                                refreshSessions()
+                                refreshArchived()
+                            } catch (e: Exception) {
+                                listError = e.message
+                            }
                         }
                     }
-                }
-            },
-        )
+                },
+                pinnedIds = pinnedIds,
+                onTogglePin = { id -> scope.launch { settingsStore.setPinned(id, id !in pinnedIds) } },
+                onArchive = { s -> archiveTarget = s },
+            )
+            archiveDialogOverlay()
+        }
         return
     }
 
     // Claude 移动端布局：暖炭黑 + 极简顶部导航（无背景图标）+ 28px 超大圆角输入容器 + 衬线空态标语 + 侧边抽屉
     if (DshThemeStyle == ThemeStyle.CLAUDE) {
-        ClaudeHomeLayout(
-            sessions = sessions,
-            archivedIds = archivedIds,
-            input = input,
-            onInputChange = { input = it },
-            sending = sending,
-            onSend = { send() },
-            sendError = sendError,
-            preset = preset,
-            presets = presets,
-            presetMenu = presetMenu,
-            onPresetMenuChange = { presetMenu = it },
-            pendingImages = pendingImages,
-            onPickImage = { imagePicker.launch("image/*") },
-            onRemoveImage = { i -> pendingImages = pendingImages.filterIndexed { j, _ -> j != i } },
-            onNewChat = {
-                input = ""
-                pendingImages = emptyList()
-            },
-            onSessionClick = onSessionClick,
-            onSettings = onSettings,
-            onUpgrade = onUpgrade,
-            onPending = onPending,
-            pendingCount = pendingCount,
-            onRefresh = {
-                refreshSessions()
-                refreshArchived()
-            },
-            onRestoreArchived = { id ->
-                scope.launch {
-                    val ws = workspaces.firstOrNull()?.workspaceId
-                    if (ws.isNullOrBlank()) {
-                        listError = "没有可用工作区，无法恢复"
-                    } else {
-                        try {
-                            connection.restoreSession(ws, id)
-                            refreshSessions()
-                            refreshArchived()
-                        } catch (e: Exception) {
-                            listError = e.message
+        Box {
+            ClaudeHomeLayout(
+                sessions = sessions,
+                archivedIds = archivedIds,
+                input = input,
+                onInputChange = { input = it },
+                sending = sending,
+                onSend = { send() },
+                sendError = sendError,
+                preset = preset,
+                presets = presets,
+                presetMenu = presetMenu,
+                onPresetMenuChange = { presetMenu = it },
+                pendingImages = pendingImages,
+                onPickImage = { imagePicker.launch("image/*") },
+                onRemoveImage = { i -> pendingImages = pendingImages.filterIndexed { j, _ -> j != i } },
+                onNewChat = {
+                    input = ""
+                    pendingImages = emptyList()
+                },
+                onSessionClick = onSessionClick,
+                onSettings = onSettings,
+                onUpgrade = onUpgrade,
+                onPending = onPending,
+                pendingCount = pendingCount,
+                onRefresh = {
+                    refreshSessions()
+                    refreshArchived()
+                },
+                onRestoreArchived = { id ->
+                    scope.launch {
+                        val ws = workspaces.firstOrNull()?.workspaceId
+                        if (ws.isNullOrBlank()) {
+                            listError = "没有可用工作区，无法恢复"
+                        } else {
+                            try {
+                                connection.restoreSession(ws, id)
+                                refreshSessions()
+                                refreshArchived()
+                            } catch (e: Exception) {
+                                listError = e.message
+                            }
                         }
                     }
-                }
-            },
-        )
+                },
+                pinnedIds = pinnedIds,
+                onTogglePin = { id -> scope.launch { settingsStore.setPinned(id, id !in pinnedIds) } },
+                onArchive = { s -> archiveTarget = s },
+            )
+            archiveDialogOverlay()
+        }
         return
     }
 
@@ -465,9 +516,13 @@ fun HomeScreen(
                     refreshSessions()
                     refreshArchived()
                 },
+                pinnedIds = pinnedIds,
+                onTogglePin = { id -> scope.launch { settingsStore.setPinned(id, id !in pinnedIds) } },
+                onArchive = { s -> archiveTarget = s },
             )
             // 工作区选择面板覆盖层（DeepLook 分支不渲染 Scaffold，这里单独挂载）
             workspaceSheetOverlay()
+            archiveDialogOverlay()
         }
         return
     }
@@ -852,11 +907,24 @@ fun HomeScreen(
                     contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp),
                 ) {
                     items(sessions, key = { "s_" + it.sessionId }) { s ->
-                        SessionCard(
-                            session = s,
-                            onClick = { onSessionClick(s.sessionId) },
-                            onLongClick = { archiveTarget = s },
-                        )
+                        Box {
+                            SessionCard(
+                                session = s,
+                                pinned = s.sessionId in pinnedIds,
+                                onClick = { onSessionClick(s.sessionId) },
+                                onLongClick = { menuTarget = s.sessionId },
+                            )
+                            SessionActionMenu(
+                                session = s,
+                                pinnedIds = pinnedIds,
+                                expanded = menuTarget == s.sessionId,
+                                onDismiss = { menuTarget = null },
+                                onTogglePin = {
+                                    scope.launch { settingsStore.setPinned(s.sessionId, s.sessionId !in pinnedIds) }
+                                },
+                                onArchive = { archiveTarget = s },
+                            )
+                        }
                     }
                     if (archivedIds.isNotEmpty()) {
                         item(key = "arch_header") {
@@ -889,32 +957,8 @@ fun HomeScreen(
                 }
             }
 
-            // 归档确认
-            archiveTarget?.let { target ->
-                AlertDialog(
-                    onDismissRequest = { archiveTarget = null },
-                    title = { Text("归档会话") },
-                    text = { Text("「${target.sessionId.take(8)}」将从会话列表移除，可在已归档区恢复。") },
-                    confirmButton = {
-                        TextButton(onClick = {
-                            scope.launch {
-                                try {
-                                    connection.archiveSession(target.sessionId)
-                                    archiveTarget = null
-                                    refreshSessions()
-                                    refreshArchived()
-                                } catch (e: Exception) {
-                                    listError = e.message
-                                    archiveTarget = null
-                                }
-                            }
-                        }) { Text("归档") }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { archiveTarget = null }) { Text("取消") }
-                    },
-                )
-            }
+            // 归档确认（共享覆盖层；长按菜单「归档」触发）
+            archiveDialogOverlay()
 
             // 工作区选择面板（对齐 Web WorkspacePicker：默认 / 已有工作区 / 新建）
             workspaceSheetOverlay()
@@ -1252,6 +1296,7 @@ private fun SessionCard(
     session: SessionSummary,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    pinned: Boolean = false,
 ) {
     val values = runCatching {
         session.projections?.jsonObject?.get("values")?.jsonObject
@@ -1331,6 +1376,15 @@ private fun SessionCard(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
+                    if (pinned) {
+                        Spacer(Modifier.width(6.dp))
+                        Icon(
+                            Icons.Rounded.PushPin,
+                            contentDescription = "已置顶",
+                            modifier = Modifier.size(14.dp),
+                            tint = DshBrand,
+                        )
+                    }
                     Spacer(Modifier.width(8.dp))
                     if (session.running) {
                         Box(
@@ -1382,12 +1436,42 @@ private fun SessionCard(
     }
 }
 
+/** 长按会话弹出的操作菜单：置顶/取消置顶 + 归档（所有布局分支共用） */
+@Composable
+private fun SessionActionMenu(
+    session: SessionSummary,
+    pinnedIds: Set<String>,
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    onTogglePin: () -> Unit,
+    onArchive: () -> Unit,
+) {
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        DropdownMenuItem(
+            text = { Text(if (session.sessionId in pinnedIds) "取消置顶" else "置顶") },
+            leadingIcon = { Icon(Icons.Rounded.PushPin, null) },
+            onClick = {
+                onDismiss()
+                onTogglePin()
+            },
+        )
+        DropdownMenuItem(
+            text = { Text("归档") },
+            leadingIcon = { Icon(Icons.Default.Archive, null) },
+            onClick = {
+                onDismiss()
+                onArchive()
+            },
+        )
+    }
+}
+
 // ════════════════════════ Claude 移动端布局（主题包风格）════════════════════════
 // 按用户提供的 1:1 设计令牌落地：
 // 暖炭黑 #171716 / 次级 #242423 / 三级 #2A2A29 / 陶土橙 #E8755A / 淡紫 #A78BFA
 // 衬线大标题 32/600、空态标语 36/500、输入容器 28px 超大圆角、极简顶部导航（无背景图标）
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 private fun ClaudeHomeLayout(
     sessions: List<SessionSummary>,
@@ -1412,11 +1496,15 @@ private fun ClaudeHomeLayout(
     pendingCount: Int,
     onRefresh: () -> Unit,
     onRestoreArchived: (String) -> Unit,
+    pinnedIds: Set<String>,
+    onTogglePin: (String) -> Unit,
+    onArchive: (SessionSummary) -> Unit,
 ) {
     val context = LocalContext.current
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val closeDrawer: () -> Unit = { scope.launch { drawerState.close() } }
+    var menuTarget by remember { mutableStateOf<String?>(null) }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -1536,24 +1624,46 @@ private fun ClaudeHomeLayout(
                         )
                     }
                     sessions.forEach { s ->
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .height(48.dp)
-                                .padding(horizontal = 32.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable {
-                                    closeDrawer()
-                                    onSessionClick(s.sessionId)
-                                },
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                chatGptTitleOf(s),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = Color(0xFFF5F5F4),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
+                        Box {
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                                    .padding(horizontal = 32.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .combinedClickable(
+                                        onClick = {
+                                            closeDrawer()
+                                            onSessionClick(s.sessionId)
+                                        },
+                                        onLongClick = { menuTarget = s.sessionId },
+                                    ),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (s.sessionId in pinnedIds) {
+                                    Icon(
+                                        Icons.Rounded.PushPin,
+                                        null,
+                                        Modifier.size(14.dp),
+                                        tint = Color(0xFFE8755A),
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                }
+                                Text(
+                                    chatGptTitleOf(s),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Color(0xFFF5F5F4),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            SessionActionMenu(
+                                session = s,
+                                pinnedIds = pinnedIds,
+                                expanded = menuTarget == s.sessionId,
+                                onDismiss = { menuTarget = null },
+                                onTogglePin = { onTogglePin(s.sessionId) },
+                                onArchive = { onArchive(s) },
                             )
                         }
                     }
@@ -1897,6 +2007,9 @@ private fun DeepLookHomeLayout(
     onPending: () -> Unit,
     pendingCount: Int,
     onRefresh: () -> Unit,
+    pinnedIds: Set<String>,
+    onTogglePin: (String) -> Unit,
+    onArchive: (SessionSummary) -> Unit,
 ) {
     val deep = Color(0xFF0D1B2A)
     // 深色变体自适应：浅色下深蓝黑做前景强调（规范），深色下改用亮色前景 + 品牌蓝方块（否则黑底黑字不可见）
@@ -1907,6 +2020,7 @@ private fun DeepLookHomeLayout(
     val chevronTint = if (darkVariant) MaterialTheme.colorScheme.onSurfaceVariant else Color(0xFFB4B4B8)
     val dashTint = if (darkVariant) MaterialTheme.colorScheme.outline else Color(0xFFC9C9CD)
     var tab by remember { mutableStateOf("new") } // new | sessions
+    var menuTarget by remember { mutableStateOf<String?>(null) }
     // 默认工作区（未选择）显示「默认工作区」，与工作区选择面板口径一致
     val wsLabel = when {
         selectedWorkspaceId.isBlank() -> "默认工作区"
@@ -2156,42 +2270,64 @@ private fun DeepLookHomeLayout(
                 } else {
                     DeepLookCard {
                         sessions.forEachIndexed { index, s ->
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .clickable { onSessionClick(s.sessionId) }
-                                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(
-                                        chatGptTitleOf(s),
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        fontWeight = FontWeight.Medium,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    Text(
-                                        SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
-                                            .format(Date(s.updatedAt)),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = faintIcon,
+                            Box {
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .combinedClickable(
+                                            onClick = { onSessionClick(s.sessionId) },
+                                            onLongClick = { menuTarget = s.sessionId },
+                                        )
+                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            chatGptTitleOf(s),
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = FontWeight.Medium,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+                                                .format(Date(s.updatedAt)),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = faintIcon,
+                                        )
+                                    }
+                                    if (s.running) {
+                                        Box(
+                                            Modifier
+                                                .size(8.dp)
+                                                .background(MaterialTheme.colorScheme.primary, CircleShape),
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                    }
+                                    if (s.sessionId in pinnedIds) {
+                                        Icon(
+                                            Icons.Rounded.PushPin,
+                                            null,
+                                            Modifier.size(14.dp),
+                                            tint = deepAccent,
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                    }
+                                    Icon(
+                                        Icons.Default.ChevronRight,
+                                        null,
+                                        Modifier.size(16.dp),
+                                        tint = chevronTint,
                                     )
                                 }
-                                if (s.running) {
-                                    Box(
-                                        Modifier
-                                            .size(8.dp)
-                                            .background(MaterialTheme.colorScheme.primary, CircleShape),
-                                    )
-                                    Spacer(Modifier.width(8.dp))
-                                }
-                                Icon(
-                                    Icons.Default.ChevronRight,
-                                    null,
-                                    Modifier.size(16.dp),
-                                    tint = chevronTint,
+                                SessionActionMenu(
+                                    session = s,
+                                    pinnedIds = pinnedIds,
+                                    expanded = menuTarget == s.sessionId,
+                                    onDismiss = { menuTarget = null },
+                                    onTogglePin = { onTogglePin(s.sessionId) },
+                                    onArchive = { onArchive(s) },
                                 )
                             }
                             if (index < sessions.lastIndex) {
@@ -2363,7 +2499,7 @@ private fun ArchivedRow(id: String, onRestore: () -> Unit) {
 private fun chatGptTitleOf(s: SessionSummary): String = sessionTitleOf(s)
     ?: "会话 ${s.sessionId.take(8)}"
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 private fun ChatGptHomeLayout(
     sessions: List<SessionSummary>,
@@ -2387,6 +2523,9 @@ private fun ChatGptHomeLayout(
     pendingCount: Int,
     onRefresh: () -> Unit,
     onRestoreArchived: (String) -> Unit,
+    pinnedIds: Set<String>,
+    onTogglePin: (String) -> Unit,
+    onArchive: (SessionSummary) -> Unit,
 ) {
     val context = LocalContext.current
     val drawerState = rememberDrawerState(DrawerValue.Closed)
@@ -2394,6 +2533,7 @@ private fun ChatGptHomeLayout(
     var searchActive by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var showArchived by remember { mutableStateOf(false) }
+    var menuTarget by remember { mutableStateOf<String?>(null) }
 
     val filtered = remember(sessions, searchQuery) {
         if (searchQuery.isBlank()) sessions
@@ -2538,24 +2678,46 @@ private fun ChatGptHomeLayout(
                         )
                     }
                     filtered.forEach { s ->
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .height(48.dp)
-                                .padding(horizontal = 32.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable {
-                                    closeDrawer()
-                                    onSessionClick(s.sessionId)
-                                },
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                chatGptTitleOf(s),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = Color.White,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
+                        Box {
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                                    .padding(horizontal = 32.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .combinedClickable(
+                                        onClick = {
+                                            closeDrawer()
+                                            onSessionClick(s.sessionId)
+                                        },
+                                        onLongClick = { menuTarget = s.sessionId },
+                                    ),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (s.sessionId in pinnedIds) {
+                                    Icon(
+                                        Icons.Rounded.PushPin,
+                                        null,
+                                        Modifier.size(14.dp),
+                                        tint = Color(0xFF60A5FA),
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                }
+                                Text(
+                                    chatGptTitleOf(s),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Color.White,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            SessionActionMenu(
+                                session = s,
+                                pinnedIds = pinnedIds,
+                                expanded = menuTarget == s.sessionId,
+                                onDismiss = { menuTarget = null },
+                                onTogglePin = { onTogglePin(s.sessionId) },
+                                onArchive = { onArchive(s) },
                             )
                         }
                     }
