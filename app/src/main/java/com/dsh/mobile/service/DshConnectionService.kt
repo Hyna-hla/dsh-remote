@@ -45,6 +45,8 @@ class DshConnectionService : Service() {
     /** 审批/问答去重 */
     private val seenApprovals = mutableSetOf<String>()
     private val seenQuestions = mutableSetOf<String>()
+    /** trackKey → 通知 id：审批/问答横幅在 Resolved 时按 key 取消，防止托盘残留 */
+    private val notificationIds = mutableMapOf<String, Int>()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -113,6 +115,7 @@ class DshConnectionService : Service() {
                     watcher = null
                     seenApprovals.clear()
                     seenQuestions.clear()
+                    notificationIds.clear()
                     sessionActive.clear()
                     completionJobs.values.forEach { it.cancel() }
                     completionJobs.clear()
@@ -150,7 +153,12 @@ class DshConnectionService : Service() {
     }
 
     private suspend fun handle(event: DshConnection.Event) {
-        if (DshApplication.isAppInForeground) return
+        // Resolved 事件在 App 前台时也须处理：用户可能正停留在会话页（App 前台），
+        // 若审批/问答在 PC 端被解决，照常取消托盘横幅，否则残留过期通知。
+        if (DshApplication.isAppInForeground &&
+            event !is DshConnection.Event.ApprovalResolved &&
+            event !is DshConnection.Event.QuestionResolved
+        ) return
         when (event) {
             // 全局 token 用量监听：App 被杀后前台服务仍活着，PC 端回合消耗继续计费（假 Pro）
             is DshConnection.Event.SessionEvent ->
@@ -171,9 +179,15 @@ class DshConnectionService : Service() {
                     "DSH 需要你的审批",
                     "工具「" + event.toolName + "」请求执行权限" + reason,
                     event.sessionId,
+                    trackKey = "a:${event.sessionId}:${event.approvalId}",
                 )
             }
-            is DshConnection.Event.ApprovalResolved -> seenApprovals.remove(event.approvalId)
+            is DshConnection.Event.ApprovalResolved -> {
+                seenApprovals.remove(event.approvalId)
+                notificationIds.remove("a:${event.sessionId}:${event.approvalId}")?.let {
+                    notificationManager().cancel(it)
+                }
+            }
 
             is DshConnection.Event.QuestionRequested -> {
                 if (!seenQuestions.add(event.sessionId)) return
@@ -191,9 +205,15 @@ class DshConnectionService : Service() {
                     if (first != null) "「" + first + "」等 " + event.questions.size + " 个问题等待回答"
                     else "有 " + event.questions.size + " 个问题等待回答",
                     event.sessionId,
+                    trackKey = "q:${event.sessionId}",
                 )
             }
-            is DshConnection.Event.QuestionResolved -> seenQuestions.remove(event.sessionId)
+            is DshConnection.Event.QuestionResolved -> {
+                seenQuestions.remove(event.sessionId)
+                notificationIds.remove("q:${event.sessionId}")?.let {
+                    notificationManager().cancel(it)
+                }
+            }
 
             is DshConnection.Event.SessionStatus ->
                 updateActivity(event.sessionId, event.status == "running")
@@ -235,13 +255,17 @@ class DshConnectionService : Service() {
         }
     }
 
+    private fun notificationManager(): NotificationManager =
+        getSystemService(NotificationManager::class.java)
+
     private fun postAlert(
         title: String,
         text: String,
         sessionId: String? = null,
         channelId: String = DshApplication.CHANNEL_APPROVALS,
+        trackKey: String? = null,
     ) {
-        val manager = getSystemService(NotificationManager::class.java)
+        val manager = notificationManager()
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
             if (sessionId != null) putExtra("open_session", sessionId)
@@ -260,7 +284,9 @@ class DshConnectionService : Service() {
                 )
             )
             .build()
-        manager.notify(1000 + (notificationSeq++ % 100), notification)
+        val id = 1000 + (notificationSeq++ % 100)
+        manager.notify(id, notification)
+        if (trackKey != null) notificationIds[trackKey] = id
     }
 
     override fun onDestroy() {
