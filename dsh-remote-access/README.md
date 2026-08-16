@@ -29,9 +29,16 @@ cpolar 公网隧道降级为「网页版」备选。
 - **移动端文件只读预览（S6）**：工作区面板浏览 PC 目录时同时列出文件，点文件在手机端只读预览——
   文本等宽展示（>1MB 截断并提示）、二进制识别（base64 大小提示，不解码）；全程只读，不提供写入。
   路由：`GET /api/remote-access/fs/read`（内容）+ `GET /api/remote-access/fs/list`（目录+文件列举）。
+- **MCP 服务列表（S5）**：App 设置页「MCP 服务」卡片展示 PC 端已配置的 MCP 服务与工具数——
+  按 `mcp__<server>__<tool>` 前缀聚合 `ctx.tools.schemas()`，`status` 恒 `"unknown"`
+  （上游 `dsh-mcp-client` 无连接态查询 API，侦察 §2.2）；只读，不触发任何连接。
+  路由：`GET /api/remote-access/mcp/list`。
 
 ## 更新日志
 
+- **v?.?.?**：MCP 服务列表 —— 新增 `GET /api/remote-access/mcp/list`（只读枚举 `ctx.tools.schemas()`
+  中 `mcp__<server>__<tool>` 前缀工具，按 serverName 聚合；`status` 恒 `"unknown"`——上游
+  `dsh-mcp-client` 无连接态 API；tools 服务未挂载/异常 → 空 servers）
 - **v?.?.?**：S6 文件内容只读预览 —— 新增 `GET /api/remote-access/fs/read?path=<abs>`（只读，
   1MB 截断 `truncated: true`；非 UTF-8/含 NUL → `isBinary: true` + base64 `data` 字段；读取优先
   注入的 fs 服务、回退 node:fs，大文件/二进制自动走 node:fs 读头部，不整读大文件）；

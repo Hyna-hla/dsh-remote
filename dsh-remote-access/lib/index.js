@@ -33,8 +33,9 @@ import QRCode from "qrcode";
 const execFileAsync = promisify(execFile);
 
 export const name = "dsh-remote-access";
-// fs 为可选注入：可用时文件读取走注入服务（工作区/sandbox 语义），不可用回退 node:fs
-export const inject = { required: ["webServer"], optional: ["fs"] };
+// fs / tools 为可选注入：可用时文件读取走注入服务（工作区/sandbox 语义），
+// 不可用回退 node:fs / 空工具列表；tools 由 dsh-mcp-client 挂载（可能晚于本插件）
+export const inject = { required: ["webServer"], optional: ["fs", "tools"] };
 
 const json = (res, code, payload) => {
   res.statusCode = code;
@@ -394,6 +395,40 @@ export const apply = (ctx) => {
         } else {
           json(res, 200, { ok: true, path: p, size, truncated, isBinary: false, text: decodeUtf8Strict(slice) });
         }
+      } catch (err) {
+        json(res, 200, { ok: false, error: String(err?.message ?? err) });
+      }
+    },
+  });
+
+  // ---------- MCP 服务列表（S5） ----------
+  // 上游 dsh-mcp-client 只把工具以 mcp__<server>__<tool> 注册进 ctx.tools，无连接态查询 API
+  // （侦察 §2.2）：按 mcp__ 前缀聚合 serverName → tools[]，status 恒 "unknown"。
+  // ctx.get 惰性读取：tools 由 mcp-client 挂载（可能晚于本插件），未挂载/异常 → 空 servers。
+  reg({
+    kind: "exact",
+    path: "/api/remote-access/mcp/list",
+    handler: async (req, res) => {
+      if (req.method !== "GET") return json(res, 405, { error: "method not allowed" });
+      try {
+        const tools = ctx.get("tools");
+        const schemas = tools && typeof tools.schemas === "function" ? tools.schemas() : [];
+        const byServer = new Map();
+        for (const s of schemas) {
+          const name = typeof s?.name === "string" ? s.name : "";
+          // mcp__<server>__<tool>：server 取第一段（工具原始名可能含更多下划线）
+          const parts = name.startsWith("mcp__") ? name.split("__") : null;
+          if (!parts || parts.length < 3 || !parts[1]) continue;
+          const serverName = parts[1];
+          if (!byServer.has(serverName)) byServer.set(serverName, []);
+          byServer.get(serverName).push(name);
+        }
+        const servers = [...byServer.entries()].map(([serverName, toolsList]) => ({
+          serverName,
+          tools: toolsList,
+          status: "unknown",
+        }));
+        json(res, 200, { ok: true, servers });
       } catch (err) {
         json(res, 200, { ok: false, error: String(err?.message ?? err) });
       }
