@@ -45,7 +45,7 @@ class ApprovalCenter(
     private val _items = MutableStateFlow<List<PendingItem>>(emptyList())
 
     /** 已解决项的墓碑（键同 itemKey 格式），阻止乐观回滚「复活」并发已解决的项。 */
-    private val resolvedTombstones = mutableSetOf<String>()
+    private var resolvedTombstones: Set<String> = mutableSetOf()
 
     /** 已排序的待办列表（唯一事实源） */
     val items: StateFlow<List<PendingItem>> = _items
@@ -87,7 +87,7 @@ class ApprovalCenter(
             }
             is DshConnection.Event.ApprovalResolved -> mutate { l ->
                 resolvedTombstones += "a:${e.sessionId}:${e.approvalId}"
-                if (resolvedTombstones.size > 200) resolvedTombstones.clear()
+                if (resolvedTombstones.size > 200) resolvedTombstones = trimTombstones(resolvedTombstones)
                 l.removeAll { it is PendingItem.Approval && it.sessionId == e.sessionId && it.approvalId == e.approvalId }
             }
             is DshConnection.Event.QuestionRequested -> mutate { l ->
@@ -97,7 +97,7 @@ class ApprovalCenter(
             }
             is DshConnection.Event.QuestionResolved -> mutate { l ->
                 resolvedTombstones += "q:${e.sessionId}"
-                if (resolvedTombstones.size > 200) resolvedTombstones.clear()
+                if (resolvedTombstones.size > 200) resolvedTombstones = trimTombstones(resolvedTombstones)
                 l.removeAll { it is PendingItem.Question && it.sessionId == e.sessionId }
             }
             is DshConnection.Event.SessionEvent ->
@@ -125,7 +125,7 @@ class ApprovalCenter(
             for (s in recent) {
                 val hv = runCatching { historyFn(s.sessionId) }.getOrNull() ?: continue
                 for (item in scanHistoryEvents(s.sessionId, hv.events)) {
-                    if (merged.none { itemKey(it) == itemKey(item) }) merged += item
+                    if (itemKey(item) !in resolvedTombstones && merged.none { itemKey(it) == itemKey(item) }) merged += item
                 }
             }
             _items.value = sortPendingItems(merged)
@@ -198,4 +198,14 @@ class ApprovalCenter(
         }
         return failures
     }
+}
+
+/**
+ * 墓碑超限裁剪：保留最近 capacity 条（按加入顺序），丢弃最旧——与全清相比不丢近期已解决项。
+ * 约定输入为插入有序集合（mutableSetOf 即 LinkedHashSet）；capacity <= 0 时清空。
+ */
+internal fun trimTombstones(current: Set<String>, capacity: Int = 200): Set<String> {
+    if (capacity <= 0) return emptySet()
+    if (current.size <= capacity) return current
+    return LinkedHashSet(current).drop(current.size - capacity).toSet()
 }

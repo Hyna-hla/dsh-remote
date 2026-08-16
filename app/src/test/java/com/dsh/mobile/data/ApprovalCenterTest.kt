@@ -2,13 +2,16 @@ package com.dsh.mobile.data
 
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class ApprovalCenterTest {
 
     private val events = MutableSharedFlow<DshConnection.Event>(extraBufferCapacity = 16)
@@ -170,5 +173,85 @@ class ApprovalCenterTest {
         events.emit(DshConnection.Event.ApprovalResolved("s1", "a1", "allowed-once"))
         assertEquals(1, c.items.value.size)
         assertEquals("s2", (c.items.value[0] as PendingItem.Approval).sessionId)
+    }
+
+    // ── Task 1 (S9 清理二期)：墓碑增量裁剪 + recover 查墓碑 ──
+
+    @Test
+    fun trimTombstonesOverCapacityKeepsNewest200InOrder() {
+        val keys = (1..250).map { "k$it" }.toCollection(LinkedHashSet())
+        val trimmed = trimTombstones(keys)
+        assertEquals(200, trimmed.size)
+        assertEquals((51..250).map { "k$it" }.toList(), trimmed.toList()) // 加入序保留最近 200
+    }
+
+    @Test
+    fun trimTombstonesUnderCapacityReturnsUnchanged() {
+        val keys = (1..5).map { "k$it" }.toCollection(LinkedHashSet())
+        val trimmed = trimTombstones(keys)
+        assertSame(keys, trimmed) // 未超限原样返回，不复制
+        assertEquals(keys, trimmed)
+    }
+
+    @Test
+    fun trimTombstonesEmptySetReturnsEmpty() {
+        assertTrue(trimTombstones(emptySet()).isEmpty())
+    }
+
+    @Test
+    fun trimTombstonesZeroCapacityReturnsEmpty() {
+        val keys = (1..5).map { "k$it" }.toCollection(LinkedHashSet())
+        assertTrue(trimTombstones(keys, capacity = 0).isEmpty())
+    }
+
+    @Test
+    fun recoverSkipsTombstonedApprovalButAddsFresh() = runTest(UnconfinedTestDispatcher()) {
+        val h = Harness()
+        h.sessions = {
+            listOf(
+                SessionSummary(sessionId = "s1", updatedAt = 1L),
+                SessionSummary(sessionId = "s2", updatedAt = 2L),
+            )
+        }
+        h.history = { sid ->
+            HistoryValue(events = listOf(HistoryEntry(event = SessionEventWire(
+                "approval/asked", 1, 1,
+                kotlinx.serialization.json.buildJsonObject { put("id", "a$sid"); put("toolName", "bash") },
+            ))))
+        }
+        val c = center(h, backgroundScope)
+        // s1 的审批已实时解决（墓碑 a:s1:as1 生效）；s2 从未出现
+        events.emit(DshConnection.Event.ApprovalRequested("s1", "as1", "bash", null, null))
+        events.emit(DshConnection.Event.ApprovalResolved("s1", "as1", "allowed-once"))
+        state.value = DshConnection.State.Connected("http://x")
+        assertEquals(1, c.items.value.size) // s1 墓碑不复活，s2 历史正常回加
+        assertEquals("s2", (c.items.value[0] as PendingItem.Approval).sessionId)
+    }
+
+    @Test
+    fun recoverAddsOnlyItemsWhoseTombstoneWasTrimmed() = runTest(UnconfinedTestDispatcher()) {
+        val h = Harness()
+        h.sessions = {
+            listOf(
+                SessionSummary(sessionId = "s0", updatedAt = 0L),     // 最旧墓碑（超限被裁剪）
+                SessionSummary(sessionId = "s200", updatedAt = 200L), // 新墓碑（保留）
+            )
+        }
+        h.history = { sid ->
+            HistoryValue(events = listOf(HistoryEntry(event = SessionEventWire(
+                "approval/asked", 1, 1,
+                kotlinx.serialization.json.buildJsonObject {
+                    put("id", "a${sid.removePrefix("s")}"); put("toolName", "bash")
+                },
+            ))))
+        }
+        val c = center(h, backgroundScope)
+        // 250 次解决触发超限裁剪：保留最近 200 条墓碑（a:s50:a50 … a:s249:a249）
+        repeat(250) { i ->
+            events.emit(DshConnection.Event.ApprovalResolved("s$i", "a$i", "allowed-once"))
+        }
+        state.value = DshConnection.State.Connected("http://x")
+        // s0:a0 墓碑已被裁剪 → 历史回加；s200:a200 墓碑保留 → 不回加
+        assertEquals(listOf("s0"), c.items.value.map { it.sessionId })
     }
 }
