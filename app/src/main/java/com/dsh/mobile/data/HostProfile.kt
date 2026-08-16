@@ -34,6 +34,7 @@ data class HostProfile(
     val autoConnect: Boolean = false,
     val lastUsedAt: Long = 0,
     val lastErrorCode: String? = null,
+    val paired: Boolean = false,
 )
 
 /**

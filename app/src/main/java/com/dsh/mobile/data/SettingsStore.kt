@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 private val Context.dataStore by preferencesDataStore("dsh-mobile-settings")
@@ -64,6 +65,7 @@ class SettingsStore(
         private val ACTIVE_PROFILE_KEY = stringPreferencesKey("active_profile_id")
         private val BIOMETRIC_LOCK_KEY = booleanPreferencesKey("biometric_lock")
         private val DEVICE_NAME_KEY = stringPreferencesKey("device_name")
+        private val DEVICE_ID_KEY = stringPreferencesKey("device_id")
     }
 
     val profiles: Flow<List<HostProfile>> = context.dataStore.data.map { prefs ->
@@ -244,6 +246,19 @@ class SettingsStore(
 
     suspend fun setDeviceName(name: String) {
         context.dataStore.edit { it[DEVICE_NAME_KEY] = name }
+    }
+
+    val deviceId: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[DEVICE_ID_KEY] ?: ""
+    }
+
+    /** 首读生成并持久化设备 ID（幂等） */
+    suspend fun ensureDeviceId(): String {
+        val existing = deviceId.first()
+        if (existing.isNotBlank()) return existing
+        val id = java.util.UUID.randomUUID().toString()
+        context.dataStore.edit { it[DEVICE_ID_KEY] = id }
+        return id
     }
 }
 

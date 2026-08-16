@@ -41,5 +41,6 @@ class HostProfileTest {
         assertEquals(false, back[0].trustSelfSigned)
         assertEquals(null, back[0].proxy)
         assertEquals(false, back[0].autoConnect)
+        assertEquals(false, back[0].paired)
     }
 }
