@@ -21,10 +21,17 @@
 - **背景图与面板**：设置 → 外观可选本地背景图 + 四档一键预设（通透玻璃/电影质感/纯净原图/柔和梦境）；图像不透明度/模糊/饱和度/蒙层浓度独立可调，**面板通透**玻璃化（对齐桌面 dsh-beautify 模板）；屏幕亮度 = 夜间模式
 - **图片消息**：📎 选择图片（PNG/JPEG/WebP/GIF ≤4MB）随消息发送，新对话与历史会话均支持
 - **技能选择**：📚 技能列表（skill.list），点选自动插入"请使用 X 技能"到输入框
+- **保险库解锁（dsh-encrypt 联动）**：设置页「保险库」卡片查看锁定状态、手机端输入密码解锁 PC 端凭证保险库——与 web 端走同一路由（/api/credentials.unlock），密码本地 SHA3-256 后仅上传摘要，解锁后 PC 端同步生效；支持记住密码（AndroidKeyStore 加密存储摘要）、防爆破冷却展示
 - **会话管理**：最近会话列表、历史分页加载、长按归档 / 已归档区恢复、状态指示、停止运行、⚡ 插话发送（打断思考，steer 模式）、新对话工作区选择
 
 ## 更新日志
 
+- **v1.3.2**：保险库联动 + PC 端兼容修复——
+  - **保险库解锁**：设置页新增「保险库」卡片（已锁定 / 已解锁 / 未设密码 / 不可用四态）；解锁对话框输入密码，本地求 SHA3-256 摘要后 POST `/api/credentials.unlock`（明文密码不上行，与 web 端一致）；解锁为进程全局状态，PC web 端同步解锁；「记住密码」将摘要经 AndroidKeyStore AES-GCM 加密落盘，下次留空一键解锁；密码错误不做弹窗报错（避免诱导连续尝试烧掉防爆破额度），冷却剩余秒数由 status 的 lockout 字段呈现
+  - **纯 Kotlin SHA3-256**（data/Sha3.kt）：Android 各版本 MessageDigest 对 SHA3 支持不一致，自带 Keccak-f[1600] 实现，已对拍 Node crypto 测试向量
+  - **PC 插件 dsh-remote-access 修复**：inject 声明改为 `["webServer"]`——npm 版 `@deepseek-ai/dsh` 的 `Inject.resolve` 无 `{required, optional}` 语义，对象写法会被解析成等待名为 required/optional 的服务，插件永远 pending 并导致 DSH 启动失败（Setup 版 DSH 不受影响）
+  - **dsh-remote-start.ps1 修复**：加 UTF-8 BOM（修复 Windows PowerShell 5.1 按 GBK 解析报语法错误）；防火墙规则创建失败降级为警告（cpolar 模式不受影响）；端口探测失败延时 2s 重试一次
+  - **LICENSE**：MIT + 社区桌面版声明
 - **v?.?.?**：能力补全三阶段（S5-S7）——
   - **内容可视化（S5）**：思考链展示（💭 折叠思考区，流式累积 reasoning-delta + 完整消息兜底）；工具调用耗时（callId 配对信封 time 相减，工具卡片显示耗时）；MCP 服务列表（设置 → 关于 → MCP 服务卡片，枚举 mcp__ 前缀工具，连接状态以上游为准）
   - **文件工作区（S6）**：目录浏览直连 host.listDirectory（面包屑/隐藏项/截断提示，不再依赖插件 fs/list）；文件只读预览（点击文件弹出预览对话框：文本展示/二进制提示/复制，插件 fs/read 走沙箱读取 + 1MB 截断，fs/list 增强列文件）

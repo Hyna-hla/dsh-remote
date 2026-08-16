@@ -55,6 +55,7 @@ class SettingsStore(
         private val NOTIFY_APPROVALS_KEY = booleanPreferencesKey("notify_approvals")
         private val NOTIFY_COMPLETION_KEY = booleanPreferencesKey("notify_completion")
         private val QUICK_PROMPTS_KEY = stringPreferencesKey("quick_prompts")
+        private val VAULT_DIGEST_KEY = stringPreferencesKey("vault_digest_enc")
         private val PINNED_SESSION_IDS_KEY = stringPreferencesKey("pinned_session_ids")
         private val AUTO_MODEL_KEY = booleanPreferencesKey("auto_model")
         private val THEME_MODE_KEY = stringPreferencesKey("theme_mode")
@@ -190,6 +191,19 @@ class SettingsStore(
 
     suspend fun setDarkMode(enabled: Boolean) {
         context.dataStore.edit { it[DARK_MODE_KEY] = enabled }
+    }
+
+    // 保险库（dsh-encrypt）解锁摘要：SHA3-256 hex 在功能上等价于该保险库的钥匙，
+    // 与代理密码同等对待——仅 AndroidKeyStore AES-GCM 密文落盘，绝不打日志
+    val vaultDigest: Flow<String?> = context.dataStore.data.map { prefs ->
+        prefs[VAULT_DIGEST_KEY]?.let { runCatching { secretBox.decrypt(it) }.getOrNull() }
+    }
+
+    suspend fun setVaultDigest(digest: String?) {
+        context.dataStore.edit { prefs ->
+            if (digest.isNullOrBlank()) prefs.remove(VAULT_DIGEST_KEY)
+            else prefs[VAULT_DIGEST_KEY] = secretBox.encrypt(digest)
+        }
     }
 
     val appearance: Flow<AppearanceConfig> = context.dataStore.data.map { prefs ->

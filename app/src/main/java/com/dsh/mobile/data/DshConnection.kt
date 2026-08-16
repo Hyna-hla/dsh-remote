@@ -10,6 +10,7 @@ import kotlinx.serialization.json.*
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import java.util.UUID
 
 class ApiException(message: String, val code: String? = null) : Exception(message)
@@ -751,6 +752,45 @@ class DshConnection(private val appContext: Context? = null) {
             parseMcpList(json.parseToJsonElement(text))
         } catch (e: Exception) {
             emptyList()
+        }
+    }
+
+    /**
+     * dsh-encrypt 保险库状态（POST /api/credentials.status，与 web 端同一路由）。
+     * 返回 null = 未连接 / PC 端未装 dsh-encrypt（404）/ 响应不可解析 → UI 显示「不可用」。
+     */
+    suspend fun vaultStatus(): VaultStatus? {
+        return try {
+            val text = postVaultRoute("/api/credentials.status", "{}")
+            if (text == null) null else parseVaultStatus(text)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * 解锁保险库（POST /api/credentials.unlock {digest}）。digest 为密码 SHA3-256 小写 hex
+     * （明文密码不上行，与 web 端一致）；解锁为进程全局状态，PC web 端同步解锁。
+     * 429 TOO_MANY_ATTEMPTS 不重试——由 UI 呈现倒计时（5 次失败锁 30s 起、指数到 15 分钟）。
+     */
+    suspend fun vaultUnlock(digest: String): VaultUnlockResult? {
+        val text = try {
+            postVaultRoute("/api/credentials.unlock", JSONObject().put("digest", digest).toString())
+        } catch (e: Exception) {
+            return null
+        } ?: return null
+        return parseVaultUnlock(text)
+    }
+
+    /** 保险库路由 POST（application/json 写栅栏）：非 2xx 返回原始响应体供错误码解析；404 → null。 */
+    private suspend fun postVaultRoute(path: String, body: String): String? = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url(baseUrl + path)
+            .post(body.toRequestBody("application/json".toMediaType()))
+            .build()
+        unaryClient.newCall(request).execute().use { resp ->
+            if (resp.code == 404) return@withContext null
+            resp.body?.string().orEmpty()
         }
     }
 

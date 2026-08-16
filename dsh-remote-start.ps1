@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     启动 DeepSeek Harness 服务，供手机端 DSH Remote 连接（局域网直连 或 cpolar 内网穿透）。
 
@@ -52,11 +52,15 @@ $localIp = (Get-NetIPConfiguration | Where-Object {
 } | Select-Object -First 1).IPv4Address.IPAddress
 if (-not $localIp) { $localIp = "<your-pc-ip>" }
 
-# 防火墙
+# 防火墙（仅 LAN 模式真正需要；创建失败不致命——cpolar 隧道为出站连接）
 $ruleName = "DSH Remote $Port"
 if (-not (Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue)) {
-    New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Protocol TCP -LocalPort $Port -Action Allow | Out-Null
-    Write-Host "[FIREWALL] 已放行端口 $Port" -ForegroundColor Green
+    try {
+        New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Protocol TCP -LocalPort $Port -Action Allow -ErrorAction Stop | Out-Null
+        Write-Host "[FIREWALL] 已放行端口 $Port" -ForegroundColor Green
+    } catch {
+        Write-Host "[WARN] 防火墙规则创建失败（需要管理员权限；cpolar 模式不受影响）" -ForegroundColor Yellow
+    }
 }
 
 # —— 自动探测桌面版 DSH 的监听端口 ——
@@ -103,6 +107,11 @@ if ($Mode -eq "cpolar") {
         Write-Host "[INFO] 使用指定目标端口 $tunnelPort" -ForegroundColor Cyan
     } else {
         $tunnelPort = Find-DesktopDshPort
+        if ($tunnelPort -eq 0) {
+            # 探测存在时序窗口（DSH 启动中 / 进程信息延迟），短暂等待后重试一次
+            Start-Sleep -Seconds 2
+            $tunnelPort = Find-DesktopDshPort
+        }
         if ($tunnelPort -gt 0) {
             Write-Host "[INFO] 检测到桌面版 DSH，端口 $tunnelPort" -ForegroundColor Green
         } else {

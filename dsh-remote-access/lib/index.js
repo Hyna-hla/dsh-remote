@@ -33,9 +33,11 @@ import QRCode from "qrcode";
 const execFileAsync = promisify(execFile);
 
 export const name = "dsh-remote-access";
-// fs / tools 为可选注入：可用时文件读取走注入服务（工作区/sandbox 语义），
-// 不可用回退 node:fs / 空工具列表；tools 由 dsh-mcp-client 挂载（可能晚于本插件）
-export const inject = { required: ["webServer"], optional: ["fs", "tools"] };
+// fs / tools 不进 inject 声明，运行时以 ctx.fs / ctx.get("tools") 惰性取用：
+// 不可用回退 node:fs / 空工具列表；tools 由 dsh-mcp-client 挂载（可能晚于本插件）。
+// 注意：npm 版 @deepseek-ai/dsh 的 Inject.resolve 只认服务名数组/服务名为键的对象，
+// 无 { required, optional } 语义——对象写法会被解析成等待名为 required/optional 的服务，插件永远 pending
+export const inject = ["webServer"];
 
 const json = (res, code, payload) => {
   res.statusCode = code;

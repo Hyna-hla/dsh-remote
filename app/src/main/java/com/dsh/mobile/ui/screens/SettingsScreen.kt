@@ -28,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -37,6 +38,8 @@ import com.dsh.mobile.data.DshConnection
 import com.dsh.mobile.data.McpServer
 import com.dsh.mobile.data.ReleaseInfo
 import com.dsh.mobile.data.SettingsStore
+import com.dsh.mobile.data.Sha3
+import com.dsh.mobile.data.VaultStatus
 import com.dsh.mobile.data.UpdateChecker
 import com.dsh.mobile.service.DshConnectionService
 import com.dsh.mobile.ui.theme.DshBrand
@@ -735,6 +738,93 @@ fun SettingsScreen(
                 }
             }
 
+            // 保险库（dsh-encrypt 联动）：手机端输入密码解锁 PC 端凭证保险库——与 web 端走同一路由
+            // （/api/credentials.unlock），密码本地 SHA3-256 后仅上传摘要，明文不上行；
+            // 解锁为进程全局状态，手机解锁后 PC web 端同步解锁。未装 dsh-encrypt → 「不可用」。
+            Text("保险库", style = MaterialTheme.typography.titleMedium)
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    val connected = connState is DshConnection.State.Connected
+                    var vault by remember { mutableStateOf<VaultStatus?>(null) }
+                    var vaultLoaded by remember { mutableStateOf(false) }
+                    var rememberedDigest by remember { mutableStateOf<String?>(null) }
+                    var showUnlockDialog by remember { mutableStateOf(false) }
+                    LaunchedEffect(connected) {
+                        if (connected) {
+                            vault = connection.vaultStatus()
+                            vaultLoaded = true
+                            rememberedDigest = settingsStore.vaultDigest.first()
+                        } else {
+                            vault = null
+                            vaultLoaded = false
+                        }
+                    }
+                    when {
+                        !connected -> Text(
+                            "连接后可查看保险库状态",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        !vaultLoaded -> Text(
+                            "加载中…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        vault == null -> Text(
+                            "不可用（PC 端未安装 dsh-encrypt 插件）",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        vault != null && vault!!.locked -> Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                if (vault!!.lockoutRetryAfterMs > 0)
+                                    "已锁定（防爆破冷却 ${vault!!.lockoutRetryAfterMs / 1000}s）"
+                                else "已锁定 · 凭证不可用",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = DshError,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Button(onClick = { showUnlockDialog = true }) { Text("解锁") }
+                        }
+                        vault != null && vault!!.encrypted -> Text(
+                            "已解锁",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = DshSuccess,
+                        )
+                        else -> Text(
+                            "未设置密码（明文存储）",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (showUnlockDialog) {
+                        VaultUnlockDialog(
+                            hasRemembered = rememberedDigest != null,
+                            onDismiss = { showUnlockDialog = false },
+                            onUnlock = { password, remember ->
+                                scope.launch {
+                                    val digest = rememberedDigest?.takeIf { password.isBlank() }
+                                        ?: Sha3.digest256Hex(password)
+                                    connection.vaultUnlock(digest)
+                                    // 成功/失败统一以新一轮 status 呈现（密码错会触发防爆破计数，
+                                    // 不做弹窗报错以免诱导连续尝试；冷却剩余由 lockout 字段带出）
+                                    settingsStore.setVaultDigest(if (remember) digest else null)
+                                    vault = connection.vaultStatus()
+                                    vaultLoaded = true
+                                    showUnlockDialog = false
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+
             // MCP 服务（S5）：PC 插件 mcp/list 枚举的 MCP 服务与工具（serverName + 工具数徽章；
             // 上游无连接态 API，status 恒 unknown → 显示「连接状态未知」）；未连接/空 → 「无 MCP 服务」
             Text("MCP 服务", style = MaterialTheme.typography.titleMedium)
@@ -1047,4 +1137,51 @@ private fun UpdateSection(
             }
         }
     }
+}
+
+/** 保险库解锁对话框：密码留空 = 使用已记住的摘要直接解锁。 */
+@Composable
+private fun VaultUnlockDialog(
+    hasRemembered: Boolean,
+    onDismiss: () -> Unit,
+    onUnlock: (password: String, remember: Boolean) -> Unit,
+) {
+    var password by remember { mutableStateOf("") }
+    var remember by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("解锁保险库") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (hasRemembered) Text(
+                    "已记住密码——输入框留空直接解锁",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("密码") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = remember, onCheckedChange = { remember = it })
+                    Text("记住密码（本机加密存储）", style = MaterialTheme.typography.bodyMedium)
+                }
+                Text(
+                    "密码仅在本机求 SHA3-256 摘要后上传（与 web 端一致），解锁后 PC 端同步生效。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onUnlock(password, remember) },
+                enabled = password.isNotBlank() || hasRemembered,
+            ) { Text("解锁") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
 }
