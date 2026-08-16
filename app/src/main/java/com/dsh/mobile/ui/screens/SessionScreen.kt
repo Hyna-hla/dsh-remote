@@ -1161,6 +1161,21 @@ fun SessionScreen(
 
         // 连接中断提示条（事件流断开/首连失败时显示，重连成功后消失）
         streamNotice?.let { notice ->
+            // 断线诊断：探测根路径分辨「服务在线通道抖动」与「服务器不可达（隧道断/电脑关机）」
+            var diag by remember(notice) { mutableStateOf<String?>(null) }
+            LaunchedEffect(notice) {
+                diag = withContext(Dispatchers.IO) {
+                    val code = runCatching {
+                        val req = okhttp3.Request.Builder().url(connection.baseUrl()).head().build()
+                        okhttp3.OkHttpClient.Builder()
+                            .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                            .build()
+                            .newCall(req).execute().use { it.code }
+                    }.getOrNull()
+                    if (code != null) "服务在线（HTTP $code），通道恢复中…" to true
+                    else null to false
+                }.first
+            }
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1179,10 +1194,10 @@ fun SessionScreen(
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        notice,
+                        if (diag != null) "$notice\n$diag" else notice,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.error,
-                        maxLines = 2,
+                        maxLines = 3,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
