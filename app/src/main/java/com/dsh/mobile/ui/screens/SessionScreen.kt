@@ -78,6 +78,9 @@ private const val CHUNK_FLUSH_MS = 50L
 // 流式期间 Markdown 只渲染尾部上限，防止长回复每个增量都全量重解析（O(n²)）
 private const val STREAM_TAIL_CHARS = 8000
 
+// T6 插话反馈 banner 展示时长：与 data/SteerFeedback.kt 的 steerFlashOn 默认 durationMs 保持一致
+private const val STEER_FLASH_MS = 2000L
+
 // ──────────────────────────── 聊天条目模型与状态机 ────────────────────────────
 
 /** 用户消息里的图片内容块（mediaType + base64 data，DSH 协议 image 块） */
@@ -93,6 +96,8 @@ sealed interface ChatItem {
         val text: String,
         override val seq: Long? = null,
         val images: List<UserImage> = emptyList(),
+        /** T6 插话乐观标记：本条消息以 steer 模式发送（纯乐观，服务端无回执，不落缓存） */
+        val steerSent: Boolean = false,
     ) : ChatItem
     data class Assistant(
         override val key: String,
@@ -100,6 +105,8 @@ sealed interface ChatItem {
         val streaming: Boolean = false,
         val thinkSeconds: Long? = null,
         override val seq: Long? = null,
+        /** T6 插话乐观标记：本条回复由插话触发（纯乐观，不落缓存） */
+        val steerSent: Boolean = false,
     ) : ChatItem
     data class Tool(
         override val key: String,
@@ -245,6 +252,23 @@ class SessionChatState(
     private var streamStart: Long? = null
     /** key 生成线程安全：load() 解析在 Default 线程、实时事件在主线程，并发自增不得冲突 */
     private val counter = java.util.concurrent.atomic.AtomicLong(0)
+
+    // T6 插话乐观标记：steer 发送时登记的文本，按服务端回显 USER_MESSAGE 的文本匹配消费。
+    // 列表语义——同文本连发两次可分别消费（UI 单飞发送，实际最多一条在途）。
+    private val steerPending = mutableListOf<String>()
+    /** steer 回显命中后置 true：下一条 ASSISTANT_MESSAGE（插话触发的回复）标记「插话」后消费 */
+    private var steerReplyArmed = false
+
+    /** T6：steer 发送时登记本次文本；回显 USER_MESSAGE 按文本匹配标记「插话」。
+     *  纯文本以外（纯图片发送）不登记——无法稳定匹配回显，消息级徽章跳过，banner 反馈不受影响。 */
+    fun markSteerPending(text: String) {
+        if (text.isNotBlank()) steerPending.add(text)
+    }
+
+    /** T6：发送失败时撤回登记，避免后续无关回显被误标 */
+    fun clearSteerPending(text: String) {
+        if (text.isNotBlank()) steerPending.removeAll { it == text }
+    }
 
     // 流式增量缓冲：chunk 先攒在这里，50ms 批量 flush 一次列表
     private val pendingChunk = StringBuilder()
@@ -540,7 +564,10 @@ class SessionChatState(
             DshEventTypes.USER_MESSAGE -> {
                 val uc = userContentOf(e.data.jsonObject["content"])
                 if (uc.text.isNotBlank() || uc.images.isNotEmpty()) {
-                    cur.add(ChatItem.User(nextKey(), uc.text, seq = e.seq, images = uc.images))
+                    // T6：按文本匹配本次 steer 发送（乐观标记；匹配即登记「插话」回复）
+                    val steer = if (uc.text.isNotBlank()) steerPending.remove(uc.text) else false
+                    if (steer) steerReplyArmed = true
+                    cur.add(ChatItem.User(nextKey(), uc.text, seq = e.seq, images = uc.images, steerSent = steer))
                 }
             }
 
@@ -548,10 +575,12 @@ class SessionChatState(
                 val t = assistantTextOf(e.data)
                 val secs = streamStart?.let { (e.time - it) / 1000 }
                 val idx = cur.indexOfLast { it is ChatItem.Assistant && it.streaming }
+                // T6：插话回显命中后，本条（或其覆盖的流式条目）即插话触发的回复
+                val steer = steerReplyArmed.also { steerReplyArmed = false }
                 if (idx >= 0) {
-                    cur[idx] = ChatItem.Assistant(cur[idx].key, t, thinkSeconds = secs, seq = e.seq)
+                    cur[idx] = ChatItem.Assistant(cur[idx].key, t, thinkSeconds = secs, seq = e.seq, steerSent = steer)
                 } else if (t.isNotBlank()) {
-                    cur.add(ChatItem.Assistant(nextKey(), t, thinkSeconds = secs, seq = e.seq))
+                    cur.add(ChatItem.Assistant(nextKey(), t, thinkSeconds = secs, seq = e.seq, steerSent = steer))
                 }
                 streamStart = null
             }
@@ -650,6 +679,8 @@ fun SessionScreen(
     var input by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
     var steerMode by remember { mutableStateOf(false) }
+    // T6 插话反馈 banner：steer 发送瞬间显示 2s「⚡ 已插话」后自动消失（纯乐观，无服务端回执）
+    var steerFlash by remember { mutableStateOf(SteerFlash(false)) }
     var pendingImages by remember { mutableStateOf<List<DshConnection.ImagePart>>(emptyList()) }
     // 快捷指令条（T5）：SettingsStore 持久化，未配置时注入内置默认 4 条
     val settingsStore = remember { SettingsStore(context) }
@@ -782,6 +813,15 @@ fun SessionScreen(
         }
     }
 
+    // T6：插话反馈 banner 自动消失——触发后 STEER_FLASH_MS 置回不可见；
+    // at 变化（持续可见时再次触发）会重启计时，顺延展示时长
+    LaunchedEffect(steerFlash.visible, steerFlash.at) {
+        if (steerFlash.visible) {
+            delay(STEER_FLASH_MS)
+            steerFlash = steerFlashOn(sendingSteer = false, prev = steerFlash, now = System.currentTimeMillis())
+        }
+    }
+
     // 滚动到顶自动加载更早的消息（每加载一页顶部索引后移，需再次滚到顶才继续；
     // 与「加载更早」按钮并存，按钮兜底手动加载）
     LaunchedEffect(listState.firstVisibleItemIndex) {
@@ -851,6 +891,13 @@ fun SessionScreen(
         if ((text.isBlank() && pendingImages.isEmpty()) || sending) return
         sending = true
         actionError = null
+        // 捕获本次发送模式：await 期间用户切走开关不影响已发起请求的语义
+        val isSteer = steerMode
+        if (isSteer) {
+            // T6：插话发送瞬间 → 「⚡ 已插话」banner + 登记消息级乐观标记
+            steerFlash = steerFlashOn(sendingSteer = true, prev = steerFlash, now = System.currentTimeMillis())
+            state.markSteerPending(text)
+        }
         scope.launch {
             try {
                 // 自适应模型：按任务难度先切 Flash/Pro 再发送
@@ -860,12 +907,13 @@ fun SessionScreen(
                 connection.prompt(
                     sessionId,
                     text,
-                    if (steerMode) "steer" else "queue",
+                    if (isSteer) "steer" else "queue",
                     images = pendingImages,
                 )
                 input = ""
                 pendingImages = emptyList()
             } catch (e: Exception) {
+                state.clearSteerPending(text)
                 actionError = e.message
             } finally {
                 sending = false
@@ -1137,6 +1185,26 @@ fun SessionScreen(
                 modifier = Modifier.size(32.dp),
             ) {
                 Icon(Icons.Rounded.Edit, "编辑快捷指令", Modifier.size(18.dp))
+            }
+        }
+
+        // 插话反馈 banner（T6）：steer 发送瞬间显示 2s「⚡ 已插话」（快捷指令条之下、输入栏之上），
+        // 纯乐观反馈——服务端无回执事件（recon §7.5），可见性与时长由 SteerFlash 状态机驱动
+        if (steerFlash.visible) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                AssistChip(
+                    onClick = {},
+                    label = { Text("⚡ 已插话") },
+                    colors = AssistChipDefaults.assistChipColors(
+                        containerColor = DshBrandSoft,
+                        labelColor = DshBrand,
+                    ),
+                )
             }
         }
 
@@ -1428,52 +1496,63 @@ private fun UserBubble(item: ChatItem.User, modifier: Modifier = Modifier) {
             .then(modifier),
         horizontalArrangement = Arrangement.End,
     ) {
-        Surface(
-            shape = DshShape.userBubble,
-            color = if (DshThemeStyle == ThemeStyle.CHATGPT) Color(0xFF1C1C1E)
-            else MaterialTheme.colorScheme.primaryContainer,
-            modifier = Modifier
-                .widthIn(max = 320.dp)
-                .combinedClickable(
-                    onClick = {},
-                    onLongClick = {
-                        if (item.text.isNotBlank()) {
-                            clipboard.setText(AnnotatedString(item.text))
-                            Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                ),
-        ) {
-            Column(
-                Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+        Column(horizontalAlignment = Alignment.End) {
+            if (item.steerSent) {
+                // T6：插话乐观徽章——本条消息以 steer 模式发送（纯乐观，无服务端确认）
+                Text(
+                    "⚡ 插话",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = DshBrand,
+                    modifier = Modifier.padding(end = 6.dp, bottom = 2.dp),
+                )
+            }
+            Surface(
+                shape = DshShape.userBubble,
+                color = if (DshThemeStyle == ThemeStyle.CHATGPT) Color(0xFF1C1C1E)
+                else MaterialTheme.colorScheme.primaryContainer,
+                modifier = Modifier
+                    .widthIn(max = 320.dp)
+                    .combinedClickable(
+                        onClick = {},
+                        onLongClick = {
+                            if (item.text.isNotBlank()) {
+                                clipboard.setText(AnnotatedString(item.text))
+                                Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                    ),
             ) {
-                item.images.forEach { img ->
-                    val bitmap = remember(img.base64) { decodeUserImage(context, img) }
-                    if (bitmap != null) {
-                        Image(
-                            bitmap = bitmap.asImageBitmap(),
-                            contentDescription = "图片",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp)),
-                            contentScale = ContentScale.FillWidth,
-                        )
-                    } else {
+                Column(
+                    Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    item.images.forEach { img ->
+                        val bitmap = remember(img.base64) { decodeUserImage(context, img) }
+                        if (bitmap != null) {
+                            Image(
+                                bitmap = bitmap.asImageBitmap(),
+                                contentDescription = "图片",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp)),
+                                contentScale = ContentScale.FillWidth,
+                            )
+                        } else {
+                            Text(
+                                "（图片）",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
+                            )
+                        }
+                    }
+                    if (item.text.isNotBlank()) {
                         Text(
-                            "（图片）",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
+                            item.text,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (DshThemeStyle == ThemeStyle.CHATGPT) Color.White
+                            else MaterialTheme.colorScheme.onPrimaryContainer,
                         )
                     }
-                }
-                if (item.text.isNotBlank()) {
-                    Text(
-                        item.text,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (DshThemeStyle == ThemeStyle.CHATGPT) Color.White
-                        else MaterialTheme.colorScheme.onPrimaryContainer,
-                    )
                 }
             }
         }
@@ -1529,6 +1608,15 @@ private fun AssistantCard(item: ChatItem.Assistant, modifier: Modifier = Modifie
                     .background(if (item.streaming) DshBrandSoft else DshBrand),
             )
             Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                if (item.steerSent) {
+                    // T6：插话乐观徽章——本条回复由插话（steer）触发（纯乐观，无服务端确认）
+                    Text(
+                        "⚡ 插话",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = DshBrand,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                }
                 item.thinkSeconds?.let { secs ->
                     Text(
                         if (DshThemeStyle == ThemeStyle.CODEX) "⚡ think ${secs}s" else "⚡ 已思考 $secs 秒",
