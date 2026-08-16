@@ -731,6 +731,30 @@ class DshConnection(private val appContext: Context? = null) {
     }
 
     /**
+     * 插件 mcp/list（dsh-remote-access，S5）：MCP 服务与工具枚举。
+     * 响应 {ok, servers:[{serverName, tools[], status}]}；失败/插件不可用/非法 → 空列表
+     * （UI 显示「无 MCP 服务」）。
+     */
+    suspend fun mcpList(): List<McpServer> {
+        return try {
+            val text = withContext(Dispatchers.IO) {
+                val request = Request.Builder()
+                    .url("$baseUrl/api/remote-access/mcp/list")
+                    .get()
+                    .build()
+                unaryClient.newCall(request).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withContext ""
+                    resp.body?.string().orEmpty()
+                }
+            }
+            if (text.isBlank()) return emptyList()
+            parseMcpList(json.parseToJsonElement(text))
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    /**
      * 浏览 PC 端任意目录（直连 host.listDirectory RPC）：
      * 返回 {path, crumbs 面包屑层级, entries 子目录（含 hidden 隐藏标记）, truncated 截断标记, files 文件}。
      * - host RPC 可用：目录/面包屑/截断来自 host；文件来自插件 fs/list（host RPC 不含文件，插件不可用则空）；

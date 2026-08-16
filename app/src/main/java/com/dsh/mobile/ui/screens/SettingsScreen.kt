@@ -34,6 +34,7 @@ import androidx.core.content.ContextCompat
 import com.dsh.mobile.data.ApkInstaller
 import com.dsh.mobile.data.AppearanceConfig
 import com.dsh.mobile.data.DshConnection
+import com.dsh.mobile.data.McpServer
 import com.dsh.mobile.data.ReleaseInfo
 import com.dsh.mobile.data.SettingsStore
 import com.dsh.mobile.data.UpdateChecker
@@ -731,6 +732,68 @@ fun SettingsScreen(
                     SettingInfoRow("协议", "dsh-api (client-request / WS+SSE mux)")
                     SettingInfoRow("后端", "DeepSeek Harness")
                     SettingInfoRow("主题", "DSH 浅色/深色 · 背景图/蒙层/面板通透可调")
+                }
+            }
+
+            // MCP 服务（S5）：PC 插件 mcp/list 枚举的 MCP 服务与工具（serverName + 工具数徽章；
+            // 上游无连接态 API，status 恒 unknown → 显示「连接状态未知」）；未连接/空 → 「无 MCP 服务」
+            Text("MCP 服务", style = MaterialTheme.typography.titleMedium)
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    val connected = connState is DshConnection.State.Connected
+                    var mcpServers by remember { mutableStateOf<List<McpServer>?>(null) }
+                    LaunchedEffect(connected) {
+                        mcpServers = if (connected) connection.mcpList() else emptyList()
+                    }
+                    val servers = mcpServers
+                    when {
+                        !connected -> Text(
+                            "无 MCP 服务",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        servers == null -> Text(
+                            "加载中…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        servers.isEmpty() -> Text(
+                            "无 MCP 服务",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        else -> servers.forEach { s ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    s.serverName,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = MaterialTheme.colorScheme.secondaryContainer,
+                                ) {
+                                    Text(
+                                        "${s.tools.size} 工具",
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                        style = MaterialTheme.typography.labelSmall,
+                                    )
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "连接状态未知",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
