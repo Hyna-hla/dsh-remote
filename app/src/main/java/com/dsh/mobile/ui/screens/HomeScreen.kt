@@ -341,6 +341,7 @@ fun HomeScreen(
                     onBrowseEnter = { enterBrowseDir(it) },
                     onBrowseOpenFile = { openFilePreview(it) },
                     onBrowseUp = { browseUp() },
+                    onBrowseNavigate = { loadBrowseDir(it) },
                     onBrowseBack = { browseOpen = false },
                     onBrowsePick = {
                         // 选中当前浏览目录 → 创建为工作区并选中
@@ -1218,6 +1219,7 @@ private fun WorkspaceSheetContent(
     onBrowseEnter: (DirEntry) -> Unit,
     onBrowseOpenFile: (FileEntry) -> Unit,
     onBrowseUp: () -> Unit,
+    onBrowseNavigate: (String) -> Unit,
     onBrowseBack: () -> Unit,
     onBrowsePick: () -> Unit,
     onPickDefault: () -> Unit,
@@ -1266,7 +1268,8 @@ private fun WorkspaceSheetContent(
                         modifier = Modifier.weight(1f),
                     )
                 } else {
-                    // 面包屑：当前路径层级标签（横向滚动）
+                    // 面包屑：可点击 chips（crumb.path 非 null 且非当前目录 → listDirectory 跳转）；
+                    // 当前目录（最后一个 crumb）高亮不可点；path 缺失的 crumb 仅展示不可点
                     Row(
                         modifier = Modifier
                             .weight(1f)
@@ -1274,17 +1277,35 @@ private fun WorkspaceSheetContent(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         crumbs.forEachIndexed { i, crumb ->
-                            Text(
-                                crumb,
-                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                color = if (i == crumbs.lastIndex) MaterialTheme.colorScheme.onSurface
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            if (i != crumbs.lastIndex) {
+                            val isLast = i == crumbs.lastIndex
+                            val clickable = !isLast && crumb.path != null && !browseLoading
+                            if (clickable) {
+                                TextButton(
+                                    onClick = { crumb.path?.let(onBrowseNavigate) },
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                ) {
+                                    Text(
+                                        crumb.name,
+                                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                        color = MaterialTheme.colorScheme.primary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            } else {
                                 Text(
-                                    " › ",
+                                    crumb.name,
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                    fontWeight = if (isLast) FontWeight.Medium else null,
+                                    color = if (isLast) MaterialTheme.colorScheme.onSurface
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            if (!isLast) {
+                                Text(
+                                    "›",
                                     color = MaterialTheme.colorScheme.outline,
                                     style = MaterialTheme.typography.bodySmall,
                                 )

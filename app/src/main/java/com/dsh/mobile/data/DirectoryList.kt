@@ -12,16 +12,19 @@ import kotlinx.serialization.json.longOrNull
 /** host.listDirectory 单个条目（子目录或面包屑祖先；path 为宿主绝对路径，客户端不做路径拼接） */
 data class DirEntry(val name: String, val path: String, val hidden: Boolean)
 
+/** 面包屑层级元素：name=展示标签、path=宿主绝对路径（可跳转目标）；path=null 表示仅展示不可点（S8 Task 4） */
+data class Crumb(val name: String, val path: String?)
+
 /** 插件 fs/list 的 files[] 条目：{name, path, size, hidden}（size 字节数；隐藏 = 点前缀） */
 data class FileEntry(val name: String, val path: String, val size: Long, val hidden: Boolean)
 
 /** 插件 fs/list 响应模型（Task 4 增强）：子目录名 + 文件条目（dirs[] 兼容旧 App） */
 data class FsListing(val dirs: List<String>, val files: List<FileEntry>)
 
-/** host.listDirectory 响应扁平模型：当前目录 + 面包屑层级标签 + 子目录 + 是否截断 + 文件（插件 fs/list 增强） */
+/** host.listDirectory 响应扁平模型：当前目录 + 面包屑层级（Crumb） + 子目录 + 是否截断 + 文件（插件 fs/list 增强） */
 data class DirListing(
     val path: String,
-    val crumbs: List<String>,
+    val crumbs: List<Crumb>,
     val entries: List<DirEntry>,
     val truncated: Boolean,
     val files: List<FileEntry> = emptyList(),
@@ -30,7 +33,8 @@ data class DirListing(
 /**
  * 解析 host.listDirectory 响应：{path, home, crumbs[], entries[{name,path,hidden}], truncated} → 扁平模型。
  * - path 缺失/非字符串 → 非法 → null；
- * - crumbs 宽容解析：元素为对象取 name（真实 wire 形状，每个 crumb 是 DirectoryEntry），纯字符串直接收；
+ * - crumbs 宽容解析：元素为对象取 {name,path}（真实 wire 形状，每个 crumb 是 DirectoryEntry；
+ *   path 缺失 → Crumb(name, null) 仅展示不可点；name 缺失 → 跳过），纯字符串 → Crumb(it, null)；
  * - entries 条目缺 name/path 跳过；hidden 缺省 false；crumbs/entries/truncated 缺省空/空/false。
  */
 internal fun parseDirectoryList(data: JsonElement?): DirListing? {
@@ -46,12 +50,18 @@ internal fun parseDirectoryList(data: JsonElement?): DirListing? {
     )
 }
 
-private fun parseCrumbs(el: JsonElement): List<String> {
+/**
+ * 面包屑宽容解析：元素为对象取 {name,path}（真实 wire 形状；path 缺失 → Crumb(name, null) 仅展示不可点，
+ * name 缺失/非字符串 → 跳过），纯字符串 → Crumb(it, null)（无跳转目标），非对象非字符串 → 跳过。
+ */
+private fun parseCrumbs(el: JsonElement): List<Crumb> {
     val arr = el as? JsonArray ?: return emptyList()
     return arr.mapNotNull { c ->
         when (c) {
-            is JsonObject -> c["name"]?.stringValue()
-            is JsonPrimitive -> c.stringValue()
+            is JsonObject -> c["name"]?.stringValue()?.let { name ->
+                Crumb(name = name, path = c["path"]?.stringValue())
+            }
+            is JsonPrimitive -> c.stringValue()?.let { Crumb(it, null) }
             else -> null
         }
     }
@@ -78,10 +88,11 @@ private fun parseFiles(el: JsonElement): List<FileEntry> {
 }
 
 /**
- * 插件回退时 host 无 crumbs：从绝对路径推导层级标签（如 C:\a\b → ["C:\\", "C:\\a", "C:\\a\\b"]）。
- * 兼容 Windows（盘符根 C:\）与 POSIX（/）两种绝对路径形态。
+ * 插件回退时 host 无 crumbs：从绝对路径推导面包屑层级 Crumb（如 C:\a\b →
+ * [Crumb("C:\","C:\"), Crumb("C:\a","C:\a"), Crumb("C:\a\b","C:\a\b")]），
+ * name=层级标签、path=推导路径，全部可点。兼容 Windows（盘符根 C:\）与 POSIX（/）两种绝对路径形态。
  */
-internal fun deriveCrumbsFromPath(path: String): List<String> {
+internal fun deriveCrumbsFromPath(path: String): List<Crumb> {
     val raw = path.trim()
     if (raw.isEmpty()) return emptyList()
     // 分隔符须在 trimEnd 之前判定：盘符根 "C:\" 去掉尾分隔符后只剩 "C:"，无法再推断反斜杠
@@ -94,23 +105,23 @@ internal fun deriveCrumbsFromPath(path: String): List<String> {
     val p = raw.trimEnd('\\').trimEnd('/')
     val parts = p.split('\\', '/').filter { it.isNotEmpty() }
     if (parts.isEmpty()) return emptyList()
-    val out = mutableListOf<String>()
+    val out = mutableListOf<Crumb>()
     var cur = ""
     if (parts[0].length == 2 && parts[0][1] == ':') {
         // Windows 盘符根：C:\ → C:\foo → C:\foo\bar
         cur = parts[0] + sep
-        out += cur
+        out += Crumb(cur, cur)
         for (i in 1 until parts.size) {
             cur = cur.trimEnd(sep) + sep + parts[i]
-            out += cur
+            out += Crumb(cur, cur)
         }
     } else {
         // POSIX：/home → /home/me
         cur = "/" + parts[0]
-        out += cur
+        out += Crumb(cur, cur)
         for (i in 1 until parts.size) {
             cur += "/" + parts[i]
-            out += cur
+            out += Crumb(cur, cur)
         }
     }
     return out
