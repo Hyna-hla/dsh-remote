@@ -24,9 +24,14 @@ cpolar 公网隧道降级为「网页版」备选。
   - 二维码由插件**本机生成**（Node qrcode 库，数据不出本机、不依赖第三方 API、秒出图）
   - cpolar 二进制与 DSH 端口探测带 30s/60s 缓存，设置页轮询与「生成地址」更快
   - 地址可直接点击、一键复制
+- **移动端 App 配对确认（S3）**：手机 App 首次连接本电脑时，设置页会注入全局全屏确认对话框（允许/拒绝），
+  允许后写入 `$DSH_HOME/remote-access/paired.json`；设置页「配对管理」小节可查看已配对设备并逐项撤销。
 
 ## 更新日志
 
+- **v?.?.?**：S3 安全底座 —— 移动端首次配对确认：新增 `pair/request` / `pair/status` / `pair/respond` /
+  `pair/list` / `pair/revoke` 路由，配对记录持久化到 `$DSH_HOME/remote-access/paired.json`（120s 超时自动清除）；
+  设置页新增「配对管理」小节（已配对设备列表 + 撤销）；pending 时注入全局全屏确认对话框（允许/拒绝）
 - **v1.2.1**：装机自检 —— DSH 启动后若检测到 cpolar 未安装，延迟 10s 后台预下载，
   打开设置页时大概率已就绪；已装旧版（E:\coplar / PATH）则跳过，不重复下载
 - **v1.2.0**：cpolar 一键供应 —— 插件内自动下载/解压 cpolar（无需手动安装）、注册引导 + authtoken
@@ -48,7 +53,7 @@ cpolar 公网隧道降级为「网页版」备选。
   X-WECHAT-UIN = base64(十进制随机 uint32)、AES-128-ECB 媒体加密等）
 - DSH 侧走官方网关：ctx.apiProxy.sessions.create/prompt（与网页前端同一条路径）
 - 审批：approval/request 事件 prepend 应答器，仅接管微信绑定会话
-- 状态文件：$DSH_HOME/remote-access/wx-state.json（凭证）、wx-config.json（绑定会话/白名单）
+- 状态文件：$DSH_HOME/remote-access/wx-state.json（凭证）、wx-config.json（绑定会话/白名单）、paired.json（移动端已配对设备）
 
 ## 部署
 
@@ -64,11 +69,14 @@ cpolar 公网隧道降级为「网页版」备选。
 
 然后**重启 DSH**（宿主插件代码生效）并刷新页面。
 
+S3 移动端配对确认（`pair/*` 路由 + 全局确认对话框）同样随上述两处 lib 副本替换 + 重启 DSH 生效，
+无需新增依赖；配对记录保存在 `$DSH_HOME/remote-access/paired.json`。
+
 ## 文件
 
 - lib/ilink.js — 微信 iLink Bot API 客户端（扫码登录、长轮询、发送、typing、AES 媒体上传下载）
 - lib/bridge.js — 微信 ↔ DSH 桥（会话注入、流式回传、审批应答、白名单、工具聚合、重试）
 - lib/cpolar.js — cpolar 供应模块（一键下载/解压、注册引导、authtoken、隧道进程与状态）
-- lib/index.js — 插件宿主入口（HTTP 路由、本地二维码端点、cpolar 接口、探测缓存）
-- lib/client.js — 设置页 UI（微信卡片 + cpolar 卡片，含安装向导与登录向导）
+- lib/index.js — 插件宿主入口（HTTP 路由、本地二维码端点、cpolar 接口、探测缓存、移动端配对路由）
+- lib/client.js — 设置页 UI（微信卡片 + cpolar 卡片，含安装向导与登录向导 + 配对管理 + 全局确认对话框）
 - protocol-spec.md — 协议精确报文规范（源码出处齐全）

@@ -130,7 +130,9 @@ window.__ModuleLoader__.load({
         h("hr", { style: S.divider }),
         h("div", { style: S.title }, "网页版隧道（备选）"),
         h("div", { style: S.sub }, "需要完整网页版 UI 时使用（cpolar 内网穿透，免费版地址每次会变）。"),
-        h(CpolarCard, {})
+        h(CpolarCard, {}),
+        h("hr", { style: S.divider }),
+        h(PairSection, {})
       );
     }
 
@@ -330,6 +332,144 @@ window.__ModuleLoader__.load({
               "使用说明：1) 点「生成地址」；2) 手机打开 DSH Remote，把地址粘贴到服务器地址；3) 免费版地址每次生成都会变，重新生成后需重新填写。"),
             h("div", { style: S.label2() }, "（本插件为个人自用，非官方功能。）")
           )) : null
+      );
+    }
+
+    // ---------- 移动端 App 配对确认（全局对话框 + 配对管理） ----------
+    var pairDialogEl = null;
+    var pairDialogShown = false;
+
+    function removePairDialog() {
+      if (pairDialogEl && pairDialogEl.parentNode) pairDialogEl.parentNode.removeChild(pairDialogEl);
+      pairDialogEl = null;
+      pairDialogShown = false;
+    }
+
+    function showPairDialog(pendingDevice, respond) {
+      removePairDialog();
+      pairDialogShown = true;
+
+      var overlay = document.createElement("div");
+      overlay.setAttribute("data-dsh-pair-dialog", "1");
+      overlay.style.cssText = [
+        "position:fixed", "inset:0", "z-index:2147483000",
+        "display:flex", "align-items:center", "justify-content:center",
+        "background:rgba(13,27,42,.62)", "backdrop-filter:blur(4px)",
+        "padding:20px",
+      ].join(";");
+
+      var card = document.createElement("div");
+      card.style.cssText = [
+        "background:var(--dsw-alias-bg-layer-1)", "border:1px solid var(--dsw-alias-border-l1)",
+        "border-radius:14px", "padding:24px", "max-width:380px", "width:100%",
+        "box-shadow:0 20px 60px rgba(0,0,0,.5)", "color:var(--dsw-alias-label-primary)",
+      ].join(";");
+
+      var title = document.createElement("div");
+      title.textContent = "🔐 手机设备「" + pendingDevice.name + "」请求首次连接";
+      title.style.cssText = "font-size:15px;font-weight:600;line-height:1.5;margin-bottom:8px";
+
+      var sub = document.createElement("div");
+      sub.textContent = "允许该设备远程控制这台电脑？";
+      sub.style.cssText = "font-size:13px;color:var(--dsw-alias-label-secondary);line-height:1.6;margin-bottom:18px";
+
+      var row = document.createElement("div");
+      row.style.cssText = "display:flex;gap:10px;justify-content:flex-end";
+
+      function mkBtn(label, primary) {
+        var b = document.createElement("button");
+        b.textContent = label;
+        b.style.cssText = primary
+          ? "border:1px solid var(--dsw-alias-brand-primary);border-radius:6px;background:var(--dsw-alias-brand-primary);color:#0D1B2A;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer"
+          : "border:1px solid var(--dsw-alias-border-l1);border-radius:6px;background:transparent;color:var(--dsw-alias-label-primary);padding:7px 16px;font-size:13px;cursor:pointer";
+        return b;
+      }
+
+      var allowBtn = mkBtn("允许", true);
+      var denyBtn = mkBtn("拒绝", false);
+
+      allowBtn.onclick = function () { allowBtn.disabled = true; denyBtn.disabled = true; respond(pendingDevice.deviceId, "approve"); };
+      denyBtn.onclick = function () { allowBtn.disabled = true; denyBtn.disabled = true; respond(pendingDevice.deviceId, "deny"); };
+
+      row.appendChild(allowBtn);
+      row.appendChild(denyBtn);
+      card.appendChild(title);
+      card.appendChild(sub);
+      card.appendChild(row);
+      overlay.appendChild(card);
+      document.body.appendChild(overlay);
+      pairDialogEl = overlay;
+    }
+
+    function PairSection() {
+      var [devices, setDevices] = useState(null);
+      var [busyId, setBusyId] = useState(null);
+      var pairTimer = useRef(null);
+
+      function refreshList() {
+        fetchJson("/api/remote-access/pair/list")
+          .then(function (r) { if (r && r.ok) setDevices(r.devices || []); })
+          .catch(function () {});
+      }
+
+      function respond(deviceId, outcome) {
+        fetchJson("/api/remote-access/pair/respond", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ deviceId: deviceId, outcome: outcome }),
+        })
+          .then(function () { removePairDialog(); refreshList(); })
+          .catch(function () { removePairDialog(); });
+      }
+
+      function pollStatus() {
+        fetchJson("/api/remote-access/pair/status")
+          .then(function (r) {
+            if (!r || !r.ok) return;
+            var pendingDevice = r.pendingDevice || null;
+            if (r.state === "pending" && pendingDevice && !pairDialogShown) {
+              showPairDialog(pendingDevice, respond);
+            } else if (r.state !== "pending" && pairDialogShown) {
+              removePairDialog();
+            }
+          })
+          .catch(function () {});
+      }
+
+      useEffect(function () {
+        refreshList();
+        pollStatus();
+        pairTimer.current = setInterval(pollStatus, 2000);
+        return function () {
+          clearInterval(pairTimer.current);
+          removePairDialog();
+        };
+      }, []);
+
+      function revoke(deviceId) {
+        setBusyId(deviceId);
+        fetchJson("/api/remote-access/pair/revoke", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ deviceId: deviceId }),
+        })
+          .then(function () { refreshList(); })
+          .catch(function () {})
+          .finally(function () { setBusyId(null); });
+      }
+
+      return h("div", { style: S.root },
+        h("div", { style: S.title }, "配对管理（手机 App）"),
+        h("div", { style: S.sub }, "手机 App 首次连接本电脑时，需在此确认允许；已允许的设备可随时撤销，撤销后下次连接需重新确认。"),
+        h("div", { style: S.card },
+          devices === null ? h("div", { style: S.sub }, "加载中…") :
+            devices.length === 0 ? h("div", { style: S.sub }, "暂无已配对设备。") :
+              devices.map(function (d) {
+                return h("div", { key: d.deviceId, style: Object.assign({}, S.row, { justifyContent: "space-between", marginBottom: 8 }) },
+                  h("div", { style: S.label }, d.name || d.deviceId),
+                  h("button", { style: S.btn, disabled: busyId === d.deviceId, onClick: function () { revoke(d.deviceId); } }, busyId === d.deviceId ? "撤销中…" : "撤销"));
+              })
+        )
       );
     }
 

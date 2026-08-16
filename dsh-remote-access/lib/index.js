@@ -2,7 +2,7 @@
 // 微信桥：扫码登录微信 iLink Bot → 微信里给自己发消息遥控 DSH（会话注入、流式回复、审批、图片）
 // cpolar：网页版备选。内置一键安装（官网自动下载）、注册引导、authtoken 保存，无需手动装 cpolar
 import { execFile } from "node:child_process";
-import { readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
@@ -288,6 +288,97 @@ export const apply = (ctx) => {
       } catch (err) {
         json(res, 200, { ok: false, error: String(err?.message ?? err) });
       }
+    },
+  });
+
+  // ---------- 移动端首次配对（一次性握手确认） ----------
+  const pairFile = join(home, "remote-access", "paired.json");
+  const readPaired = () => {
+    try { return JSON.parse(readFileSync(pairFile, "utf8")).devices ?? []; }
+    catch { return []; }
+  };
+  const writePaired = (devices) => {
+    try {
+      mkdirSync(join(home, "remote-access"), { recursive: true });
+      writeFileSync(pairFile, JSON.stringify({ devices }, null, 2), "utf8");
+    } catch (e) { log("paired.json 写入失败", e); }
+  };
+  let pendingPair = null; // { deviceId, name, at, timer }
+
+  const clearPending = () => {
+    if (pendingPair?.timer) clearTimeout(pendingPair.timer);
+    pendingPair = null;
+  };
+
+  reg({
+    kind: "exact",
+    path: "/api/remote-access/pair/request",
+    handler: async (req, res) => {
+      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
+      const body = await readBody(req);
+      const deviceId = String(body.deviceId || "").trim();
+      const deviceName = String(body.deviceName || "未知设备").trim();
+      if (!deviceId) return json(res, 400, { error: "missing deviceId" });
+      if (readPaired().some((d) => d.deviceId === deviceId)) {
+        return json(res, 200, { ok: true, state: "paired" });
+      }
+      if (!pendingPair || pendingPair.deviceId !== deviceId) {
+        clearPending();
+        pendingPair = { deviceId, name: deviceName, at: Date.now(), timer: null };
+        pendingPair.timer = setTimeout(() => { pendingPair = null; }, 120000);
+      }
+      json(res, 200, { ok: true, state: "pending" });
+    },
+  });
+
+  reg({
+    kind: "exact",
+    path: "/api/remote-access/pair/status",
+    handler: async (req, res) => {
+      if (req.method !== "GET") return json(res, 405, { error: "method not allowed" });
+      json(res, 200, { ok: true, state: pendingPair ? "pending" : "none", pendingDevice: pendingPair ?? null });
+    },
+  });
+
+  reg({
+    kind: "exact",
+    path: "/api/remote-access/pair/respond",
+    handler: async (req, res) => {
+      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
+      const body = await readBody(req);
+      const deviceId = String(body.deviceId || "").trim();
+      const outcome = String(body.outcome || "");
+      if (!pendingPair || pendingPair.deviceId !== deviceId) {
+        return json(res, 200, { ok: false, error: "no pending request" });
+      }
+      if (outcome === "approve") {
+        const devices = readPaired().filter((d) => d.deviceId !== deviceId);
+        devices.push({ deviceId, name: pendingPair.name, at: Date.now() });
+        writePaired(devices);
+      }
+      clearPending();
+      json(res, 200, { ok: true, state: outcome === "approve" ? "approved" : "denied" });
+    },
+  });
+
+  reg({
+    kind: "exact",
+    path: "/api/remote-access/pair/list",
+    handler: async (req, res) => {
+      if (req.method !== "GET") return json(res, 405, { error: "method not allowed" });
+      json(res, 200, { ok: true, devices: readPaired() });
+    },
+  });
+
+  reg({
+    kind: "exact",
+    path: "/api/remote-access/pair/revoke",
+    handler: async (req, res) => {
+      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
+      const body = await readBody(req);
+      const deviceId = String(body.deviceId || "").trim();
+      writePaired(readPaired().filter((d) => d.deviceId !== deviceId));
+      json(res, 200, { ok: true });
     },
   });
 };
