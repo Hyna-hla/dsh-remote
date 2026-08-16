@@ -72,4 +72,25 @@ class SettingsStoreSecretTest {
         assertEquals("secret123", decryptProfileFromStorage(aStored, box).proxy!!.password)
         assertEquals("pwB", decryptProfileFromStorage(afterB.first { it.id == "pb" }, box).proxy!!.password)
     }
+
+    @Test
+    fun keyLossCiphertextNotTreatedAsPlaintext() {
+        // 模拟密钥丢失：假箱对 28+ 字节 Base64 密文解密失败
+        val fake = object : SecretBox {
+            override fun encrypt(plain: String): String = java.util.Base64.getEncoder().encodeToString(
+                ("0123456789012345678901234567" + plain).toByteArray())
+            override fun decrypt(enc: String): String? = null // 一律失败 = 密钥丢失
+        }
+        val stored = encryptProfileForStorage(profileWithProxy(), fake)
+        val read = decryptProfileFromStorage(stored, fake)
+        assertEquals(stored.proxy!!.password, read.proxy!!.password) // 保留密文形态，不回退
+    }
+
+    @Test
+    fun legacyPlaintextStillFallsBack() {
+        // 旧明文（短、Base64 解码后 <28 字节）→ 回退原文（现有 FakeBox 行为已覆盖，再显式断言一次）
+        val legacy = profileWithProxy() // password = "secret123"（9 字节）
+        val dec = decryptProfileFromStorage(legacy, FakeBox())
+        assertEquals("secret123", dec.proxy!!.password)
+    }
 }

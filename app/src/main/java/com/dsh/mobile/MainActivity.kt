@@ -79,15 +79,19 @@ class MainActivity : FragmentActivity() {
 
     private val settingsStore = SettingsStore(this)
     private var lastUnlockedAt = 0L
-    private var locked by mutableStateOf(false)
+    // 三态：unknown（异步读开关前的不透明占位，杜绝冷启动可交互窗口）/ locked / unlocked
+    private var lockState by mutableStateOf<String>("unknown")
 
     override fun onStart() {
         super.onStart()
         DshApplication.isAppInForeground = true
         lifecycleScope.launch {
-            if (settingsStore.biometricLockEnabled.first()) {
-                if (shouldLock(lastUnlockedAt, System.currentTimeMillis(), true)) locked = true
-            } else locked = false
+            val enabled = settingsStore.biometricLockEnabled.first()
+            lockState = if (enabled && shouldLock(lastUnlockedAt, System.currentTimeMillis(), true)) {
+                "locked"
+            } else {
+                "unlocked"
+            }
         }
     }
 
@@ -240,14 +244,21 @@ class MainActivity : FragmentActivity() {
                         )
                     }
 
-                    // — 生物锁覆盖层：锁态下全屏遮罩，解锁前阻断一切交互 —
-                    if (locked) {
-                        BiometricLockOverlay(
+                    // — 生物锁覆盖层：内容层之上，锁态下全屏遮罩，解锁前阻断一切交互；
+                    //   unknown 阶段用不透明占位覆盖，避免异步读开关期间出现可交互窗口 —
+                    when (lockState) {
+                        "unknown" -> Box(
+                            Modifier
+                                .fillMaxSize()
+                                .background(MaterialTheme.colorScheme.background),
+                        )
+                        "locked" -> BiometricLockOverlay(
                             onUnlocked = {
                                 lastUnlockedAt = System.currentTimeMillis()
-                                locked = false
+                                lockState = "unlocked"
                             },
                         )
+                        "unlocked" -> Unit
                     }
 
                     // — 资源更新提示层（启动自动检测；无更新静默，有更新询问是否下载）—

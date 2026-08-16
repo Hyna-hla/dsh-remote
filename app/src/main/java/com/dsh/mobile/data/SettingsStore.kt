@@ -303,10 +303,18 @@ internal fun upsertProfileInStore(
 ): List<HostProfile> =
     current.filterNot { it.id == incoming.id } + encryptProfileForStorage(incoming, box)
 
-/** 读出后解密代理密码；解密失败 = 旧明文，按原样读（下次写重加密）。 */
+/** 读出后解密代理密码；解密失败时按形态判定：合法 Base64 且长度>=28 视为「密文但密钥丢失」保留密文，否则按旧明文迁移。 */
 internal fun decryptProfileFromStorage(p: HostProfile, box: SecretBox): HostProfile {
     val pw = p.proxy?.password
     if (pw.isNullOrBlank()) return p
-    val plain = box.decrypt(pw) ?: pw
-    return p.copy(proxy = p.proxy.copy(password = plain))
+    val plain = box.decrypt(pw)
+    if (plain != null) return p.copy(proxy = p.proxy.copy(password = plain))
+    // 解密失败：形态判定——合法 Base64 且长度>=28（12 IV + 16 tag）视为「密文但密钥丢失」，
+    // 保留密文（UI 显示乱码，用户重输密码后自然重加密）；否则按旧明文迁移。
+    // 用 java.util.Base64（Android API 26+，minSdk 29 可用；JVM 单测也可用，android.util.Base64 在单测被 mock 抛异常）。
+    val looksCiphertext = runCatching {
+        val raw = java.util.Base64.getDecoder().decode(pw)
+        raw.size >= 28
+    }.getOrDefault(false)
+    return if (looksCiphertext) p else p.copy(proxy = p.proxy.copy(password = pw))
 }
