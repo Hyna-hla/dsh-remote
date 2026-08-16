@@ -29,9 +29,18 @@ class PairingCoordinator(
                     return@collect
                 }
                 val profile = connection.currentProfile() ?: return@collect
-                if (profile.paired || handshakingFor == profile.id) return@collect
+                if (profile.paired) {
+                    val stillPaired = runCatching {
+                        HttpPairingRpc(connection, OkHttpClientFactory.build(profile).first)
+                            .check(settingsStore.ensureDeviceId())
+                    }.getOrDefault(true) // 回查失败保守视为仍配对（网络错不打扰）
+                    if (stillPaired) return@collect
+                    settingsStore.upsertProfile(profile.copy(paired = false))
+                    // 继续走握手（不 return）
+                }
+                if (handshakingFor == profile.id) return@collect
                 handshakingFor = profile.id
-                val outcome = runCatching {
+                val result = runCatching {
                     // 握手前已取得 profile，直接用其 unary client（避免不可达的兜底分支）
                     val client = OkHttpClientFactory.build(profile).first
                     val rpc = HttpPairingRpc(connection, client)
@@ -40,13 +49,17 @@ class PairingCoordinator(
                             settingsStore.ensureDeviceId(),
                             settingsStore.deviceName.first().ifBlank { android.os.Build.MODEL },
                         )
-                }.getOrElse { PairingOutcome.SKIPPED }
-                when (outcome) {
-                    PairingOutcome.PAIRED, PairingOutcome.APPROVED, PairingOutcome.SKIPPED -> {
+                }.getOrElse { null }
+                when (result) {
+                    null -> {
+                        _events.tryEmit("配对请求失败（网络或服务器错误），下次连接时重试")
+                    }
+                    PairingOutcome.PAIRED, PairingOutcome.APPROVED -> {
                         settingsStore.upsertProfile(profile.copy(paired = true))
-                        if (outcome == PairingOutcome.SKIPPED) {
-                            _events.tryEmit("PC 端插件未开启配对确认，已跳过（可在插件更新后重启验证）")
-                        }
+                    }
+                    PairingOutcome.SKIPPED -> {
+                        settingsStore.upsertProfile(profile.copy(paired = true))
+                        _events.tryEmit("PC 端插件未开启配对确认，已跳过（可在插件更新后重启验证）")
                     }
                     PairingOutcome.DENIED -> {
                         _events.tryEmit("PC 端拒绝了本次配对，连接已断开")

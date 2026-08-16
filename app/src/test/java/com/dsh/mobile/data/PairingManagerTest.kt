@@ -34,9 +34,20 @@ class PairingManagerTest {
     }
 
     @Test
-    fun requestThrowsIsSkipped() = runTest(UnconfinedTestDispatcher()) {
-        val mgr = PairingManager(FakeRpc(requestResult = { throw IllegalStateException("404") }), backgroundScope)
+    fun requestReturnsSkipLiteral() = runTest(UnconfinedTestDispatcher()) {
+        val mgr = PairingManager(FakeRpc(requestResult = { "skip" }), backgroundScope)
         assertEquals(PairingOutcome.SKIPPED, mgr.ensurePaired("d1", "iPhone"))
+    }
+
+    @Test
+    fun requestThrowsOtherThanUnavailable() = runTest(UnconfinedTestDispatcher()) {
+        val mgr = PairingManager(FakeRpc(requestResult = { throw IllegalStateException("HTTP 500") }), backgroundScope)
+        try {
+            mgr.ensurePaired("d1", "iPhone")
+            org.junit.Assert.fail("ensurePaired 应重抛非 CancellationException，而非吞成 SKIPPED")
+        } catch (e: IllegalStateException) {
+            assertEquals("HTTP 500", e.message)
+        }
     }
 
     @Test

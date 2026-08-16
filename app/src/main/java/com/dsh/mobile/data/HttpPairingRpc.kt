@@ -24,7 +24,11 @@ class HttpPairingRpc(
             .build()
         client.newCall(req).execute().use { resp ->
             val text = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}")
+            if (!resp.isSuccessful) {
+                // 404/410 = 插件未更新（旧版无该路由），spec 降级为「跳过」；其余（5xx/超时）按瞬断抛异常
+                if (resp.code == 404 || resp.code == 410) return@withContext "skip"
+                throw IllegalStateException("HTTP ${resp.code}")
+            }
             JSONObject(text).optString("state", "")
         }
     }
@@ -44,4 +48,18 @@ class HttpPairingRpc(
 
     override suspend fun status(): String =
         get("/api/remote-access/pair/status")
+
+    /** 回查该设备在 PC 端是否仍配对（撤销后 App 重新握手）；失败抛异常由调用方 runCatching 兜底。 */
+    suspend fun check(deviceId: String): Boolean = withContext(Dispatchers.IO) {
+        val encoded = java.net.URLEncoder.encode(deviceId, "UTF-8")
+        val req = Request.Builder()
+            .url(connection.baseUrl() + "/api/remote-access/pair/check?deviceId=" + encoded)
+            .get()
+            .build()
+        client.newCall(req).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}")
+            JSONObject(text).optBoolean("paired", false)
+        }
+    }
 }

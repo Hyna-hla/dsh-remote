@@ -376,6 +376,18 @@ export const apply = (ctx) => {
     },
   });
 
+  // 回查某设备是否仍配对（App 撤销后重新握手用）
+  reg({
+    kind: "exact",
+    path: "/api/remote-access/pair/check",
+    handler: async (req, res) => {
+      if (req.method !== "GET") return json(res, 405, { error: "method not allowed" });
+      const u = new URL(req.url, "http://localhost");
+      const deviceId = u.searchParams.get("deviceId") ?? "";
+      json(res, 200, { ok: true, paired: readPaired().some((d) => d.deviceId === deviceId) });
+    },
+  });
+
   reg({
     kind: "exact",
     path: "/api/remote-access/pair/revoke",

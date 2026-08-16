@@ -25,10 +25,9 @@ class PairingManager(
             rpc.request(deviceId, deviceName)
         } catch (e: CancellationException) {
             throw e
-        } catch (e: Exception) {
-            return PairingOutcome.SKIPPED // 插件未更新/网络错误 → 降级
         }
         if (initial == "paired") return PairingOutcome.PAIRED
+        if (initial == "skip") return PairingOutcome.SKIPPED // 404/410 = 插件未更新，spec 降级
         repeat(MAX_ATTEMPTS) {
             delay(POLL_INTERVAL_MS)
             val s = try {
