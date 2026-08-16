@@ -1,5 +1,6 @@
 # Gradle
 .gradle/
+.gradle-home/
 build/
 !**/src/**/build/
 
@@ -19,7 +20,7 @@ build-log.txt
 # OS
 .DS_Store
 Thumbs.db
-# ´óÌå»ý debug °²×°°ü²»½ø²Ö¿â£¨>50MB£¬×ß±¾µØÁôµµ / Release ¸½¼þ / Play£©
+# ï¿½ï¿½ï¿½ï¿½ï¿½ debug ï¿½ï¿½×°ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¿â£¨>50MBï¿½ï¿½ï¿½ß±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ / Release ï¿½ï¿½ï¿½ï¿½ / Playï¿½ï¿½
 release/*.apk
 !release/DSH-Remote-v1.0.15-min.apk
 !release/DSH-Remote-v1.0.22-min.apk
