@@ -94,6 +94,39 @@ fun MarkdownText(
                     }
                 }
 
+                is MdBlock.Ordered -> {
+                    Row(Modifier.fillMaxWidth()) {
+                        Text(
+                            "${block.number}.  ",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = DshBrandSoft,
+                        )
+                        Text(
+                            text = renderInline(block.text),
+                            style = MaterialTheme.typography.bodyMedium,
+                            overflow = TextOverflow.Clip,
+                        )
+                    }
+                }
+
+                is MdBlock.Quote -> {
+                    Row(Modifier.fillMaxWidth()) {
+                        Box(
+                            Modifier
+                                .width(3.dp)
+                                .height(18.dp)
+                                .background(DshBrandSoft.copy(alpha = 0.5f), RoundedCornerShape(2.dp))
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            text = renderInline(block.text),
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            ),
+                        )
+                    }
+                }
+
                 is MdBlock.Paragraph -> {
                     if (block.text.isNotBlank()) {
                         Text(
@@ -211,8 +244,12 @@ private sealed interface MdBlock {
     data class Heading(val level: Int, val text: String) : MdBlock
     data class Code(val text: String, val lang: String = "") : MdBlock
     data class Bullet(val text: String) : MdBlock
+    data class Ordered(val number: Int, val text: String) : MdBlock
+    data class Quote(val text: String) : MdBlock
     data class Paragraph(val text: String) : MdBlock
 }
+
+private val ORDERED_LIST_RE = Regex("""^(d{1,3})[.)]s+(.*)$""")
 
 private fun parseMarkdownBlocks(text: String): List<MdBlock> {
     val lines = text.split("\n")
@@ -248,6 +285,24 @@ private fun parseMarkdownBlocks(text: String): List<MdBlock> {
             line.startsWith("- ") || line.startsWith("* ") -> {
                 blocks.add(MdBlock.Bullet(line.substring(2).trim()))
                 i++
+            }
+
+            // 有序列表：1. xxx / 2) xxx（编号透传，保持模型给的序号）
+            ORDERED_LIST_RE.containsMatchIn(line) -> {
+                val m = ORDERED_LIST_RE.find(line)!!
+                blocks.add(MdBlock.Ordered(m.groupValues[1].toInt(), m.groupValues[2].trim()))
+                i++
+            }
+
+            // 引用块：> xxx（左侧品牌色竖条 + 弱化文字）
+            line.startsWith("> ") || line == ">" -> {
+                val buf = StringBuilder(line.removePrefix(">").trim())
+                i++
+                while (i < lines.size && (lines[i].startsWith("> ") || lines[i] == ">")) {
+                    buf.append("\n").append(lines[i].removePrefix(">").trim())
+                    i++
+                }
+                blocks.add(MdBlock.Quote(buf.toString().trim()))
             }
 
             else -> {
