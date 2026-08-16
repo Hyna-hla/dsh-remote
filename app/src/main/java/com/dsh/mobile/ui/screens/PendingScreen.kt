@@ -13,6 +13,7 @@ import androidx.compose.ui.unit.dp
 import com.dsh.mobile.data.*
 import com.dsh.mobile.ui.components.QuestionCard
 import com.dsh.mobile.ui.theme.DshShape
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -37,7 +38,13 @@ fun PendingScreen(
 
     suspend fun runBatch(label: String, block: suspend () -> List<String>) {
         busy = true
-        val failures = runCatching { block() }.getOrElse { listOf(it.message ?: "unknown") }
+        val failures = try {
+            block()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            listOf(e.message ?: "unknown")
+        }
         busy = false
         if (failures.isNotEmpty()) {
             snackbar.showSnackbar("$label：${failures.size} 条失败 —— ${failures.first().take(80)}")
@@ -89,7 +96,7 @@ fun PendingScreen(
                             ) { Text("全部拒绝") }
                         }
                     }
-                    items(approvals, key = { "ap-" + it.approvalId }) { a ->
+                    items(approvals, key = { "ap-" + it.sessionId + "-" + it.approvalId }) { a ->
                         Card(Modifier.fillMaxWidth().padding(vertical = 6.dp), shape = DshShape.card) {
                             Column(Modifier.padding(14.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {

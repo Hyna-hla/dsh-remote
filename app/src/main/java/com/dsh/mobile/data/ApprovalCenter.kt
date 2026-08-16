@@ -1,5 +1,6 @@
 package com.dsh.mobile.data
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,6 +44,9 @@ class ApprovalCenter(
     private val mutex = Mutex()
     private val _items = MutableStateFlow<List<PendingItem>>(emptyList())
 
+    /** 已解决项的墓碑（键同 itemKey 格式），阻止乐观回滚「复活」并发已解决的项。 */
+    private val resolvedTombstones = mutableSetOf<String>()
+
     /** 已排序的待办列表（唯一事实源） */
     val items: StateFlow<List<PendingItem>> = _items
     val pendingCount: StateFlow<Int> =
@@ -74,6 +78,7 @@ class ApprovalCenter(
     private suspend fun onEvent(e: DshConnection.Event) {
         when (e) {
             is DshConnection.Event.ApprovalRequested -> mutate { l ->
+                resolvedTombstones -= "a:${e.sessionId}:${e.approvalId}"
                 l.removeAll { it is PendingItem.Approval && it.sessionId == e.sessionId && it.approvalId == e.approvalId }
                 l += PendingItem.Approval(
                     e.sessionId, e.approvalId, e.toolName, e.reason, e.callId,
@@ -81,13 +86,18 @@ class ApprovalCenter(
                 )
             }
             is DshConnection.Event.ApprovalResolved -> mutate { l ->
+                resolvedTombstones += "a:${e.sessionId}:${e.approvalId}"
+                if (resolvedTombstones.size > 200) resolvedTombstones.clear()
                 l.removeAll { it is PendingItem.Approval && it.sessionId == e.sessionId && it.approvalId == e.approvalId }
             }
             is DshConnection.Event.QuestionRequested -> mutate { l ->
+                resolvedTombstones -= "q:${e.sessionId}"
                 l.removeAll { it is PendingItem.Question && it.sessionId == e.sessionId }
                 l += PendingItem.Question(e.sessionId, e.questions, System.currentTimeMillis(), false)
             }
             is DshConnection.Event.QuestionResolved -> mutate { l ->
+                resolvedTombstones += "q:${e.sessionId}"
+                if (resolvedTombstones.size > 200) resolvedTombstones.clear()
                 l.removeAll { it is PendingItem.Question && it.sessionId == e.sessionId }
             }
             is DshConnection.Event.SessionEvent ->
@@ -132,7 +142,7 @@ class ApprovalCenter(
             answerApprovalFn(sessionId, approvalId, outcome)
         } catch (e: Exception) {
             mutate { l ->
-                if (l.none { it is PendingItem.Approval && it.sessionId == sessionId && it.approvalId == approvalId }) l += item
+                if (itemKey(item) !in resolvedTombstones && l.none { itemKey(it) == itemKey(item) }) l += item
             }
             throw e
         }
@@ -152,7 +162,7 @@ class ApprovalCenter(
             answerQuestionsFn(sessionId, answers)
         } catch (e: Exception) {
             mutate { l ->
-                if (l.none { it is PendingItem.Question && it.sessionId == sessionId }) l += item
+                if (itemKey(item) !in resolvedTombstones && l.none { itemKey(it) == itemKey(item) }) l += item
             }
             throw e
         }
@@ -165,7 +175,7 @@ class ApprovalCenter(
             .map { it.sessionId to it.approvalId }
         val failures = mutableListOf<String>()
         for ((sid, aid) in snaps) {
-            try { allow(sid, aid) } catch (e: Exception) { failures += e.message ?: "unknown" }
+            try { allow(sid, aid) } catch (e: CancellationException) { throw e } catch (e: Exception) { failures += e.message ?: "unknown" }
         }
         return failures
     }
@@ -175,7 +185,7 @@ class ApprovalCenter(
             .map { it.sessionId to it.approvalId }
         val failures = mutableListOf<String>()
         for ((sid, aid) in snaps) {
-            try { reject(sid, aid) } catch (e: Exception) { failures += e.message ?: "unknown" }
+            try { reject(sid, aid) } catch (e: CancellationException) { throw e } catch (e: Exception) { failures += e.message ?: "unknown" }
         }
         return failures
     }
@@ -184,7 +194,7 @@ class ApprovalCenter(
         val sessions = items.value.filterIsInstance<PendingItem.Question>().map { it.sessionId }
         val failures = mutableListOf<String>()
         for (sid in sessions) {
-            try { skipQuestions(sid) } catch (e: Exception) { failures += e.message ?: "unknown" }
+            try { skipQuestions(sid) } catch (e: CancellationException) { throw e } catch (e: Exception) { failures += e.message ?: "unknown" }
         }
         return failures
     }

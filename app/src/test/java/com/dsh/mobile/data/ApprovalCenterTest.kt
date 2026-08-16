@@ -127,6 +127,23 @@ class ApprovalCenterTest {
     }
 
     @Test
+    fun resolvedThenFailureDoesNotResurrect() = runTest(UnconfinedTestDispatcher()) {
+        val h = Harness()
+        // 应答在乐观移除之后、回滚之前抛出；期间并发解决该项（墓碑生效）
+        h.answerApproval = { _, _, _ ->
+            events.emit(DshConnection.Event.ApprovalResolved("s1", "a1", "allowed-once"))
+            throw ApiException("rpc down")
+        }
+        val c = center(h, backgroundScope)
+        events.emit(DshConnection.Event.ApprovalRequested("s1", "a1", "bash", null, null))
+        assertEquals(1, c.items.value.size)
+        var failed = false
+        try { c.allow("s1", "a1") } catch (e: Exception) { failed = true }
+        assertTrue(failed)
+        assertTrue(c.items.value.isEmpty()) // 墓碑阻止回滚复活
+    }
+
+    @Test
     fun batchCollectsFailures() = runTest(UnconfinedTestDispatcher()) {
         val h = Harness()
         h.answerApproval = { _, aid, _ -> if (aid == "a2") throw ApiException("nope") }
