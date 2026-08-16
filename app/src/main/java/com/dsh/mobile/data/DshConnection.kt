@@ -552,6 +552,22 @@ class DshConnection(private val appContext: Context? = null) {
         })
     }
 
+    /**
+     * commands/list：当前会话可用的斜杠命令 [{name, description, input:{hint}}]。
+     * 响应非法/连接失败 → 空列表（面板显示「没有可用命令」）。
+     * 端点名内联（brief 提交文件集不含 DshProtocol.kt，未新增 DshEndpoints 常量）。
+     */
+    suspend fun commandsList(sessionId: String): List<SlashCommand> {
+        return try {
+            val value = call("commands/list", buildJsonObject {
+                put("agentId", sessionId)
+            })
+            parseCommandsList(value)
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
     suspend fun history(sessionId: String, beforeSeq: Long? = null, maxMessages: Int? = null): HistoryValue {
         val value = call(DshEndpoints.SESSION_HISTORY, buildJsonObject {
             put("sessionId", sessionId)

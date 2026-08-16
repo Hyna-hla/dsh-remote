@@ -47,6 +47,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -766,6 +767,10 @@ fun SessionScreen(
     var skillsDialog by remember { mutableStateOf(false) }
     var skills by remember { mutableStateOf<List<DshConnection.SkillEntry>>(emptyList()) }
     var skillsLoading by remember { mutableStateOf(false) }
+    // S7 slash 命令面板：commands/list + 执行反馈
+    var commandsDialog by remember { mutableStateOf(false) }
+    var commands by remember { mutableStateOf<List<SlashCommand>>(emptyList()) }
+    var commandsLoading by remember { mutableStateOf(false) }
     var actionError by remember { mutableStateOf<String?>(null) }
     var workspaceLabel by remember { mutableStateOf<String?>(null) }
     var autoModelEnabled by remember { mutableStateOf(true) }
@@ -1064,6 +1069,16 @@ fun SessionScreen(
                 }
                 IconButton(onClick = { modeDialog = true }) {
                     Icon(Icons.Default.Security, null)
+                }
+                IconButton(onClick = {
+                    commandsDialog = true
+                    commandsLoading = true
+                    scope.launch {
+                        commands = connection.commandsList(sessionId)
+                        commandsLoading = false
+                    }
+                }) {
+                    Icon(Icons.Default.Terminal, "斜杠命令")
                 }
                 if (running) {
                     IconButton(onClick = { stopRun() }) {
@@ -1494,6 +1509,34 @@ fun SessionScreen(
                 onPick = { name ->
                     input = input + "请使用 $name 技能："
                     skillsDialog = false
+                },
+            )
+        }
+
+        // 斜杠命令面板（S7）：点击命令 → commands/execute 直接执行；
+        // 响应 {commandId, result:{kind, text}}——kind=error 红字轻提示，其余 Toast 展示输出
+        if (commandsDialog) {
+            CommandsDialog(
+                commands = commands,
+                loading = commandsLoading,
+                onDismiss = { commandsDialog = false },
+                onPick = { cmd ->
+                    commandsDialog = false
+                    scope.launch {
+                        try {
+                            val result = connection.executeCommand(sessionId, cmd.name)
+                            val r = runCatching { result.jsonObject["result"]?.jsonObject }.getOrNull()
+                            val kind = r?.get("kind")?.jsonPrimitive?.contentOrNull
+                            val text = r?.get("text")?.jsonPrimitive?.contentOrNull
+                            if (kind == "error") {
+                                actionError = text ?: "命令执行失败"
+                            } else {
+                                Toast.makeText(context, text ?: "命令已执行", Toast.LENGTH_SHORT).show()
+                            }
+                        } catch (e: Exception) {
+                            actionError = e.message
+                        }
+                    }
                 },
             )
         }
@@ -2180,6 +2223,78 @@ private fun SkillsDialog(
                                     s.description,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+    )
+}
+
+// ──────────────────────────── 斜杠命令面板（S7） ────────────────────────────
+
+@Composable
+private fun CommandsDialog(
+    commands: List<SlashCommand>,
+    loading: Boolean,
+    onDismiss: () -> Unit,
+    onPick: (SlashCommand) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("斜杠命令") },
+        text = {
+            if (loading) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator(Modifier.size(24.dp))
+                }
+            } else if (commands.isEmpty()) {
+                Text("没有可用命令", style = MaterialTheme.typography.bodySmall)
+            } else {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    commands.forEach { c ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onPick(c) }
+                                .padding(vertical = 6.dp),
+                        ) {
+                            Text(
+                                c.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            c.description?.takeIf { it.isNotBlank() }?.let { desc ->
+                                Text(
+                                    desc,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            // hint 作占位提示（斜体低强调；无 description 时兜底说明）
+                            c.hint?.takeIf { it.isNotBlank() }?.let { hint ->
+                                Text(
+                                    hint,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontStyle = FontStyle.Italic,
+                                    color = MaterialTheme.colorScheme.tertiary,
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
                                 )
