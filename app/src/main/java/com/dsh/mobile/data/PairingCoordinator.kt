@@ -53,7 +53,7 @@ class PairingCoordinator(
                         connection.disconnect()
                     }
                     PairingOutcome.TIMEOUT -> {
-                        _events.tryEmit("配对确认超时，连接已断开")
+                        _events.tryEmit("配对确认超时（请确认 PC 端已打开 设置→远程控制 页面），连接已断开")
                         connection.disconnect()
                     }
                 }

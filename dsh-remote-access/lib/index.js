@@ -303,10 +303,12 @@ export const apply = (ctx) => {
       writeFileSync(pairFile, JSON.stringify({ devices }, null, 2), "utf8");
     } catch (e) { log("paired.json 写入失败", e); }
   };
-  let pendingPair = null; // { deviceId, name, at, timer }
+  let pendingPair = null; // { deviceId, name, at, outcome }（JSON 安全；120s 定时器单独持有）
+  let pendingTimer = null;
 
   const clearPending = () => {
-    if (pendingPair?.timer) clearTimeout(pendingPair.timer);
+    if (pendingTimer) clearTimeout(pendingTimer);
+    pendingTimer = null;
     pendingPair = null;
   };
 
@@ -324,8 +326,12 @@ export const apply = (ctx) => {
       }
       if (!pendingPair || pendingPair.deviceId !== deviceId) {
         clearPending();
-        pendingPair = { deviceId, name: deviceName, at: Date.now(), timer: null };
-        pendingPair.timer = setTimeout(() => { pendingPair = null; }, 120000);
+        pendingPair = { deviceId, name: deviceName, at: Date.now(), outcome: null };
+        pendingTimer = setTimeout(() => { pendingPair = null; pendingTimer = null; }, 120000);
+      } else {
+        // 同一设备重新发起握手：清除上一次 approve/deny 结果，恢复 pending
+        pendingPair.outcome = null;
+        pendingPair.name = deviceName;
       }
       json(res, 200, { ok: true, state: "pending" });
     },
@@ -336,7 +342,7 @@ export const apply = (ctx) => {
     path: "/api/remote-access/pair/status",
     handler: async (req, res) => {
       if (req.method !== "GET") return json(res, 405, { error: "method not allowed" });
-      json(res, 200, { ok: true, state: pendingPair ? "pending" : "none", pendingDevice: pendingPair ?? null });
+      json(res, 200, { ok: true, state: pendingPair?.outcome ?? (pendingPair ? "pending" : "none"), pendingDevice: pendingPair ?? null });
     },
   });
 
@@ -356,8 +362,8 @@ export const apply = (ctx) => {
         devices.push({ deviceId, name: pendingPair.name, at: Date.now() });
         writePaired(devices);
       }
-      clearPending();
-      json(res, 200, { ok: true, state: outcome === "approve" ? "approved" : "denied" });
+      pendingPair.outcome = outcome === "approve" ? "approved" : "denied";
+      json(res, 200, { ok: true, state: pendingPair.outcome });
     },
   });
 
