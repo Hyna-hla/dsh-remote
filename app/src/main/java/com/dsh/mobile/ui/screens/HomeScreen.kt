@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.rounded.PushPin
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -91,6 +92,9 @@ fun HomeScreen(
     var menuTarget by remember { mutableStateOf<String?>(null) }
     var listError by remember { mutableStateOf<String?>(null) }
     var pendingImages by remember { mutableStateOf<List<DshConnection.ImagePart>>(emptyList()) }
+    // STANDARD 分支顶栏搜索框状态（其余主题布局各自内部持有）
+    var stdSearchActive by remember { mutableStateOf(false) }
+    var stdSearchQuery by remember { mutableStateOf("") }
     val context = LocalContext.current
     val settingsStore = remember { SettingsStore(context) }
     val cache = remember { HistoryCache(context) }
@@ -224,6 +228,11 @@ fun HomeScreen(
     // 置顶集合变化（初次从 DataStore 加载 / 长按切换）→ 就地重排当前列表，置顶立即生效
     LaunchedEffect(pinnedIds) {
         sessions = sortSessionsWithPinned(sessions, pinnedIds)
+    }
+
+    // STANDARD 分支会话列表：置顶排序在前（sessions 已在 HomeScreen 层排好，此处幂等）→ 过滤在后
+    val stdFiltered = remember(sessions, pinnedIds, stdSearchQuery) {
+        filterSessions(sortSessionsWithPinned(sessions, pinnedIds), stdSearchQuery)
     }
 
     // 事件驱动的列表刷新（断线重连成功后立即补拉，避免列表停留在空态）
@@ -547,6 +556,9 @@ fun HomeScreen(
                 },
                 actions = {
                     PendingBell(pendingCount = pendingCount, onPending = onPending)
+                    IconButton(onClick = { stdSearchActive = !stdSearchActive }) {
+                        Icon(Icons.Rounded.Search, if (stdSearchActive) "关闭搜索" else "搜索会话")
+                    }
                     IconButton(onClick = onSettings) {
                         Icon(Icons.Default.Settings, null)
                     }
@@ -847,6 +859,16 @@ fun HomeScreen(
                 }
             }
 
+            if (stdSearchActive) {
+                SessionSearchField(
+                    query = stdSearchQuery,
+                    onQueryChange = { stdSearchQuery = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+            }
+
             listError?.let {
                 Text(
                     it,
@@ -906,7 +928,17 @@ fun HomeScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp),
                 ) {
-                    items(sessions, key = { "s_" + it.sessionId }) { s ->
+                    if (stdFiltered.isEmpty() && stdSearchQuery.isNotBlank()) {
+                        item(key = "no_match") {
+                            Text(
+                                "无匹配会话",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(16.dp),
+                            )
+                        }
+                    }
+                    items(stdFiltered, key = { "s_" + it.sessionId }) { s ->
                         Box {
                             SessionCard(
                                 session = s,
@@ -981,6 +1013,42 @@ private fun PendingBell(
         ) {
             Icon(Icons.Default.Notifications, contentDescription = "待办中心", tint = tint)
         }
+    }
+}
+
+/** 会话搜索框（ChatGPT 抽屉同款样式：胶囊底 + BasicTextField + 占位符）；颜色由各布局传入 */
+@Composable
+private fun SessionSearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    bg: Color = MaterialTheme.colorScheme.surfaceVariant,
+    textColor: Color = MaterialTheme.colorScheme.onSurface,
+    placeholderColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+) {
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = bg,
+        modifier = modifier,
+    ) {
+        BasicTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodyMedium.copy(color = textColor),
+            cursorBrush = SolidColor(textColor),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            decorationBox = { inner ->
+                Box {
+                    if (query.isEmpty()) {
+                        Text("搜索会话…", color = placeholderColor, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    inner()
+                }
+            },
+        )
     }
 }
 
@@ -1505,6 +1573,11 @@ private fun ClaudeHomeLayout(
     val scope = rememberCoroutineScope()
     val closeDrawer: () -> Unit = { scope.launch { drawerState.close() } }
     var menuTarget by remember { mutableStateOf<String?>(null) }
+    var searchQuery by remember { mutableStateOf("") }
+    // 抽屉 Recents：置顶排序在前（sessions 已在 HomeScreen 层排好，此处幂等）→ 过滤在后
+    val filtered = remember(sessions, pinnedIds, searchQuery) {
+        filterSessions(sortSessionsWithPinned(sessions, pinnedIds), searchQuery)
+    }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -1555,6 +1628,18 @@ private fun ClaudeHomeLayout(
                         )
                     }
                 }
+
+                // ── 会话搜索框（ChatGPT 抽屉同款样式，暖炭黑配色）──
+                SessionSearchField(
+                    query = searchQuery,
+                    onQueryChange = { searchQuery = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 8.dp),
+                    bg = Color(0xFF242423),
+                    textColor = Color(0xFFF5F5F4),
+                    placeholderColor = Color(0xFF78716C),
+                )
 
                 // ── 功能菜单区：Chats / Projects / Artifacts（56dp、图标 24、文字 18）──
                 Column(
@@ -1622,8 +1707,15 @@ private fun ClaudeHomeLayout(
                             color = Color(0xFF78716C),
                             modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp),
                         )
+                    } else if (filtered.isEmpty() && searchQuery.isNotBlank()) {
+                        Text(
+                            "无匹配会话",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color(0xFF78716C),
+                            modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp),
+                        )
                     }
-                    sessions.forEach { s ->
+                    filtered.forEach { s ->
                         Box {
                             Row(
                                 Modifier
@@ -2021,12 +2113,17 @@ private fun DeepLookHomeLayout(
     val dashTint = if (darkVariant) MaterialTheme.colorScheme.outline else Color(0xFFC9C9CD)
     var tab by remember { mutableStateOf("new") } // new | sessions
     var menuTarget by remember { mutableStateOf<String?>(null) }
+    var searchQuery by remember { mutableStateOf("") }
     // 默认工作区（未选择）显示「默认工作区」，与工作区选择面板口径一致
     val wsLabel = when {
         selectedWorkspaceId.isBlank() -> "默认工作区"
         else -> workspaces.firstOrNull { it.workspaceId == selectedWorkspaceId }
             ?.let { it.title.ifBlank { it.path } }
             ?: "工作区 ${selectedWorkspaceId.take(8)}"
+    }
+    // 会话 tab 列表：置顶排序在前（sessions 已在 HomeScreen 层排好，此处幂等）→ 过滤在后
+    val filtered = remember(sessions, pinnedIds, searchQuery) {
+        filterSessions(sortSessionsWithPinned(sessions, pinnedIds), searchQuery)
     }
 
     Column(
@@ -2233,6 +2330,13 @@ private fun DeepLookHomeLayout(
             } else {
                 // 会话列表分组卡片
                 DeepLookGroupTitle("最近会话")
+                SessionSearchField(
+                    query = searchQuery,
+                    onQueryChange = { searchQuery = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                )
                 if (sessions.isEmpty()) {
                     // 空状态：72dp 虚线圆环 + 内部图标 + 「暂无会话」14sp
                     Column(
@@ -2267,9 +2371,23 @@ private fun DeepLookHomeLayout(
                             color = faintIcon,
                         )
                     }
+                } else if (filtered.isEmpty()) {
+                    // 有会话但搜索无命中
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(
+                            "无匹配会话",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = faintIcon,
+                        )
+                    }
                 } else {
                     DeepLookCard {
-                        sessions.forEachIndexed { index, s ->
+                        filtered.forEachIndexed { index, s ->
                             Box {
                                 Row(
                                     Modifier
@@ -2330,7 +2448,7 @@ private fun DeepLookHomeLayout(
                                     onArchive = { onArchive(s) },
                                 )
                             }
-                            if (index < sessions.lastIndex) {
+                            if (index < filtered.lastIndex) {
                                 HorizontalDivider(
                                     color = MaterialTheme.colorScheme.surfaceVariant,
                                     thickness = 1.dp,
@@ -2536,8 +2654,7 @@ private fun ChatGptHomeLayout(
     var menuTarget by remember { mutableStateOf<String?>(null) }
 
     val filtered = remember(sessions, searchQuery) {
-        if (searchQuery.isBlank()) sessions
-        else sessions.filter { chatGptTitleOf(it).contains(searchQuery, ignoreCase = true) }
+        filterSessions(sessions, searchQuery)
     }
 
     val closeDrawer: () -> Unit = { scope.launch { drawerState.close() } }
