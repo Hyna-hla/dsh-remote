@@ -74,14 +74,14 @@ class ApprovalCenter(
     private suspend fun onEvent(e: DshConnection.Event) {
         when (e) {
             is DshConnection.Event.ApprovalRequested -> mutate { l ->
-                l.removeAll { it is PendingItem.Approval && it.approvalId == e.approvalId }
+                l.removeAll { it is PendingItem.Approval && it.sessionId == e.sessionId && it.approvalId == e.approvalId }
                 l += PendingItem.Approval(
                     e.sessionId, e.approvalId, e.toolName, e.reason, e.callId,
                     System.currentTimeMillis(), fromHistory = false,
                 )
             }
             is DshConnection.Event.ApprovalResolved -> mutate { l ->
-                l.removeAll { it is PendingItem.Approval && it.approvalId == e.approvalId }
+                l.removeAll { it is PendingItem.Approval && it.sessionId == e.sessionId && it.approvalId == e.approvalId }
             }
             is DshConnection.Event.QuestionRequested -> mutate { l ->
                 l.removeAll { it is PendingItem.Question && it.sessionId == e.sessionId }
@@ -127,12 +127,12 @@ class ApprovalCenter(
     private suspend fun answerApprovalItem(sessionId: String, approvalId: String, outcome: String) {
         val item = items.value.filterIsInstance<PendingItem.Approval>()
             .firstOrNull { it.sessionId == sessionId && it.approvalId == approvalId } ?: return
-        mutate { l -> l.removeAll { it is PendingItem.Approval && it.approvalId == approvalId } }
+        mutate { l -> l.removeAll { it is PendingItem.Approval && it.sessionId == sessionId && it.approvalId == approvalId } }
         try {
             answerApprovalFn(sessionId, approvalId, outcome)
         } catch (e: Exception) {
             mutate { l ->
-                if (l.none { it is PendingItem.Approval && it.approvalId == approvalId }) l += item
+                if (l.none { it is PendingItem.Approval && it.sessionId == sessionId && it.approvalId == approvalId }) l += item
             }
             throw e
         }

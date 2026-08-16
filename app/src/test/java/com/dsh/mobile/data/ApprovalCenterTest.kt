@@ -93,6 +93,28 @@ class ApprovalCenterTest {
     }
 
     @Test
+    fun historyFailureIsSilent() = runTest(UnconfinedTestDispatcher()) {
+        val h = Harness()
+        h.sessions = {
+            listOf(
+                SessionSummary(sessionId = "s1", updatedAt = 1L),
+                SessionSummary(sessionId = "s2", updatedAt = 2L),
+            )
+        }
+        h.history = { sid ->
+            if (sid == "s2") throw RuntimeException("boom")
+            HistoryValue(events = listOf(HistoryEntry(event = SessionEventWire(
+                "approval/asked", 1, 1,
+                kotlinx.serialization.json.buildJsonObject { put("id", "a1"); put("toolName", "bash") },
+            ))))
+        }
+        val c = center(h, backgroundScope)
+        state.value = DshConnection.State.Connected("http://x")
+        assertEquals(1, c.items.value.size) // s1 照常合并，s2 静默跳过
+        assertEquals("s1", (c.items.value[0] as PendingItem.Approval).sessionId)
+    }
+
+    @Test
     fun optimisticRemoveRollsBackOnFailure() = runTest(UnconfinedTestDispatcher()) {
         val h = Harness()
         h.answerApproval = { _, _, _ -> throw ApiException("rpc down") }
@@ -116,5 +138,20 @@ class ApprovalCenterTest {
         assertEquals(1, failures.size)
         assertTrue(failures[0].contains("nope"))
         assertEquals(1, c.items.value.size) // 失败项回滚保留
+    }
+
+    @Test
+    fun crossSessionSameApprovalIdIsolated() = runTest(UnconfinedTestDispatcher()) {
+        val c = center(Harness(), backgroundScope)
+        events.emit(DshConnection.Event.ApprovalRequested("s1", "a1", "bash", null, null))
+        events.emit(DshConnection.Event.ApprovalRequested("s2", "a1", "bash", null, null))
+        assertEquals(2, c.items.value.size)
+        // s1 重发同 approvalId 只替换 s1 的项，不影响 s2
+        events.emit(DshConnection.Event.ApprovalRequested("s1", "a1", "bash", "r2", null))
+        assertEquals(2, c.items.value.size)
+        // 解决 s1 的 a1 只移除 s1，s2 保留
+        events.emit(DshConnection.Event.ApprovalResolved("s1", "a1", "allowed-once"))
+        assertEquals(1, c.items.value.size)
+        assertEquals("s2", (c.items.value[0] as PendingItem.Approval).sessionId)
     }
 }
