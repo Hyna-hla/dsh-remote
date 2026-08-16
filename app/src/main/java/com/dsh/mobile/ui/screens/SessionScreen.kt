@@ -19,6 +19,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
@@ -30,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -649,6 +651,11 @@ fun SessionScreen(
     var sending by remember { mutableStateOf(false) }
     var steerMode by remember { mutableStateOf(false) }
     var pendingImages by remember { mutableStateOf<List<DshConnection.ImagePart>>(emptyList()) }
+    // 快捷指令条（T5）：SettingsStore 持久化，未配置时注入内置默认 4 条
+    val settingsStore = remember { SettingsStore(context) }
+    val quickPrompts by settingsStore.quickPrompts.collectAsState(initial = defaultQuickPrompts())
+    var quickEditDialog by remember { mutableStateOf(false) }
+    var quickEditText by remember { mutableStateOf("") }
     var modelDialog by remember { mutableStateOf(false) }
     var modeDialog by remember { mutableStateOf(false) }
     var modelInfo by remember { mutableStateOf<SessionModelsValue?>(null) }
@@ -1102,6 +1109,37 @@ fun SessionScreen(
             }
         }
 
+        // 快捷指令条（T5）：输入栏上方横向 chip，点击追加 prompt 到输入框；条尾「编辑」打开编辑对话框
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            quickPrompts.forEach { prompt ->
+                AssistChip(
+                    onClick = {
+                        // 复用技能选择拼接模式（:1308）：追加 prompt 并补空格，避免与后续输入粘连
+                        input = if (input.isBlank()) prompt + " " else input.trimEnd() + " " + prompt + " "
+                    },
+                    label = {
+                        Text(prompt, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    },
+                )
+            }
+            IconButton(
+                onClick = {
+                    quickEditText = quickPrompts.joinToString("\n")
+                    quickEditDialog = true
+                },
+                modifier = Modifier.size(32.dp),
+            ) {
+                Icon(Icons.Rounded.Edit, "编辑快捷指令", Modifier.size(18.dp))
+            }
+        }
+
         // 输入栏（ChatGPT/Claude 风格胶囊化；其余风格保持原样）
         val modernInput = DshThemeStyle == ThemeStyle.CHATGPT || DshThemeStyle == ThemeStyle.CLAUDE
         Surface(
@@ -1307,6 +1345,36 @@ fun SessionScreen(
                 onPick = { name ->
                     input = input + "请使用 $name 技能："
                     skillsDialog = false
+                },
+            )
+        }
+
+        // 快捷指令编辑（T5）：每行一条，保存写入 SettingsStore
+        if (quickEditDialog) {
+            AlertDialog(
+                onDismissRequest = { quickEditDialog = false },
+                title = { Text("编辑快捷指令") },
+                text = {
+                    OutlinedTextField(
+                        value = quickEditText,
+                        onValueChange = { quickEditText = it },
+                        label = { Text("每行一条") },
+                        minLines = 4,
+                        maxLines = 8,
+                        shape = DshShape.small,
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            quickEditDialog = false
+                            val items = quickEditText.lines().map { it.trim() }.filter { it.isNotEmpty() }
+                            scope.launch { settingsStore.setQuickPrompts(items) }
+                        },
+                    ) { Text("保存") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { quickEditDialog = false }) { Text("取消") }
                 },
             )
         }

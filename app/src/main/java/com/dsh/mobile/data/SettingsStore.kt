@@ -54,6 +54,7 @@ class SettingsStore(
         private val BACKGROUND_NOTIFY_KEY = booleanPreferencesKey("background_notify")
         private val NOTIFY_APPROVALS_KEY = booleanPreferencesKey("notify_approvals")
         private val NOTIFY_COMPLETION_KEY = booleanPreferencesKey("notify_completion")
+        private val QUICK_PROMPTS_KEY = stringPreferencesKey("quick_prompts")
         private val PINNED_SESSION_IDS_KEY = stringPreferencesKey("pinned_session_ids")
         private val AUTO_MODEL_KEY = booleanPreferencesKey("auto_model")
         private val THEME_MODE_KEY = stringPreferencesKey("theme_mode")
@@ -240,6 +241,15 @@ class SettingsStore(
 
     suspend fun setNotifyCompletion(on: Boolean) {
         context.dataStore.edit { it[NOTIFY_COMPLETION_KEY] = on }
+    }
+
+    /** 快捷指令（T5）：输入栏上方 chip 条的可编辑指令列表；未配置时注入内置默认 4 条 */
+    val quickPrompts: Flow<List<String>> = context.dataStore.data.map { prefs ->
+        prefs[QUICK_PROMPTS_KEY]?.let { decodeQuickPrompts(it) } ?: defaultQuickPrompts()
+    }
+
+    suspend fun setQuickPrompts(items: List<String>) {
+        context.dataStore.edit { it[QUICK_PROMPTS_KEY] = encodeQuickPrompts(items) }
     }
 
     /** 置顶会话 id 集合（本地 pin，仅本机生效；JSON 数组存储，默认空） */
