@@ -7,6 +7,7 @@ import com.dsh.mobile.data.ApprovalCenter
 import com.dsh.mobile.data.DshConnection
 import com.dsh.mobile.data.HistoryCache
 import com.dsh.mobile.data.ProTokenBank
+import com.dsh.mobile.data.SecretCipher
 import com.dsh.mobile.data.UpdateChecker
 import kotlinx.coroutines.*
 
@@ -21,6 +22,8 @@ class DshApplication : Application() {
         createNotificationChannels()
         // 启动时清理过期会话缓存（7 天前历史、1 天前会话列表），防磁盘膨胀
         runCatching { HistoryCache(this).prune() }
+        // 加密主密钥初始化（凭证密文存储，幂等）
+        SecretCipher.init(this)
         // 假 Pro 订阅银行初始化（读持久化状态）
         ProTokenBank.init(this)
         // 更新镜像偏好初始化（记住上次成功的镜像，下次优先）

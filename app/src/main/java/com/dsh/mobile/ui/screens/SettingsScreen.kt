@@ -69,7 +69,14 @@ fun SettingsScreen(
     var notifGranted by remember { mutableStateOf(true) }
     var themeImportError by remember { mutableStateOf<String?>(null) }
     var showAppearanceDetail by remember { mutableStateOf(false) }
+    var biometricEnabled by remember { mutableStateOf(false) }
+    var deviceName by remember { mutableStateOf("") }
     val customThemes by ThemeRepository.themes.collectAsState()
+    val biometricAvailable = remember {
+        androidx.biometric.BiometricManager.from(context)
+            .canAuthenticate(androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK) ==
+            androidx.biometric.BiometricManager.BIOMETRIC_SUCCESS
+    }
     val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { g ->
         notifGranted = g
     }
@@ -100,6 +107,8 @@ fun SettingsScreen(
         autoModel = settingsStore.autoModel.first()
         uiFont = settingsStore.uiFont.first()
         codeFont = settingsStore.codeFont.first()
+        biometricEnabled = settingsStore.biometricLockEnabled.first()
+        deviceName = settingsStore.deviceName.first()
         notifGranted = Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(
             context, Manifest.permission.POST_NOTIFICATIONS,
         ) == PackageManager.PERMISSION_GRANTED
@@ -483,6 +492,58 @@ fun SettingsScreen(
                             }
                         }
                     }
+                }
+            }
+
+            Text("安全", style = MaterialTheme.typography.titleMedium)
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("生物锁", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                if (biometricAvailable) "回到前台需生物识别验证后才能操控电脑" else "此设备无可用生物识别",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Switch(
+                            checked = biometricAvailable && biometricEnabled,
+                            enabled = biometricAvailable,
+                            onCheckedChange = {
+                                biometricEnabled = it
+                                scope.launch { settingsStore.setBiometricLock(it) }
+                            },
+                        )
+                    }
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 4.dp),
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                    )
+                    OutlinedTextField(
+                        value = deviceName,
+                        onValueChange = {
+                            deviceName = it
+                            scope.launch { settingsStore.setDeviceName(it) }
+                        },
+                        label = { Text("设备名称") },
+                        placeholder = { Text(Build.MODEL) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        "配对其他设备时显示的名称（留空 = 手机型号）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
 

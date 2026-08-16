@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.rememberNavController
 import com.dsh.mobile.data.ApkInstaller
 import com.dsh.mobile.data.AppearanceConfig
@@ -58,6 +59,8 @@ import com.dsh.mobile.data.SettingsStore
 import com.dsh.mobile.data.TokenUsageWatcher
 import com.dsh.mobile.data.UpdateChecker
 import com.dsh.mobile.data.UpdateMirrors
+import com.dsh.mobile.data.shouldLock
+import com.dsh.mobile.ui.components.BiometricLockOverlay
 import com.dsh.mobile.ui.navigation.AppNavigation
 import com.dsh.mobile.ui.theme.DshTheme
 import com.dsh.mobile.ui.theme.FontConfig
@@ -67,15 +70,25 @@ import com.dsh.mobile.ui.theme.ThemeRepository
 import com.dsh.mobile.ui.theme.isLightMode
 import com.dsh.mobile.ui.theme.surfaceAlphaFor
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
 import java.io.File
 
 class MainActivity : ComponentActivity() {
 
+    private val settingsStore = SettingsStore(this)
+    private var lastUnlockedAt = 0L
+    private var locked by mutableStateOf(false)
+
     override fun onStart() {
         super.onStart()
         DshApplication.isAppInForeground = true
+        lifecycleScope.launch {
+            if (settingsStore.biometricLockEnabled.first()) {
+                if (shouldLock(lastUnlockedAt, System.currentTimeMillis(), true)) locked = true
+            } else locked = false
+        }
     }
 
     override fun onStop() {
@@ -94,7 +107,6 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val app = application as DshApplication
-        val settingsStore = SettingsStore(this)
         consumeDeepLink(intent)
         ThemeRepository.init(applicationContext)
 
@@ -225,6 +237,16 @@ class MainActivity : ComponentActivity() {
                             navController = navController,
                             connection = app.connection,
                             approvalCenter = app.approvalCenter,
+                        )
+                    }
+
+                    // — 生物锁覆盖层：锁态下全屏遮罩，解锁前阻断一切交互 —
+                    if (locked) {
+                        BiometricLockOverlay(
+                            onUnlocked = {
+                                lastUnlockedAt = System.currentTimeMillis()
+                                locked = false
+                            },
                         )
                     }
 

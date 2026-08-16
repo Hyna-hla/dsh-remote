@@ -62,6 +62,8 @@ class SettingsStore(
         private val PRO_SINCE_KEY = longPreferencesKey("pro_since")
         private val PROFILE_LIST_KEY = stringPreferencesKey("connection_profiles")
         private val ACTIVE_PROFILE_KEY = stringPreferencesKey("active_profile_id")
+        private val BIOMETRIC_LOCK_KEY = booleanPreferencesKey("biometric_lock")
+        private val DEVICE_NAME_KEY = stringPreferencesKey("device_name")
     }
 
     val profiles: Flow<List<HostProfile>> = context.dataStore.data.map { prefs ->
@@ -224,6 +226,24 @@ class SettingsStore(
 
     suspend fun setAutoModel(enabled: Boolean) {
         context.dataStore.edit { it[AUTO_MODEL_KEY] = enabled }
+    }
+
+    /** 生物锁：回到前台需生物识别验证后才能操控电脑（默认关） */
+    val biometricLockEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[BIOMETRIC_LOCK_KEY] ?: false
+    }
+
+    suspend fun setBiometricLock(enabled: Boolean) {
+        context.dataStore.edit { it[BIOMETRIC_LOCK_KEY] = enabled }
+    }
+
+    /** 设备显示名（配对时发给 PC；空 = Build.MODEL） */
+    val deviceName: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[DEVICE_NAME_KEY] ?: ""
+    }
+
+    suspend fun setDeviceName(name: String) {
+        context.dataStore.edit { it[DEVICE_NAME_KEY] = name }
     }
 }
 
