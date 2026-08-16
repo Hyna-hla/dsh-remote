@@ -35,7 +35,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -116,6 +118,28 @@ fun HomeScreen(
     var browseListing by remember { mutableStateOf<DirListing?>(null) }
     var browseLoading by remember { mutableStateOf(false) }
     var browseError by remember { mutableStateOf<String?>(null) }
+
+    // —— 文件内容只读预览（S6 Task 4：fs/read —— 文本展示 / 二进制提示 / 复制）——
+    var previewTarget by remember { mutableStateOf<FileEntry?>(null) }
+    var previewFile by remember { mutableStateOf<FilePreview?>(null) }
+    var previewBusy by remember { mutableStateOf(false) }
+    var previewError by remember { mutableStateOf<String?>(null) }
+
+    fun openFilePreview(entry: FileEntry) {
+        previewTarget = entry
+        previewFile = null
+        previewBusy = true
+        previewError = null
+        scope.launch {
+            try {
+                previewFile = connection.fsRead(entry.path)
+            } catch (e: Exception) {
+                previewError = e.message
+            } finally {
+                previewBusy = false
+            }
+        }
+    }
 
     fun loadBrowseDir(path: String) {
         browseLoading = true
@@ -315,6 +339,7 @@ fun HomeScreen(
                     browseLoading = browseLoading,
                     browseError = browseError,
                     onBrowseEnter = { enterBrowseDir(it) },
+                    onBrowseOpenFile = { openFilePreview(it) },
                     onBrowseUp = { browseUp() },
                     onBrowseBack = { browseOpen = false },
                     onBrowsePick = {
@@ -395,6 +420,103 @@ fun HomeScreen(
         }
     }
 
+    // 文件内容只读预览（S6 Task 4：fs/read —— 文本等宽滚动展示 / 截断提示 / 二进制提示 / 复制）
+    val filePreviewOverlay: @Composable () -> Unit = {
+        previewTarget?.let { target ->
+            val clipboard = LocalClipboardManager.current
+            AlertDialog(
+                onDismissRequest = { previewTarget = null },
+                title = {
+                    Column {
+                        Text(target.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            target.path,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                },
+                text = {
+                    Column {
+                        val pv = previewFile
+                        when {
+                            previewBusy -> Box(
+                                Modifier.fillMaxWidth().padding(vertical = 20.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                CircularProgressIndicator(Modifier.size(24.dp))
+                            }
+
+                            previewError != null -> Text(
+                                previewError.orEmpty(),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+
+                            pv == null -> Text(
+                                "读取失败：无响应",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+
+                            pv.isBinary -> {
+                                Text(
+                                    "二进制文件（${formatFileSize(pv.size)}）",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    "内容按 base64 编码返回（约 ${formatFileSize(base64SizeOf(pv.size))}），不进行解码展示。",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+
+                            else -> {
+                                Text(
+                                    formatFileSize(pv.size),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                if (pv.truncated) {
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        "文件超过 1MB，仅显示前 1MB（已截断）",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.tertiary,
+                                    )
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    pv.text.orEmpty(),
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = 320.dp)
+                                        .verticalScroll(rememberScrollState()),
+                                )
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            previewFile?.text?.let { clipboard.setText(AnnotatedString(it)) }
+                        },
+                        enabled = !previewBusy && previewFile?.text != null,
+                    ) { Text("复制") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { previewTarget = null }) { Text("关闭") }
+                },
+            )
+        }
+    }
+
     // ChatGPT 移动端布局：纯黑扁平 + 顶部导航栏 + 侧边抽屉（85% 宽 + 遮罩）+ 底部胶囊输入栏
     if (DshThemeStyle == ThemeStyle.CHATGPT) {
         Box {
@@ -443,6 +565,7 @@ fun HomeScreen(
                 onArchive = { s -> archiveTarget = s },
             )
             archiveDialogOverlay()
+            filePreviewOverlay()
         }
         return
     }
@@ -499,6 +622,7 @@ fun HomeScreen(
                 onArchive = { s -> archiveTarget = s },
             )
             archiveDialogOverlay()
+            filePreviewOverlay()
         }
         return
     }
@@ -538,6 +662,7 @@ fun HomeScreen(
             // 工作区选择面板覆盖层（DeepLook 分支不渲染 Scaffold，这里单独挂载）
             workspaceSheetOverlay()
             archiveDialogOverlay()
+            filePreviewOverlay()
         }
         return
     }
@@ -997,6 +1122,7 @@ fun HomeScreen(
 
             // 归档确认（共享覆盖层；长按菜单「归档」触发）
             archiveDialogOverlay()
+            filePreviewOverlay()
 
             // 工作区选择面板（对齐 Web WorkspacePicker：默认 / 已有工作区 / 新建）
             workspaceSheetOverlay()
@@ -1058,6 +1184,19 @@ private fun SessionSearchField(
     }
 }
 
+/** 人类可读文件大小：B / KB / MB */
+private fun formatFileSize(bytes: Long): String = when {
+    bytes < 1024 -> "$bytes B"
+    bytes < 1024 * 1024 -> String.format("%.1f KB", bytes / 1024.0)
+    else -> String.format("%.2f MB", bytes / (1024.0 * 1024.0))
+}
+
+/** base64 编码长度 = 4 × ceil(bytes / 3)；预览截断到 1MB 内，与插件 fs/read 截断一致 */
+private fun base64SizeOf(bytes: Long): Long {
+    val capped = minOf(bytes, 1024L * 1024L)
+    return ((capped + 2) / 3) * 4
+}
+
 /** 工作区选择面板内容（所有布局分支共用） */
 @Composable
 private fun WorkspaceSheetContent(
@@ -1077,6 +1216,7 @@ private fun WorkspaceSheetContent(
     browseLoading: Boolean,
     browseError: String?,
     onBrowseEnter: (DirEntry) -> Unit,
+    onBrowseOpenFile: (FileEntry) -> Unit,
     onBrowseUp: () -> Unit,
     onBrowseBack: () -> Unit,
     onBrowsePick: () -> Unit,
@@ -1171,6 +1311,7 @@ private fun WorkspaceSheetContent(
                 Spacer(Modifier.height(6.dp))
             }
             val entries = browseListing?.entries ?: emptyList()
+            val files = browseListing?.files ?: emptyList()
             Surface(
                 shape = MaterialTheme.shapes.small,
                 color = MaterialTheme.colorScheme.surfaceVariant,
@@ -1185,13 +1326,13 @@ private fun WorkspaceSheetContent(
                     ) {
                         CircularProgressIndicator(Modifier.size(22.dp))
                     }
-                } else if (entries.isEmpty()) {
+                } else if (entries.isEmpty() && files.isEmpty()) {
                     Box(
                         Modifier.fillMaxWidth().padding(16.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            "（没有子目录）",
+                            "（空目录）",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -1229,6 +1370,55 @@ private fun WorkspaceSheetContent(
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
+                                }
+                            }
+                        }
+                        if (files.isNotEmpty()) {
+                            if (entries.isNotEmpty()) {
+                                HorizontalDivider(
+                                    Modifier.padding(horizontal = 14.dp),
+                                    color = MaterialTheme.colorScheme.outlineVariant,
+                                )
+                            }
+                            files.forEach { file ->
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onBrowseOpenFile(file) }
+                                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Icon(
+                                        Icons.Default.Description,
+                                        null,
+                                        Modifier.size(18.dp),
+                                        tint = if (file.hidden) MaterialTheme.colorScheme.onSurfaceVariant
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Text(
+                                        file.name,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        color = if (file.hidden) MaterialTheme.colorScheme.onSurfaceVariant
+                                        else MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        formatFileSize(file.size),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    if (file.hidden) {
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            "隐藏",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
                                 }
                             }
                         }

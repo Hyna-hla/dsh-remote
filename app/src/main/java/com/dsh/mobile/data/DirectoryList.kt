@@ -7,16 +7,24 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.longOrNull
 
 /** host.listDirectory 单个条目（子目录或面包屑祖先；path 为宿主绝对路径，客户端不做路径拼接） */
 data class DirEntry(val name: String, val path: String, val hidden: Boolean)
 
-/** host.listDirectory 响应扁平模型：当前目录 + 面包屑层级标签 + 子目录 + 是否截断 */
+/** 插件 fs/list 的 files[] 条目：{name, path, size, hidden}（size 字节数；隐藏 = 点前缀） */
+data class FileEntry(val name: String, val path: String, val size: Long, val hidden: Boolean)
+
+/** 插件 fs/list 响应模型（Task 4 增强）：子目录名 + 文件条目（dirs[] 兼容旧 App） */
+data class FsListing(val dirs: List<String>, val files: List<FileEntry>)
+
+/** host.listDirectory 响应扁平模型：当前目录 + 面包屑层级标签 + 子目录 + 是否截断 + 文件（插件 fs/list 增强） */
 data class DirListing(
     val path: String,
     val crumbs: List<String>,
     val entries: List<DirEntry>,
     val truncated: Boolean,
+    val files: List<FileEntry> = emptyList(),
 )
 
 /**
@@ -34,6 +42,7 @@ internal fun parseDirectoryList(data: JsonElement?): DirListing? {
         crumbs = obj["crumbs"]?.let(::parseCrumbs) ?: emptyList(),
         entries = obj["entries"]?.let(::parseEntries) ?: emptyList(),
         truncated = obj["truncated"]?.boolValue() ?: false,
+        files = obj["files"]?.let(::parseFiles) ?: emptyList(),
     )
 }
 
@@ -55,6 +64,16 @@ private fun parseEntries(el: JsonElement): List<DirEntry> {
         val name = o["name"]?.stringValue() ?: return@mapNotNull null
         val path = o["path"]?.stringValue() ?: return@mapNotNull null
         DirEntry(name, path, o["hidden"]?.boolValue() ?: false)
+    }
+}
+
+private fun parseFiles(el: JsonElement): List<FileEntry> {
+    val arr = el as? JsonArray ?: return emptyList()
+    return arr.mapNotNull { e ->
+        val o = e as? JsonObject ?: return@mapNotNull null
+        val name = o["name"]?.stringValue() ?: return@mapNotNull null
+        val path = o["path"]?.stringValue() ?: return@mapNotNull null
+        FileEntry(name, path, o["size"]?.longValue() ?: 0L, o["hidden"]?.boolValue() ?: false)
     }
 }
 
@@ -103,6 +122,9 @@ private fun JsonElement.stringValue(): String? = when (this) {
     is JsonPrimitive -> if (isString) content else null
     else -> null
 }
+
+/** 宽松取长整型值：数字 primitive → 值；其他形态 → null（不外抛） */
+private fun JsonElement.longValue(): Long? = (this as? JsonPrimitive)?.longOrNull
 
 /** 宽松取布尔值：布尔 primitive → 值；字符串 "true"/"false" 亦接受；数字等异常形态 → null（不外抛） */
 private fun JsonElement.boolValue(): Boolean? {

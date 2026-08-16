@@ -642,27 +642,97 @@ class DshConnection(private val appContext: Context? = null) {
     }
 
     /**
+     * 插件 fs/list（dsh-remote-access，Task 4 增强）：列举目录 + 文件。
+     * 响应 {ok, path, dirs[], files[{name,path,size,hidden}]}；插件未安装/失败 → null。
+     */
+    suspend fun fsList(path: String): FsListing? {
+        return try {
+            val text = withContext(Dispatchers.IO) {
+                val encoded = java.net.URLEncoder.encode(path, "UTF-8")
+                val request = Request.Builder()
+                    .url("$baseUrl/api/remote-access/fs/list?path=$encoded")
+                    .get()
+                    .build()
+                unaryClient.newCall(request).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withContext ""
+                    resp.body?.string().orEmpty()
+                }
+            }
+            val obj = json.parseToJsonElement(text).jsonObject
+            if (obj["ok"]?.jsonPrimitive?.booleanOrNull != true) return null
+            val dirs = obj["dirs"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
+            val files = obj["files"]?.jsonArray?.mapNotNull { el ->
+                val o = el.jsonObject
+                val name = o["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                val path = o["path"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                val size = o["size"]?.jsonPrimitive?.longOrNull ?: 0L
+                val hidden = o["hidden"]?.jsonPrimitive?.booleanOrNull ?: false
+                FileEntry(name, path, size, hidden)
+            } ?: emptyList()
+            FsListing(dirs, files)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * 插件 fs/read（dsh-remote-access，Task 4）：文件内容只读预览（1MB 截断、二进制识别）。
+     * 响应 {ok, path, size, truncated, isBinary, text|data}；失败/插件不可用 → null。
+     */
+    suspend fun fsRead(path: String): FilePreview? {
+        return try {
+            val text = withContext(Dispatchers.IO) {
+                val encoded = java.net.URLEncoder.encode(path, "UTF-8")
+                val request = Request.Builder()
+                    .url("$baseUrl/api/remote-access/fs/read?path=$encoded")
+                    .get()
+                    .build()
+                unaryClient.newCall(request).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withContext ""
+                    resp.body?.string().orEmpty()
+                }
+            }
+            if (text.isBlank()) return null
+            parseFilePreview(json.parseToJsonElement(text))
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
      * 浏览 PC 端任意目录（直连 host.listDirectory RPC）：
-     * 返回 {path, crumbs 面包屑层级, entries 子目录（含 hidden 隐藏标记）, truncated 截断标记}。
-     * host RPC 不可用（老版本 host / 无 browse 能力 / 解析失败）时回退插件 fs/list
-     * （仅子目录名，无面包屑/隐藏/截断信息），保证旧体验不回归。
+     * 返回 {path, crumbs 面包屑层级, entries 子目录（含 hidden 隐藏标记）, truncated 截断标记, files 文件}。
+     * - host RPC 可用：目录/面包屑/截断来自 host；文件来自插件 fs/list（host RPC 不含文件，插件不可用则空）；
+     * - host RPC 不可用（老版本 host / 无 browse 能力 / 解析失败）时回退插件 fs/list
+     *   （子目录名 + 文件，无面包屑——由 deriveCrumbsFromPath 推导；无截断标记），保证旧体验不回归。
      */
     suspend fun listDirectory(path: String?): DirListing {
         try {
             val value = call(DshEndpoints.HOST_LIST_DIRECTORY, buildJsonObject {
                 path?.let { put("path", it) }
             })
-            parseDirectoryList(value)?.let { return it }
+            parseDirectoryList(value)?.let { host ->
+                // host 不含文件：文件走插件 fs/list 增强（插件不可用 → 空文件列表）
+                return host.copy(files = fsList(host.path)?.files ?: emptyList())
+            }
         } catch (e: Exception) {
             // host RPC 失败/不支持 → 回退插件
         }
         val p = path ?: return DirListing("", emptyList(), emptyList(), false)
+        val plugin = fsList(p)
         return DirListing(
             path = p,
             crumbs = deriveCrumbsFromPath(p),
-            entries = listWorkspaceDirs(p).map { DirEntry(it, p.trimEnd('\\') + "\\" + it, false) },
+            entries = (plugin?.dirs ?: emptyList()).map { DirEntry(it, joinChildPath(p, it), false) },
+            files = plugin?.files ?: emptyList(),
             truncated = false,
         )
+    }
+
+    /** 子路径拼接：按父路径形态选择分隔符（Windows 反斜杠 / POSIX 斜杠） */
+    private fun joinChildPath(parent: String, name: String): String {
+        val sep = if (parent.contains('/')) '/' else '\\'
+        return parent.trimEnd('\\').trimEnd('/') + sep + name
     }
 
     /** 归档会话（从会话列表移除，进入已归档区） */
