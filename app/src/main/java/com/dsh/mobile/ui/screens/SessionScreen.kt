@@ -81,6 +81,9 @@ private const val STREAM_TAIL_CHARS = 8000
 // T6 插话反馈 banner 展示时长：与 data/SteerFeedback.kt 的 steerFlashOn 默认 durationMs 保持一致
 private const val STEER_FLASH_MS = 2000L
 
+// 非流式超长消息折叠阈值：超过则默认只显示前 N 字 + 「展开全文」（省渲染/观感提速）
+private const val COLLAPSE_CHARS = 3000
+
 // ──────────────────────────── 聊天条目模型与状态机 ────────────────────────────
 
 /** 用户消息里的图片内容块（mediaType + base64 data，DSH 协议 image 块） */
@@ -1582,6 +1585,8 @@ private fun decodeUserImage(context: android.content.Context, img: UserImage): B
 private fun AssistantCard(item: ChatItem.Assistant, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    // 超长消息折叠状态
+    var expanded by remember(item.key) { mutableStateOf(false) }
     Surface(
         shape = DshShape.assistantBubble,
         color = MaterialTheme.colorScheme.surface,
@@ -1652,8 +1657,34 @@ private fun AssistantCard(item: ChatItem.Assistant, modifier: Modifier = Modifie
                         )
                         Spacer(Modifier.height(4.dp))
                         MarkdownText(item.text.takeLast(STREAM_TAIL_CHARS))
+                    } else if (!item.streaming && item.text.length > COLLAPSE_CHARS && !expanded) {
+                        // 非流式超长消息折叠：默认只渲染前段，点击展开全文（省渲染，弱网更顺滑）
+                        MarkdownText(item.text.take(COLLAPSE_CHARS))
+                        Spacer(Modifier.height(4.dp))
+                        TextButton(
+                            onClick = { expanded = true },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                "展开全文（共 ${item.text.length} 字）",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = DshBrand,
+                            )
+                        }
                     } else {
                         MarkdownText(item.text)
+                        if (!item.streaming && item.text.length > COLLAPSE_CHARS && expanded) {
+                            TextButton(
+                                onClick = { expanded = false },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(
+                                    "收起",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = DshBrand,
+                                )
+                            }
+                        }
                     }
                 }
             }
