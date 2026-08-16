@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -61,6 +62,8 @@ fun SettingsScreen(
     val scope = rememberCoroutineScope()
     var appearance by remember { mutableStateOf(AppearanceConfig()) }
     var backgroundNotify by remember { mutableStateOf(true) }
+    var notifyApprovals by remember { mutableStateOf(true) }
+    var notifyCompletion by remember { mutableStateOf(true) }
     var themeMode by remember { mutableStateOf("blue") }
     var autoModel by remember { mutableStateOf(true) }
     var uiFont by remember { mutableStateOf("") }
@@ -103,6 +106,8 @@ fun SettingsScreen(
     LaunchedEffect(Unit) {
         appearance = settingsStore.appearance.first()
         backgroundNotify = settingsStore.backgroundNotify.first()
+        notifyApprovals = settingsStore.notifyApprovals.first()
+        notifyCompletion = settingsStore.notifyCompletion.first()
         themeMode = settingsStore.themeMode.first()
         autoModel = settingsStore.autoModel.first()
         uiFont = settingsStore.uiFont.first()
@@ -123,6 +128,26 @@ fun SettingsScreen(
             }
         } else {
             runCatching { context.stopService(Intent(context, DshConnectionService::class.java)) }
+        }
+    }
+
+    fun setNotifyApprovals(on: Boolean) {
+        notifyApprovals = on
+        scope.launch { settingsStore.setNotifyApprovals(on) }
+    }
+
+    fun setNotifyCompletion(on: Boolean) {
+        notifyCompletion = on
+        scope.launch { settingsStore.setNotifyCompletion(on) }
+    }
+
+    /** 跳系统「通知渠道设置」页（可单独调审批/完成渠道的铃声、勿扰等） */
+    fun openChannelSettings() {
+        runCatching {
+            context.startActivity(
+                Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            )
         }
     }
 
@@ -481,6 +506,52 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("审批与确认提醒", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "桌面端请求工具审批/确认时横幅提醒（需上方总开关开启）",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Switch(
+                            checked = notifyApprovals,
+                            onCheckedChange = { setNotifyApprovals(it) },
+                        )
+                    }
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 4.dp),
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("任务完成提醒", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "会话任务执行完成时提醒（独立系统渠道，可单独调铃声/勿扰）",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Switch(
+                            checked = notifyCompletion,
+                            onCheckedChange = { setNotifyCompletion(it) },
+                        )
+                    }
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 4.dp),
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
                         Text(
                             if (notifGranted) "通知权限：已开启" else "通知权限：未开启（审批/确认/完成不会弹通知）",
                             style = MaterialTheme.typography.bodySmall,
@@ -490,6 +561,18 @@ fun SettingsScreen(
                             TextButton(onClick = { notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }) {
                                 Text("授权")
                             }
+                        }
+                    }
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 4.dp),
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(onClick = { openChannelSettings() }) {
+                            Text("通知渠道设置")
                         }
                     }
                 }

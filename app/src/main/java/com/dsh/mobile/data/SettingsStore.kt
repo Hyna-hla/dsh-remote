@@ -52,6 +52,8 @@ class SettingsStore(
         private val PANEL_GLASS_KEY = floatPreferencesKey("panel_glass")
         private val BRIGHTNESS_KEY = floatPreferencesKey("brightness")
         private val BACKGROUND_NOTIFY_KEY = booleanPreferencesKey("background_notify")
+        private val NOTIFY_APPROVALS_KEY = booleanPreferencesKey("notify_approvals")
+        private val NOTIFY_COMPLETION_KEY = booleanPreferencesKey("notify_completion")
         private val AUTO_MODEL_KEY = booleanPreferencesKey("auto_model")
         private val THEME_MODE_KEY = stringPreferencesKey("theme_mode")
         private val WORKSPACE_ID_KEY = stringPreferencesKey("workspace_id")
@@ -219,6 +221,24 @@ class SettingsStore(
 
     suspend fun setBackgroundNotify(enabled: Boolean) {
         context.dataStore.edit { it[BACKGROUND_NOTIFY_KEY] = enabled }
+    }
+
+    /** 审批/问答分渠道开关（默认开；总开关 backgroundNotify 也须开启才生效） */
+    val notifyApprovals: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[NOTIFY_APPROVALS_KEY] ?: true
+    }
+
+    suspend fun setNotifyApprovals(on: Boolean) {
+        context.dataStore.edit { it[NOTIFY_APPROVALS_KEY] = on }
+    }
+
+    /** 任务完成提醒分渠道开关（默认开；独立系统渠道，可与审批分别调铃声/勿扰） */
+    val notifyCompletion: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[NOTIFY_COMPLETION_KEY] ?: true
+    }
+
+    suspend fun setNotifyCompletion(on: Boolean) {
+        context.dataStore.edit { it[NOTIFY_COMPLETION_KEY] = on }
     }
 
     /** 自适应模型：按任务难度自动选择 Flash / Pro（默认开） */

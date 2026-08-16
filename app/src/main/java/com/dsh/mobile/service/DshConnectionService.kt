@@ -12,6 +12,8 @@ import com.dsh.mobile.data.DshConnection
 import com.dsh.mobile.data.HostProfile
 import com.dsh.mobile.data.SettingsStore
 import com.dsh.mobile.data.TokenUsageWatcher
+import com.dsh.mobile.data.shouldNotifyApproval
+import com.dsh.mobile.data.shouldNotifyCompletion
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -156,6 +158,14 @@ class DshConnectionService : Service() {
 
             is DshConnection.Event.ApprovalRequested -> {
                 if (!seenApprovals.add(event.approvalId)) return
+                // 分渠道开关：审批/问答渠道关闭时不弹横幅（去重照常消费，避免重复请求刷屏）
+                val settings = SettingsStore(this@DshConnectionService)
+                if (!shouldNotifyApproval(
+                        settings.backgroundNotify.first(),
+                        settings.notifyApprovals.first(),
+                        DshApplication.isAppInForeground,
+                    )
+                ) return
                 val reason = event.reason?.let { "：" + it } ?: ""
                 postAlert(
                     "DSH 需要你的审批",
@@ -167,6 +177,14 @@ class DshConnectionService : Service() {
 
             is DshConnection.Event.QuestionRequested -> {
                 if (!seenQuestions.add(event.sessionId)) return
+                // 分渠道开关：问答归入「审批与确认提醒」渠道，同审批一样受 notifyApprovals 控制
+                val settings = SettingsStore(this@DshConnectionService)
+                if (!shouldNotifyApproval(
+                        settings.backgroundNotify.first(),
+                        settings.notifyApprovals.first(),
+                        DshApplication.isAppInForeground,
+                    )
+                ) return
                 val first = event.questions.firstOrNull()?.question?.take(60)
                 postAlert(
                     "DSH 需要你的确认",
@@ -197,6 +215,14 @@ class DshConnectionService : Service() {
             val job = scope.launch {
                 delay(8_000)
                 if (sessionActive[sessionId] != true) {
+                    // 分渠道开关 + 前台判定在防抖到期瞬间读取（期间用户可能已打开 App）
+                    val settings = SettingsStore(this@DshConnectionService)
+                    if (!shouldNotifyCompletion(
+                            settings.backgroundNotify.first(),
+                            settings.notifyCompletion.first(),
+                            DshApplication.isAppInForeground,
+                        )
+                    ) return@launch
                     postAlert(
                         "DSH 任务完成",
                         "会话 " + sessionId.take(8) + " 的执行已结束",
