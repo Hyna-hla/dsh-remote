@@ -1563,13 +1563,14 @@ fun SessionScreen(
                         enabled = (input.isNotBlank() || pendingImages.isNotEmpty()) && !sending,
                         colors = IconButtonDefaults.filledIconButtonColors(
                             containerColor = Color.Transparent,
-                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                            // 高亮品牌渐变（夜之城 NC 黄）上白/深蓝字看不清，改黑色前景
+                            contentColor = if (brandGradientBright()) Color.Black else MaterialTheme.colorScheme.onPrimary,
                         ),
                     ) {
                         if (sending) {
                             CircularProgressIndicator(
                                 Modifier.size(18.dp),
-                                color = MaterialTheme.colorScheme.onPrimary,
+                                color = if (brandGradientBright()) Color.Black else MaterialTheme.colorScheme.onPrimary,
                                 strokeWidth = 2.dp,
                             )
                         } else if (DshThemeStyle == ThemeStyle.CLAUDE) {

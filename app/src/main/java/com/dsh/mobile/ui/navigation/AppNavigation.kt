@@ -11,6 +11,9 @@ import android.content.Intent
 import com.dsh.mobile.DshApplication
 import com.dsh.mobile.data.ApprovalCenter
 import com.dsh.mobile.data.DshConnection
+import com.dsh.mobile.data.SettingsStore
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import com.dsh.mobile.service.DshConnectionService
 import com.dsh.mobile.ui.screens.*
 
@@ -39,12 +42,20 @@ fun AppNavigation(
     val connState by connection.state.collectAsState()
     val context = LocalContext.current
 
-    /** 用户主动断开：同时停掉后台提醒服务，避免它在用户断开后仍保持后台连接 */
+    val opScope = rememberCoroutineScope()
+
+    /** 用户主动断开：停后台服务 + 清各主机自动连接标记（连接页不再自动重连旧地址），清理完再回连接页 */
     fun onUserDisconnect() {
         connection.disconnect()
         runCatching { context.stopService(Intent(context, DshConnectionService::class.java)) }
-        navController.navigate(Screen.Connect.route) {
-            popUpTo(0) { inclusive = true }
+        opScope.launch {
+            val store = SettingsStore(context)
+            store.profiles.first().filter { it.autoConnect }.forEach {
+                store.upsertProfile(it.copy(autoConnect = false))
+            }
+            navController.navigate(Screen.Connect.route) {
+                popUpTo(0) { inclusive = true }
+            }
         }
     }
 

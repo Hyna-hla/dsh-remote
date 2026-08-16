@@ -10,6 +10,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -131,6 +132,10 @@ var DshThemeId: String
 
 /** 品牌渐变（主按钮/强调装饰用）：brand → brandSoft，随主题色走 */
 fun brandGradient(): Brush = Brush.linearGradient(listOf(DshPalette.brand, DshPalette.brandSoft))
+
+/** 品牌渐变是否为高亮色（夜之城 NC 黄 × 霓虹青）：渐变按钮上的前景改用黑色，白字在亮黄/亮青上看不清 */
+fun brandGradientBright(): Boolean =
+    DshPalette.brand.luminance() > 0.5f || DshPalette.brandSoft.luminance() > 0.5f
 
 private fun applyShapeStyle(style: ThemeStyle) {
     when (style) {
