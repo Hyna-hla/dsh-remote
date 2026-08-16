@@ -107,6 +107,8 @@ sealed interface ChatItem {
         val text: String,
         val streaming: Boolean = false,
         val thinkSeconds: Long? = null,
+        /** S5：思考链文本——reasoning-delta 流式累积；assistant/message 的 reasoning 块兜底（不落磁盘缓存） */
+        val thinkingText: String = "",
         override val seq: Long? = null,
         /** T6 插话乐观标记：本条回复由插话触发（纯乐观，不落缓存） */
         val steerSent: Boolean = false,
@@ -198,7 +200,7 @@ private fun chunkTextOf(data: JsonElement): String {
     return when {
         chunk is JsonPrimitive && chunk.isString -> chunk.content
         chunk is JsonObject -> {
-            // 只接受正文增量；reasoning-delta（思考过程）一律丢弃，不上屏
+            // 只接受正文增量；reasoning-delta（思考过程）由 reasoningDeltaOf 单独提取进 thinkingText，不进正文
             val type = chunk["type"]?.jsonPrimitive?.contentOrNull
             if (type != null && type != "text-delta") return ""
             when {
@@ -275,6 +277,8 @@ class SessionChatState(
 
     // 流式增量缓冲：chunk 先攒在这里，50ms 批量 flush 一次列表
     private val pendingChunk = StringBuilder()
+    /** S5：思考增量缓冲——reasoning-delta 与正文 chunk 同批次 flush，保证时序一致 */
+    private val pendingThinking = StringBuilder()
     private var flushJob: Job? = null
     private var cacheJob: Job? = null
     // 注：token 用量统计已上移至全局 TokenUsageWatcher（挂在连接事件流上，PC 端会话也计数），
@@ -297,19 +301,33 @@ class SessionChatState(
 
     private fun nextKey() = "k${counter.getAndIncrement()}"
 
+    /** S5：完整消息 reasoning 块与流式已累积思考合并——取长（块为完整版，流式增量可能被服务端截断） */
+    private fun mergeThinking(accumulated: String, block: String?): String = when {
+        block.isNullOrBlank() -> accumulated
+        accumulated.isBlank() -> block
+        block.length > accumulated.length -> block
+        else -> accumulated
+    }
+
     private fun flushPendingChunk() {
         flushJob?.cancel()
         flushJob = null
-        if (pendingChunk.isEmpty()) return
+        if (pendingChunk.isEmpty() && pendingThinking.isEmpty()) return
         val delta = pendingChunk.toString()
+        val thinkingDelta = pendingThinking.toString()
         pendingChunk.clear()
+        pendingThinking.clear()
         val cur = _items.value.toMutableList()
         val idx = cur.indexOfLast { it is ChatItem.Assistant && it.streaming }
         if (idx >= 0) {
             val a = cur[idx] as ChatItem.Assistant
-            cur[idx] = ChatItem.Assistant(a.key, a.text + delta, streaming = true)
+            cur[idx] = ChatItem.Assistant(
+                a.key, a.text + delta,
+                thinkingText = a.thinkingText + thinkingDelta,
+                streaming = true,
+            )
         } else {
-            cur.add(ChatItem.Assistant(nextKey(), delta, streaming = true))
+            cur.add(ChatItem.Assistant(nextKey(), delta, thinkingText = thinkingDelta, streaming = true))
         }
         _items.value = cur
         scheduleCacheSave()
@@ -373,11 +391,12 @@ class SessionChatState(
                             chunkBuf.clear()
                             chunkStreamingIdx = -1
                             val t = assistantTextOf(e.data)
+                            val think = reasoningBlockOf(e.data)
                             val idx = list.indexOfLast { it is ChatItem.Assistant && it.streaming }
                             if (idx >= 0) {
-                                list[idx] = ChatItem.Assistant(list[idx].key, t, seq = e.seq)
-                            } else if (t.isNotBlank()) {
-                                list.add(ChatItem.Assistant(nextKey(), t, seq = e.seq))
+                                list[idx] = ChatItem.Assistant(list[idx].key, t, thinkingText = think ?: "", seq = e.seq)
+                            } else if (t.isNotBlank() || think != null) {
+                                list.add(ChatItem.Assistant(nextKey(), t, thinkingText = think ?: "", seq = e.seq))
                             }
                         }
                         DshEventTypes.ASSISTANT_CHUNK -> {
@@ -466,7 +485,10 @@ class SessionChatState(
                 }
                 DshEventTypes.ASSISTANT_MESSAGE -> {
                     val t = assistantTextOf(e.data)
-                    if (t.isNotBlank()) out.add(ChatItem.Assistant(nextKey(), t, seq = e.seq))
+                    val think = reasoningBlockOf(e.data)
+                    if (t.isNotBlank() || think != null) {
+                        out.add(ChatItem.Assistant(nextKey(), t, thinkingText = think ?: "", seq = e.seq))
+                    }
                 }
                 // 更早历史中的 chunk 已被完整 assistant/message 覆盖，忽略
                 DshEventTypes.TOOL_CALL -> {
@@ -549,13 +571,13 @@ class SessionChatState(
         if (e.type == DshEventTypes.ASSISTANT_CHUNK) {
             if (streamStart == null) streamStart = e.time
             val delta = chunkTextOf(e.data)
-            if (delta.isNotEmpty()) {
-                pendingChunk.append(delta)
-                if (flushJob == null) {
-                    flushJob = scope.launch {
-                        delay(CHUNK_FLUSH_MS)
-                        flushPendingChunk()
-                    }
+            val thinkingDelta = reasoningDeltaOf(e.data)
+            if (delta.isNotEmpty()) pendingChunk.append(delta)
+            if (!thinkingDelta.isNullOrEmpty()) pendingThinking.append(thinkingDelta)
+            if ((pendingChunk.isNotEmpty() || pendingThinking.isNotEmpty()) && flushJob == null) {
+                flushJob = scope.launch {
+                    delay(CHUNK_FLUSH_MS)
+                    flushPendingChunk()
                 }
             }
             return
@@ -576,14 +598,27 @@ class SessionChatState(
 
             DshEventTypes.ASSISTANT_MESSAGE -> {
                 val t = assistantTextOf(e.data)
+                // S5：完整消息兜底——reasoning 块作为思考全文；流式已累积时取长合并（块为完整版，流式可能截断）
+                val block = reasoningBlockOf(e.data)
                 val secs = streamStart?.let { (e.time - it) / 1000 }
                 val idx = cur.indexOfLast { it is ChatItem.Assistant && it.streaming }
                 // T6：插话回显命中后，本条（或其覆盖的流式条目）即插话触发的回复
                 val steer = steerReplyArmed.also { steerReplyArmed = false }
                 if (idx >= 0) {
-                    cur[idx] = ChatItem.Assistant(cur[idx].key, t, thinkSeconds = secs, seq = e.seq, steerSent = steer)
-                } else if (t.isNotBlank()) {
-                    cur.add(ChatItem.Assistant(nextKey(), t, thinkSeconds = secs, seq = e.seq, steerSent = steer))
+                    val a = cur[idx] as ChatItem.Assistant
+                    cur[idx] = ChatItem.Assistant(
+                        a.key, t,
+                        thinkingText = mergeThinking(a.thinkingText, block),
+                        thinkSeconds = secs, seq = e.seq, steerSent = steer,
+                    )
+                } else if (t.isNotBlank() || block != null) {
+                    cur.add(
+                        ChatItem.Assistant(
+                            nextKey(), t,
+                            thinkingText = block ?: "",
+                            thinkSeconds = secs, seq = e.seq, steerSent = steer,
+                        )
+                    )
                 }
                 streamStart = null
             }
@@ -627,7 +662,11 @@ class SessionChatState(
                 val idx = cur.indexOfLast { it is ChatItem.Assistant && it.streaming }
                 if (idx >= 0) {
                     val a = cur[idx] as ChatItem.Assistant
-                    cur[idx] = ChatItem.Assistant(a.key, a.text, streaming = false, seq = a.seq)
+                    cur[idx] = ChatItem.Assistant(
+                        a.key, a.text,
+                        thinkingText = a.thinkingText,
+                        streaming = false, seq = a.seq,
+                    )
                 }
             }
 
@@ -1580,6 +1619,45 @@ private fun decodeUserImage(context: android.content.Context, img: UserImage): B
     }
 }
 
+/**
+ * S5：思考链折叠区——「💭 已思考」标题行点击展开/收起思考文本。
+ * 纯文本（bodySmall + 弱色），不渲染 Markdown；流式进行中标题显示「思考中…」。
+ * 与既有「已思考 x 秒」占位（thinkSeconds 徽章）并存不冲突：前者是思考内容，后者是耗时。
+ */
+@Composable
+private fun ThinkingFold(streaming: Boolean, text: String, modifier: Modifier = Modifier) {
+    var expanded by remember { mutableStateOf(false) }
+    Column(modifier.fillMaxWidth()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .clickable { expanded = !expanded }
+                .padding(vertical = 2.dp),
+        ) {
+            Text(
+                if (streaming) "💭 思考中…" else "💭 已思考",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (streaming) MaterialTheme.colorScheme.onSurfaceVariant else DshWarn,
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                if (expanded) "▾" else "▸",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (expanded) {
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun AssistantCard(item: ChatItem.Assistant, modifier: Modifier = Modifier) {
@@ -1644,6 +1722,11 @@ private fun AssistantCard(item: ChatItem.Assistant, modifier: Modifier = Modifie
                             color = DshBrand,
                         )
                     }
+                    Spacer(Modifier.height(6.dp))
+                }
+                // S5 思考链：内容上方渲染「💭 已思考」折叠区（点击展开/收起思考文本；流式进行中显示「思考中…」）
+                if (item.thinkingText.isNotBlank()) {
+                    ThinkingFold(streaming = item.streaming, text = item.thinkingText)
                     Spacer(Modifier.height(6.dp))
                 }
                 if (item.text.isNotBlank()) {
