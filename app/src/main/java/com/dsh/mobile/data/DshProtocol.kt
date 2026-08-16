@@ -152,9 +152,10 @@ data class SessionSummary(
 )
 
 /** 会话标题：projections.values.title；无则 null（HomeScreen/PendingScreen 共用） */
-fun sessionTitleOf(session: SessionSummary): String? =
+fun sessionTitleOf(session: SessionSummary): String? = runCatching {
     session.projections?.jsonObject?.get("values")?.jsonObject
         ?.get("title")?.jsonPrimitive?.contentOrNull
+}.getOrNull()
 
 @Serializable
 data class SessionListValue(
