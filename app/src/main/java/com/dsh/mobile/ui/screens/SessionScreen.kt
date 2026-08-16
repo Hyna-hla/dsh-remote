@@ -1753,6 +1753,10 @@ private fun UserBubble(item: ChatItem.User, modifier: Modifier = Modifier) {
                 shape = DshShape.userBubble,
                 color = if (DshThemeStyle == ThemeStyle.CHATGPT) Color(0xFF1C1C1E)
                 else MaterialTheme.colorScheme.primaryContainer,
+                // 蓝鲸（STANDARD）主题背景图模式下给用户气泡一道细描边，避免与背景糊在一起
+                border = if (DshThemeStyle == ThemeStyle.STANDARD)
+                    BorderStroke(0.75.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.55f))
+                else null,
                 modifier = Modifier
                     .widthIn(max = 320.dp)
                     .combinedClickable(

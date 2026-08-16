@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -135,8 +136,9 @@ private fun applyShapeStyle(style: ThemeStyle) {
     when (style) {
         ThemeStyle.STANDARD -> {
             DshShape.bubble = RoundedCornerShape(18.dp)
-            DshShape.userBubble = RoundedCornerShape(18.dp, 6.dp, 18.dp, 18.dp)
-            DshShape.assistantBubble = RoundedCornerShape(6.dp, 18.dp, 18.dp, 18.dp)
+            // 尾巴小圆角放底部发送方一侧（主流 IM 惯例；原在顶部显别扭）
+            DshShape.userBubble = RoundedCornerShape(18.dp, 18.dp, 6.dp, 18.dp)
+            DshShape.assistantBubble = RoundedCornerShape(18.dp, 18.dp, 18.dp, 6.dp)
             DshShape.pill = RoundedCornerShape(24.dp)
             DshShape.card = RoundedCornerShape(14.dp)
             DshShape.small = RoundedCornerShape(10.dp)
@@ -163,19 +165,20 @@ private fun applyShapeStyle(style: ThemeStyle) {
             DshShape.small = cutSm
         }
         ThemeStyle.CHATGPT -> {
-            // ChatGPT 移动端：胶囊 = 高度/2，主按钮 16dp，列表点击态 8dp
+            // ChatGPT 移动端：胶囊 = 高度/2，主按钮 16dp，列表点击态 8dp；气泡大圆角 + 底部小尾
             DshShape.bubble = RoundedCornerShape(16.dp)
-            DshShape.userBubble = RoundedCornerShape(16.dp)
+            DshShape.userBubble = RoundedCornerShape(22.dp, 22.dp, 6.dp, 22.dp)
             DshShape.assistantBubble = RoundedCornerShape(16.dp)
             DshShape.pill = RoundedCornerShape(50)
             DshShape.card = RoundedCornerShape(16.dp)
             DshShape.small = RoundedCornerShape(8.dp)
         }
         ThemeStyle.CLAUDE -> {
-            // Claude 移动端：输入主容器 28px 超大圆角、胶囊 = 高度/2、列表点击态 12px
-            DshShape.bubble = RoundedCornerShape(16.dp)
-            DshShape.userBubble = RoundedCornerShape(16.dp)
-            DshShape.assistantBubble = RoundedCornerShape(16.dp)
+            // Claude 移动端：输入主容器 28px 超大圆角、胶囊 = 高度/2、列表点击态 12px；
+            // 气泡更圆（20dp）+ 底部小尾，暖调圆润
+            DshShape.bubble = RoundedCornerShape(20.dp)
+            DshShape.userBubble = RoundedCornerShape(20.dp, 20.dp, 6.dp, 20.dp)
+            DshShape.assistantBubble = RoundedCornerShape(20.dp)
             DshShape.pill = RoundedCornerShape(50)
             DshShape.card = RoundedCornerShape(28.dp)
             DshShape.small = RoundedCornerShape(12.dp)
@@ -359,7 +362,11 @@ private fun dshColorScheme(theme: ThemeDef, bgActive: Boolean = false, glass: Fl
         outline = c.border, outlineVariant = Color(0xFFE4EAF3),
     ) else darkColorScheme(
         primary = c.brand, onPrimary = Color(0xFF0D1B2A),
-        primaryContainer = Color(0xFF1B3A6B), onPrimaryContainer = Color(0xFFDCE7FB),
+        // 容器色从品牌色推导（surface 与 brand 插值）：原硬编码蓝 #1B3A6B 会让
+        // Claude 的陶土橙 / ChatGPT 的中性黑等非蓝主题的用户气泡与容器漏出蓝色。
+        // 蓝鲸主题下插值结果 ≈ 原 #1B3A6B，视觉不变；其余主题容器色自动随品牌调。
+        primaryContainer = lerp(c.surface, c.brand, 0.38f),
+        onPrimaryContainer = lerp(c.textPrimary, c.brand, 0.25f),
         secondary = c.brandSoft, onSecondary = Color(0xFF0D1B2A),
         tertiary = c.warn, onTertiary = Color(0xFF241A05),
         error = c.error, onError = Color(0xFF2A0B0B),
