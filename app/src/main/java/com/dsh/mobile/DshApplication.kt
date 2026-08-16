@@ -6,8 +6,10 @@ import android.app.NotificationManager
 import com.dsh.mobile.data.ApprovalCenter
 import com.dsh.mobile.data.DshConnection
 import com.dsh.mobile.data.HistoryCache
+import com.dsh.mobile.data.PairingCoordinator
 import com.dsh.mobile.data.ProTokenBank
 import com.dsh.mobile.data.SecretCipher
+import com.dsh.mobile.data.SettingsStore
 import com.dsh.mobile.data.UpdateChecker
 import kotlinx.coroutines.*
 
@@ -16,6 +18,7 @@ class DshApplication : Application() {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val connection = DshConnection(this)
     val approvalCenter by lazy { ApprovalCenter(connection, appScope) }
+    val pairingCoordinator by lazy { PairingCoordinator(connection, SettingsStore(this), appScope) }
 
     override fun onCreate() {
         super.onCreate()
@@ -28,6 +31,8 @@ class DshApplication : Application() {
         ProTokenBank.init(this)
         // 更新镜像偏好初始化（记住上次成功的镜像，下次优先）
         UpdateChecker.init(this)
+        // 配对握手协调器启动（Connected 后按活跃 profile 自动握手）
+        pairingCoordinator.start()
         // 注：资源更新检查在 MainActivity 的 UpdatePromptOverlay 里做（有更新弹窗询问，无更新静默）
     }
 

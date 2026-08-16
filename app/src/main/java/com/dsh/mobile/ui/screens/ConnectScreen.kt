@@ -23,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.dsh.mobile.R
 import androidx.core.content.ContextCompat
+import com.dsh.mobile.DshApplication
 import com.dsh.mobile.data.*
 import com.dsh.mobile.service.DshConnectionService
 import com.dsh.mobile.ui.theme.DshBrand
@@ -116,6 +117,14 @@ fun ConnectScreen(
         if (auto != null) {
             scope.launch { settingsStore.setActiveProfile(auto.id) }
             connectTo(auto)
+        }
+    }
+
+    // —— 配对握手结果提示（Toast 需主线程，LaunchedEffect 默认运行于主线程）——
+    LaunchedEffect(Unit) {
+        val app = context.applicationContext as? DshApplication ?: return@LaunchedEffect
+        app.pairingCoordinator.events.collect { msg ->
+            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
         }
     }
 
