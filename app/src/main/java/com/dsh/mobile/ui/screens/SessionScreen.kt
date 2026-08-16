@@ -63,6 +63,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
+import java.util.Locale
 
 /** 判定「复杂任务」的关键词（命中即用 Pro） */
 private val COMPLEX_TASK_KEYWORDS = listOf(
@@ -122,6 +123,8 @@ sealed interface ChatItem {
         val result: String? = null,
         val isError: Boolean = false,
         override val seq: Long? = null,
+        /** S5：工具耗时 ms——tool/call ↔ tool/result 的 time 差值（实时配对，历史重放为 null） */
+        val elapsedMs: Long? = null,
     ) : ChatItem
 
     data class Notice(override val key: String, val text: String, val isError: Boolean = false, override val seq: Long? = null) : ChatItem
@@ -240,6 +243,24 @@ private fun toolResultOf(data: JsonElement): Pair<String, Boolean>? {
     return null
 }
 
+/**
+ * S5：从 tool/result 事件 data 取配对 callId——优先 brief 指定位置
+ * `message.content[0].toolCallId`（tool-result 块），兜底既有 `message.source.callId`（同值）。
+ * 取不到 → ""（沿用旧语义：空 id 按「唯一 running 工具」匹配）。
+ */
+private fun toolResultCallIdOf(data: JsonElement): String {
+    val msg = data.jsonObject["message"]?.jsonObject ?: return ""
+    val content = msg["content"] as? JsonArray
+    if (content != null) {
+        for (el in content) {
+            val o = el.jsonObject
+            if (o["type"]?.jsonPrimitive?.contentOrNull != "tool-result") continue
+            return o["toolCallId"]?.jsonPrimitive?.contentOrNull ?: ""
+        }
+    }
+    return (msg["source"] as? JsonObject)?.get("callId")?.jsonPrimitive?.contentOrNull ?: ""
+}
+
 class SessionChatState(
     private val scope: CoroutineScope,
     private val connection: DshConnection,
@@ -257,6 +278,12 @@ class SessionChatState(
     private var streamStart: Long? = null
     /** key 生成线程安全：load() 解析在 Default 线程、实时事件在主线程，并发自增不得冲突 */
     private val counter = java.util.concurrent.atomic.AtomicLong(0)
+
+    /** S5：工具耗时配对——tool/call 登记时间，tool/result 配对计算并移除 */
+    private val toolTiming = ToolTimingTracker()
+
+    /** S5：断线/换会话时清空在途配对（时间戳已失效，避免跨连接错配） */
+    fun clearToolTiming() = toolTiming.cleanup()
 
     // T6 插话乐观标记：steer 发送时登记的文本，按服务端回显 USER_MESSAGE 的文本匹配消费。
     // 列表语义——同文本连发两次可分别消费（UI 单飞发送，实际最多一条在途）。
@@ -419,7 +446,7 @@ class SessionChatState(
                                 )
                             )
                         }
-                        DshEventTypes.TOOL_RESULT -> attachResult(list, e.data)
+                        DshEventTypes.TOOL_RESULT -> attachResult(list, e.data, e.time)
                         "permission/preset" -> {
                             e.data.jsonObject["preset"]?.jsonPrimitive?.contentOrNull?.let { currentMode.value = it }
                         }
@@ -503,7 +530,7 @@ class SessionChatState(
                         )
                     )
                 }
-                DshEventTypes.TOOL_RESULT -> attachResult(out, e.data)
+                DshEventTypes.TOOL_RESULT -> attachResult(out, e.data, e.time)
                 "permission/preset" -> {
                     e.data.jsonObject["preset"]?.jsonPrimitive?.contentOrNull?.let { currentMode.value = it }
                 }
@@ -625,10 +652,12 @@ class SessionChatState(
 
             DshEventTypes.TOOL_CALL -> {
                 val d = e.data.jsonObject
+                val callId = d["callId"]?.jsonPrimitive?.contentOrNull ?: ""
+                toolTiming.onCall(callId, e.time)
                 cur.add(
                     ChatItem.Tool(
                         key = nextKey(),
-                        callId = d["callId"]?.jsonPrimitive?.contentOrNull ?: "",
+                        callId = callId,
                         name = d["name"]?.jsonPrimitive?.contentOrNull ?: "tool",
                         args = d["arguments"]?.jsonPrimitive?.contentOrNull ?: "",
                         seq = e.seq,
@@ -636,7 +665,7 @@ class SessionChatState(
                 )
             }
 
-            DshEventTypes.TOOL_RESULT -> attachResult(cur, e.data)
+            DshEventTypes.TOOL_RESULT -> attachResult(cur, e.data, e.time)
             DshEventTypes.SESSION_TITLE -> {
                 e.data.jsonObject["title"]?.jsonPrimitive?.contentOrNull?.let { title.value = it }
             }
@@ -675,10 +704,11 @@ class SessionChatState(
         _items.value = cur
     }
 
-    private fun attachResult(list: MutableList<ChatItem>, data: JsonElement) {
+    private fun attachResult(list: MutableList<ChatItem>, data: JsonElement, timeMs: Long) {
         val r = toolResultOf(data) ?: return
-        val callId = (data.jsonObject["message"]?.jsonObject?.get("source") as? JsonObject)
-            ?.get("callId")?.jsonPrimitive?.contentOrNull ?: ""
+        val callId = toolResultCallIdOf(data)
+        // S5：配对计算工具耗时（无配对/负值 → null；历史重放路径 tracker 为空同样得 null）
+        val elapsed = if (callId.isEmpty()) null else toolTiming.onResult(callId, timeMs)
         val idx = list.indexOfLast {
             it is ChatItem.Tool && (it.callId == callId || (callId.isEmpty() && it.status == "running"))
         }
@@ -688,6 +718,7 @@ class SessionChatState(
                 status = if (r.second) "error" else "done",
                 result = r.first.take(4000),
                 isError = r.second,
+                elapsedMs = elapsed,
             )
         }
     }
@@ -846,9 +877,17 @@ fun SessionScreen(
                         runCatching { ev.value.jsonObject }.getOrNull()?.let { state.imageLimits.value = it }
                     }
 
-                is DshConnection.Event.StreamError -> streamNotice = ev.message
+                is DshConnection.Event.StreamError -> {
+                    streamNotice = ev.message
+                    // S5：流中断，在途工具配对的时间戳可能已失效，清空防错配
+                    state.clearToolTiming()
+                }
 
-                is DshConnection.Event.Reconnected -> streamNotice = null
+                is DshConnection.Event.Reconnected -> {
+                    streamNotice = null
+                    // S5：重连后时间线重新开始，清空旧配对
+                    state.clearToolTiming()
+                }
 
                 else -> {}
             }
@@ -1824,6 +1863,18 @@ private fun ToolCard(item: ChatItem.Tool, modifier: Modifier = Modifier) {
                         Modifier.size(14.dp),
                         strokeWidth = 1.5.dp,
                         color = DshBrand,
+                    )
+                }
+                // S5：工具耗时徽章（实时配对；1s 以下显示 ms，以上 %.1f s）
+                item.elapsedMs?.let { elapsed ->
+                    Spacer(Modifier.width(6.dp))
+                    ToolStatusBadge(
+                        if (elapsed >= 1000) {
+                            String.format(Locale.ROOT, "耗时 %.1f s", elapsed / 1000.0)
+                        } else {
+                            "耗时 $elapsed ms"
+                        },
+                        MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 if (item.result != null) {
