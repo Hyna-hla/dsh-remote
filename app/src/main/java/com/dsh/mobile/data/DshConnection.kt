@@ -68,7 +68,7 @@ class DshConnection(private val appContext: Context? = null) {
     }
 
     private var profileId: String? = null
-    private var currentProfile: HostProfile? = null
+    private var connectedProfile: HostProfile? = null
     private var unaryClient: OkHttpClient = OkHttpClient()
     private var streamClient: OkHttpClient = OkHttpClient()
     private var onAttempt: ((AttemptInfo) -> Unit)? = null
@@ -95,6 +95,9 @@ class DshConnection(private val appContext: Context? = null) {
 
     fun baseUrl(): String = baseUrl
 
+    /** 当前连接使用的 profile（connect 时同步设置、disconnect 清空）；配对等按已连接主机取用 */
+    fun currentProfile(): HostProfile? = connectedProfile
+
     // ────────────────────────── 连接管理 ──────────────────────────
 
     @Synchronized
@@ -103,7 +106,7 @@ class DshConnection(private val appContext: Context? = null) {
         if (_state.value is State.Connected && baseUrl == normalized) return
         disconnectInternal()
         profileId = profile.id
-        currentProfile = profile
+        connectedProfile = profile
         this.onAttempt = onAttempt
         baseUrl = normalized
         val (unary, stream) = OkHttpClientFactory.build(profile)
@@ -175,7 +178,7 @@ class DshConnection(private val appContext: Context? = null) {
         return code
     }
 
-    private fun currentProfileHasProxy(): Boolean = currentProfile?.proxy != null
+    private fun currentProfileHasProxy(): Boolean = connectedProfile?.proxy != null
 
     private fun failPermanently(code: ConnectionErrorCode, detail: String) {
         onAttempt?.invoke(AttemptInfo(profileId ?: "", code, null))
@@ -190,7 +193,7 @@ class DshConnection(private val appContext: Context? = null) {
         unregisterNetworkCallback()
         scope.coroutineContext.cancelChildren()
         _state.value = State.Disconnected
-        currentProfile = null
+        connectedProfile = null
         profileId?.let { OkHttpClientFactory.release(it) }
         pendingApprovalRpc.clear()
         pendingQuestionRpc.clear()
@@ -224,7 +227,7 @@ class DshConnection(private val appContext: Context? = null) {
         retryNowPending = true
         retryScope.launch {
             try {
-                val p = currentProfile ?: return@launch
+                val p = connectedProfile ?: return@launch
                 if (_state.value !is State.Error) return@launch
                 connectJob?.cancel()          // 取消正在等待退避的旧循环
                 connect(p, onAttempt)         // 立即重建（内部会新起连接循环）

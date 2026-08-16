@@ -28,11 +28,9 @@ class PairingCoordinator(
                     handshakingFor = null
                     return@collect
                 }
-                val activeId = settingsStore.activeProfileId.first() ?: return@collect
-                val profile = settingsStore.profiles.first().firstOrNull { it.id == activeId }
-                    ?: return@collect
-                if (profile.paired || handshakingFor == activeId) return@collect
-                handshakingFor = activeId
+                val profile = connection.currentProfile() ?: return@collect
+                if (profile.paired || handshakingFor == profile.id) return@collect
+                handshakingFor = profile.id
                 val outcome = runCatching {
                     // 握手前已取得 profile，直接用其 unary client（避免不可达的兜底分支）
                     val client = OkHttpClientFactory.build(profile).first
