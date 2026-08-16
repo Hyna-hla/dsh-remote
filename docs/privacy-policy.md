@@ -30,4 +30,4 @@ DSH Remote（下称"本应用"）是一个**非官方**的第三方客户端，�
 
 ## 联系
 
-可在 GitHub 仓库（Hyna-hla/harness-remote）提 Issue 联系开发者。
+可在 GitHub 仓库（Hyna-hla/dsh-remote）提 Issue 联系开发者。

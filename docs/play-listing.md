@@ -17,7 +17,7 @@
 2. [ ] 创建应用 → 选「工具」分类 → 语言（中文 + 英文）
 3. [ ] 上传 AAB：release/DSH-Remote-v1.0.15.aab（先用**内部测试轨道**验证，再逐步开放）
 4. [ ] 隐私政策 URL：托管到任意可访问 URL（可用本仓库 raw：
-     https://raw.githubusercontent.com/Hyna-hla/harness-remote/main/docs/privacy-policy.md
+     https://raw.githubusercontent.com/Hyna-hla/dsh-remote/main/docs/privacy-policy.md
      或转 GitHub Pages）
 5. [ ] 商店图标（512×512 PNG）+ 功能图（1024×500）+ 截图 5–8 张（手机实机截图：
      连接页 / 首页 / 会话流 / 审批卡片 / 设置 / 主题导入）

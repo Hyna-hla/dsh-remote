@@ -58,6 +58,7 @@ fun SettingsScreen(
     connection: DshConnection,
     onBack: () -> Unit,
     onUpgrade: () -> Unit,
+    onOpenMarket: () -> Unit,
     onDisconnect: () -> Unit,
 ) {
     val connState by connection.state.collectAsState()
@@ -260,6 +261,12 @@ fun SettingsScreen(
                             Icon(Icons.Default.FileOpen, null, Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
                             Text("导入主题 (zip/json)")
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        OutlinedButton(onClick = onOpenMarket) {
+                            Icon(Icons.Default.Storefront, null, Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("主题市场")
                         }
                         themeImportError?.let {
                             Spacer(Modifier.width(8.dp))

@@ -1,4 +1,4 @@
-﻿import java.util.Properties
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
@@ -22,8 +22,8 @@ android {
         applicationId = "com.dsh.mobile"
         minSdk = 29
         targetSdk = 36
-        versionCode = 51
-        versionName = "1.4.2"
+        versionCode = 52
+        versionName = "1.5.0"
 
         vectorDrawables {
             useSupportLibrary = true

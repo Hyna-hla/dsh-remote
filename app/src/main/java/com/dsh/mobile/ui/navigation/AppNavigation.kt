@@ -24,6 +24,7 @@ sealed class Screen(val route: String) {
     data object Settings : Screen("settings")
     data object Pending : Screen("pending")
     data object Pro : Screen("pro")
+    data object Market : Screen("market")
     data object HostProfile : Screen("hostProfile/{profileId}") {
         fun createRoute(profileId: String?) = "hostProfile/${profileId ?: "new"}"
     }
@@ -115,11 +116,15 @@ fun AppNavigation(
                 connection = connection,
                 onBack = { navController.popBackStack() },
                 onUpgrade = { navController.navigate(Screen.Pro.route) },
+                onOpenMarket = { navController.navigate(Screen.Market.route) },
                 onDisconnect = { onUserDisconnect() },
             )
         }
         composable(Screen.Pro.route) {
             ProScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Screen.Market.route) {
+            MarketScreen(onBack = { navController.popBackStack() })
         }
         composable(
             route = Screen.HostProfile.route,
