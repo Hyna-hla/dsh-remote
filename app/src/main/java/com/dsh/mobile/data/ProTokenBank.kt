@@ -17,6 +17,8 @@ data class ProPlan(
     val name: String,
     /** 假价格（文案用） */
     val price: String,
+    /** 假原价（划线价，各档位不同才像真的） */
+    val originalPrice: String,
     /** 赠送 token 额度 */
     val tokens: Long,
     /** 幽默标签 */
@@ -32,9 +34,9 @@ data class ProPlan(
 object ProTokenBank {
 
     val plans: List<ProPlan> = listOf(
-        ProPlan("lite", "轻量 Pro", "¥0.00", 100_000, "够你聊一宿，假装体面"),
-        ProPlan("plus", "尊享 Pro", "¥0.00", 1_000_000, "打工人的梦想额度"),
-        ProPlan("infinity", "无限 Pro ∞", "¥0.00", 100_000_000, "假装不差钱，横着聊"),
+        ProPlan("lite", "轻量 Pro", "¥0.00", "¥19.99", 100_000, "够你聊一宿，假装体面"),
+        ProPlan("plus", "尊享 Pro", "¥0.00", "¥99.99", 1_000_000, "打工人的梦想额度"),
+        ProPlan("infinity", "无限 Pro ∞", "¥0.00", "¥199.99", 100_000_000, "假装不差钱，横着聊"),
     )
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)

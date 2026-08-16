@@ -9,6 +9,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import com.dsh.mobile.data.*
 import com.dsh.mobile.ui.components.QuestionCard
@@ -25,6 +27,7 @@ fun PendingScreen(
     onOpenSession: (sessionId: String, focusSeq: Long?) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
     val items by center.items.collectAsState()
     val snackbar = remember { SnackbarHostState() }
     var busy by remember { mutableStateOf(false) }
@@ -154,6 +157,7 @@ fun PendingScreen(
                                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                     OutlinedButton(
                                         onClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                             scope.launch {
                                                 runCatching { center.reject(a.sessionId, a.approvalId) }
                                                     .onFailure { e -> scope.launch { snackbar.showSnackbar(e.message ?: "失败") } }
@@ -163,6 +167,7 @@ fun PendingScreen(
                                     ) { Text("拒绝") }
                                     Button(
                                         onClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                             if (risk == RiskLevel.HIGH) confirmDialog = true
                                             else scope.launch {
                                                 runCatching { center.allow(a.sessionId, a.approvalId) }

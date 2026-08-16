@@ -1,14 +1,22 @@
 package com.dsh.mobile.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -69,23 +77,7 @@ fun MarkdownText(
                     )
                 }
 
-                is MdBlock.Code -> {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = DshSurfaceHigh,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(
-                            text = block.text,
-                            modifier = Modifier.padding(10.dp),
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 12.sp,
-                                lineHeight = 17.sp,
-                            ),
-                        )
-                    }
-                }
+                is MdBlock.Code -> CodeBlock(block)
 
                 is MdBlock.Bullet -> {
                     Row(Modifier.fillMaxWidth()) {
@@ -117,8 +109,66 @@ fun MarkdownText(
     }
 }
 
-private fun renderInline(text: String): AnnotatedString = buildAnnotatedString {
-    // 支持 **加粗** 与 `行内代码`
+/**
+ * 代码块：头部条（语言角标 + 一键复制，「已复制 ✓」1.5s 反馈）+ 等宽正文。
+ * 头部条用 surfaceVariant 半透明叠色，随主题走，不锁死配色。
+ */
+@Composable
+private fun CodeBlock(block: MdBlock.Code) {
+    val clipboard = LocalClipboardManager.current
+    var copied by remember { mutableStateOf(false) }
+    LaunchedEffect(copied) {
+        if (copied) {
+            kotlinx.coroutines.delay(1500)
+            copied = false
+        }
+    }
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = DshSurfaceHigh,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
+                    .padding(horizontal = 10.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    block.lang.ifBlank { "code" },
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                    color = DshBrandSoft,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    if (copied) "已复制 ✓" else "复制",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (copied) MaterialTheme.colorScheme.primary else DshBrandSoft,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable {
+                            clipboard.setText(AnnotatedString(block.text))
+                            copied = true
+                        }
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
+            Text(
+                text = block.text,
+                modifier = Modifier.padding(10.dp),
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp,
+                ),
+            )
+        }
+    }
+}
+
+private fun renderInline(text: String): AnnotatedString = buildAnnotatedString {    // 支持 **加粗** 与 `行内代码`
     val bold = Regex("""\*\*(.+?)\*\*""")
     val code = Regex("""`([^`\n]+)`""")
     var rest = text
@@ -159,7 +209,7 @@ private fun renderInline(text: String): AnnotatedString = buildAnnotatedString {
 
 private sealed interface MdBlock {
     data class Heading(val level: Int, val text: String) : MdBlock
-    data class Code(val text: String) : MdBlock
+    data class Code(val text: String, val lang: String = "") : MdBlock
     data class Bullet(val text: String) : MdBlock
     data class Paragraph(val text: String) : MdBlock
 }
@@ -172,6 +222,7 @@ private fun parseMarkdownBlocks(text: String): List<MdBlock> {
         val line = lines[i]
         when {
             line.trimStart().startsWith("```") -> {
+                val lang = line.trimStart().removePrefix("```").trim().take(16)
                 val buf = StringBuilder()
                 i++
                 while (i < lines.size && !lines[i].trimStart().startsWith("```")) {
@@ -179,7 +230,7 @@ private fun parseMarkdownBlocks(text: String): List<MdBlock> {
                     i++
                 }
                 i++ // 跳过结束围栏
-                blocks.add(MdBlock.Code(buf.toString().trimEnd('\n')))
+                blocks.add(MdBlock.Code(buf.toString().trimEnd('\n'), lang))
             }
 
             line.isBlank() -> i++

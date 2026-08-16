@@ -34,6 +34,12 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material3.*
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,7 +49,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -272,6 +280,8 @@ class SessionChatState(
 ) {
     private val _items = MutableStateFlow<List<ChatItem>>(emptyList())
     val items: StateFlow<List<ChatItem>> = _items.asStateFlow()
+    /** 首屏加载中（构造起 → 首次 load() 结束）：空列表 + 加载中 → UI 显示骨架屏气泡 */
+    val initialLoading = MutableStateFlow(true)
     val title = MutableStateFlow<String?>(null)
     val running = MutableStateFlow(false)
     val currentMode = MutableStateFlow<String?>(null)
@@ -478,6 +488,7 @@ class SessionChatState(
                 _items.value = _items.value + ChatItem.Notice(nextKey(), "网络失败，显示本地缓存（重进可重试）", false)
             }
         } finally {
+            initialLoading.value = false
             // 历史页落地后重放加载期间积压的实时事件，保证内容不丢
             loaded = true
             if (preloadBuffer.isNotEmpty()) {
@@ -740,9 +751,11 @@ fun SessionScreen(
     onPending: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
     val context = LocalContext.current
     val state = remember(sessionId) { SessionChatState(scope, connection, sessionId, HistoryCache(context)) }
     val items by state.items.collectAsState()
+    val initialLoading by state.initialLoading.collectAsState()
     val title by state.title.collectAsState()
     val running by state.running.collectAsState()
 
@@ -980,6 +993,7 @@ fun SessionScreen(
     fun send() {
         val text = input.trim()
         if ((text.isBlank() && pendingImages.isEmpty()) || sending) return
+        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         sending = true
         actionError = null
         // 捕获本次发送模式：await 期间用户切走开关不影响已发起请求的语义
@@ -1176,7 +1190,18 @@ fun SessionScreen(
         }
 
         // 本会话待办轻提示条：审批/问答数量，异常不计入
-        if (myPending > 0) {
+        // 待办轻提示条：出现/消失 slide+fade（从顶部滑入，避免生硬闪现）
+        androidx.compose.animation.AnimatedVisibility(
+            visible = myPending > 0,
+            enter = androidx.compose.animation.slideInVertically(
+                initialOffsetY = { -it },
+                animationSpec = tween(220),
+            ) + androidx.compose.animation.fadeIn(animationSpec = tween(220)),
+            exit = androidx.compose.animation.slideOutVertically(
+                targetOffsetY = { -it },
+                animationSpec = tween(180),
+            ) + androidx.compose.animation.fadeOut(animationSpec = tween(180)),
+        ) {
             Surface(color = MaterialTheme.colorScheme.primaryContainer) {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
@@ -1230,6 +1255,12 @@ fun SessionScreen(
                             }
                         }
                     }
+                }
+            }
+            // 首屏骨架：空列表 + 加载中 → 3 条呼吸气泡占位（对齐真实消息的宽度分布，感知更快）
+            if (initialLoading && items.isEmpty()) {
+                items(3, key = { "skeleton_$it" }) { index ->
+                    SkeletonMessageBubble(index)
                 }
             }
             items(items, key = { it.key }) { item ->
@@ -2369,3 +2400,48 @@ private fun CommandsDialog(
 
 /** 语音识别结果回填输入栏前的最小清洗：null/空白/空串 → null（不回填）；有效文本 → trim 后返回 */
 internal fun normalizeVoiceResult(raw: String?): String? = raw?.trim()?.takeIf { it.isNotEmpty() }
+
+/** 首屏骨架气泡：呼吸透明度动画；index 决定伪随机宽度/对齐，避免三行等宽的死板感 */
+@Composable
+private fun SkeletonMessageBubble(index: Int) {
+    val transition = rememberInfiniteTransition(label = "skeleton")
+    val alpha by transition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 0.14f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(700, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "skeletonAlpha",
+    )
+    val widths = listOf(0.72f, 0.55f, 0.82f)
+    val alignEnd = index == 1
+    Box(
+        modifier = if (alignEnd) Modifier.fillMaxWidth() else Modifier,
+        contentAlignment = if (alignEnd) Alignment.BottomEnd else Alignment.BottomStart,
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier
+                .fillMaxWidth(widths[index % widths.size])
+                .background(
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = alpha),
+                    RoundedCornerShape(12.dp),
+                )
+                .padding(12.dp),
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(12.dp)
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = alpha), RoundedCornerShape(4.dp))
+            )
+            Box(
+                Modifier
+                    .fillMaxWidth(0.68f)
+                    .height(12.dp)
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = alpha), RoundedCornerShape(4.dp))
+            )
+        }
+    }
+}

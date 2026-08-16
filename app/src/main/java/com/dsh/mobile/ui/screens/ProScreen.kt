@@ -13,6 +13,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.dsh.mobile.data.ProPlan
 import com.dsh.mobile.data.ProTokenBank
@@ -191,9 +192,10 @@ fun ProScreen(onBack: () -> Unit) {
                                 color = MaterialTheme.colorScheme.primary,
                             )
                             Text(
-                                "原价 ¥199.99",
+                                "原价 ${plan.originalPrice}",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textDecoration = TextDecoration.LineThrough,
                             )
                             TextButton(
                                 onClick = { confirmPlan = plan },
