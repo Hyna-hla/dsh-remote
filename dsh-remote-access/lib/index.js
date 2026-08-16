@@ -49,17 +49,19 @@ const readBody = (req) =>
 // 探测结果短缓存：设置页轮询时不重复 spawn 进程
 let dshPortCache = { at: 0, value: 0 };
 
-/** 探测正在运行的桌面版 DSH web 端口（node 进程命令行匹配 dsh bin.js web） */
+/** 探测正在运行的桌面版 DSH web 端口（node 进程命令行匹配 bin.js web；兜底默认端口 3080） */
 async function findDshPort() {
   if (Date.now() - dshPortCache.at < 60000) return dshPortCache.value;
   const ps =
     "$ErrorActionPreference='SilentlyContinue'; " +
-    "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | " +
-    "Where-Object { $_.CommandLine -match 'dsh[\\\\/]lib[\\\\/]bin\\.js' -and $_.CommandLine -match '\\bweb\\b' } | " +
-    "ForEach-Object { $p = $_; " +
-    "Get-NetTCPConnection -State Listen -OwningProcess $p.ProcessId -ErrorAction SilentlyContinue | " +
+    "$p = Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | " +
+    "Where-Object { $_.CommandLine -match 'bin\\.js' -and $_.CommandLine -match '\\bweb\\b' } | " +
+    "ForEach-Object { $proc = $_; " +
+    "Get-NetTCPConnection -State Listen -OwningProcess $proc.ProcessId -ErrorAction SilentlyContinue | " +
     "Where-Object { $_.LocalAddress -in @('127.0.0.1','0.0.0.0','::') } | " +
-    "Select-Object -First 1 -ExpandProperty LocalPort } | Select-Object -First 1";
+    "Select-Object -First 1 -ExpandProperty LocalPort } | Select-Object -First 1; " +
+    "if (-not $p) { $p = Get-NetTCPConnection -State Listen -LocalPort 3080 -ErrorAction SilentlyContinue | Where-Object { $_.OwningProcess } | Select-Object -First 1 -ExpandProperty LocalPort }; " +
+    "$p";
   try {
     const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-Command", ps], { timeout: 15000 });
     const port = parseInt(String(stdout).trim(), 10);
