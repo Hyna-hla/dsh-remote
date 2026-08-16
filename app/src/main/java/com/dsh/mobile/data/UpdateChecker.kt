@@ -272,8 +272,8 @@ object UpdateChecker {
         }
     }
 
-    /** 从 release 资产里挑 APK（优先 -min 精简签名包） */
+    /** 从 release 资产里挑 APK（优先 debug 主包——功能最全；无主包时回退任意 apk，如 -min 精简包） */
     fun pickApk(assets: List<ReleaseAsset>): ReleaseAsset? =
-        assets.firstOrNull { it.name.endsWith(".apk") && it.name.contains("-min") }
+        assets.firstOrNull { it.name.endsWith(".apk") && !it.name.contains("-min") }
             ?: assets.firstOrNull { it.name.endsWith(".apk") }
 }

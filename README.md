@@ -1,9 +1,8 @@
 # harness-remote — 第三方 DeepSeek Harness 手机遥控端
 
-> ⚠️ **非官方项目**：本仓库是个人开发的第三方客户端，与 DeepSeek 官方无关，未使用其商标、未经授权背书，仅供个人学习与自用。
+> ⚠️ **非官方项目**：本仓库是个人开发的社区第三方客户端，基于 DeepSeek Harness 构建，并非 DeepSeek 官方产品，未使用其商标、未经授权背书。项目遵循 [MIT License](LICENSE) 且完全开源免费；如有人向您以任何形式出售本软件，请拒绝交易。
 
 > ✍️ **开发人员**：残星会·虚质空间分部 达妮娅同学（B站：**最喜欢达妮娅了**）。
-> 应用及全部界面设计、主题素材与代码版权归开发者所有，未经授权禁止商用、二传或冒名分发；
 > APK 签名证书 DN = `CN=残星会虚质空间分部达妮娅同学, OU=残星会, O=虚质空间分部`。
 
 把 DeepSeek Harness 装进口袋：手机 App 连接你电脑上正在运行的 DSH 服务，
@@ -21,6 +20,7 @@
 - **背景图与面板**：设置 → 外观可选本地背景图 + 四档一键预设（通透玻璃/电影质感/纯净原图/柔和梦境）；图像不透明度/模糊/饱和度/蒙层浓度独立可调，**面板通透**玻璃化（对齐桌面 dsh-beautify 模板）；屏幕亮度 = 夜间模式
 - **图片消息**：📎 选择图片（PNG/JPEG/WebP/GIF ≤4MB）随消息发送，新对话与历史会话均支持
 - **技能选择**：📚 技能列表（skill.list），点选自动插入"请使用 X 技能"到输入框
+- **应用内更新**：启动自动检查 GitHub Releases（每天最多一次，不打扰）；有新版弹窗询问，下载走多镜像加速（ghfast.top / gh-proxy.com / ghproxy.net / 直连兜底，失败自动切换、全程透明展示进度与速度），**优先下载 debug 主包**（功能最全；无主包时回退 -min 精简包），下载完一键安装
 - **保险库解锁（dsh-encrypt 联动）**：设置页「保险库」卡片查看锁定状态、手机端输入密码解锁 PC 端凭证保险库——与 web 端走同一路由（/api/credentials.unlock），密码本地 SHA3-256 后仅上传摘要，解锁后 PC 端同步生效；支持记住密码（AndroidKeyStore 加密存储摘要）、防爆破冷却展示
 - **会话管理**：最近会话列表、历史分页加载、长按归档 / 已归档区恢复、状态指示、停止运行、⚡ 插话发送（打断思考，steer 模式）、新对话工作区选择
 
@@ -28,18 +28,19 @@
 
 - **v1.3.2**：保险库联动 + PC 端兼容修复——
   - **保险库解锁**：设置页新增「保险库」卡片（已锁定 / 已解锁 / 未设密码 / 不可用四态）；解锁对话框输入密码，本地求 SHA3-256 摘要后 POST `/api/credentials.unlock`（明文密码不上行，与 web 端一致）；解锁为进程全局状态，PC web 端同步解锁；「记住密码」将摘要经 AndroidKeyStore AES-GCM 加密落盘，下次留空一键解锁；密码错误不做弹窗报错（避免诱导连续尝试烧掉防爆破额度），冷却剩余秒数由 status 的 lockout 字段呈现
+  - **更新通道改为 debug 主包**：应用内检查更新优先下载 Release 里的 debug 主包 APK（功能最全），无主包时回退 -min 精简包
   - **纯 Kotlin SHA3-256**（data/Sha3.kt）：Android 各版本 MessageDigest 对 SHA3 支持不一致，自带 Keccak-f[1600] 实现，已对拍 Node crypto 测试向量
   - **PC 插件 dsh-remote-access 修复**：inject 声明改为 `["webServer"]`——npm 版 `@deepseek-ai/dsh` 的 `Inject.resolve` 无 `{required, optional}` 语义，对象写法会被解析成等待名为 required/optional 的服务，插件永远 pending 并导致 DSH 启动失败（Setup 版 DSH 不受影响）
   - **dsh-remote-start.ps1 修复**：加 UTF-8 BOM（修复 Windows PowerShell 5.1 按 GBK 解析报语法错误）；防火墙规则创建失败降级为警告（cpolar 模式不受影响）；端口探测失败延时 2s 重试一次
   - **LICENSE**：MIT + 社区桌面版声明
-- **v?.?.?**：能力补全三阶段（S5-S7）——
+- **v1.3.1**：能力补全三阶段（S5-S7）——
   - **内容可视化（S5）**：思考链展示（💭 折叠思考区，流式累积 reasoning-delta + 完整消息兜底）；工具调用耗时（callId 配对信封 time 相减，工具卡片显示耗时）；MCP 服务列表（设置 → 关于 → MCP 服务卡片，枚举 mcp__ 前缀工具，连接状态以上游为准）
   - **文件工作区（S6）**：目录浏览直连 host.listDirectory（面包屑/隐藏项/截断提示，不再依赖插件 fs/list）；文件只读预览（点击文件弹出预览对话框：文本展示/二进制提示/复制，插件 fs/read 走沙箱读取 + 1MB 截断，fs/list 增强列文件）
   - **扩展运维（S7）**：slash 命令面板（会话页「/ 命令」入口，commands/list 枚举 + execute 执行）；会话日志导出（顶栏 ⋮ → 导出会话：history 原始事件转 Markdown 本地分享）
   - ⚠️ PC 端需同步更新 dsh-remote-access 插件并重启 DSH（新增 fs/read、fs/list 列文件、mcp/list 路由）
-- **v?.?.?**：会话与输入体验（S4）——通知渠道精细化（审批/问答与任务完成通知独立开关 + 一键跳系统渠道设置）；语音输入（输入栏麦克风按钮，系统语音识别回填文本，零新依赖）；会话搜索统一（标题+预览双字段过滤，四个布局分支均支持）；会话置顶（长按菜单置顶/取消置顶 + 图钉标记 + 置顶优先排序，本地持久化）；快捷指令栏（输入栏上方可编辑 chip 条，内置 4 条常用指令）；打断动效反馈（⚡ 插话发送瞬间显示「已插话」横幅 + 消息级插话标记）
-- **v?.?.?**：安全底座（S3）——凭证加密存储（AndroidKeyStore AES-GCM，代理密码不明文落盘、旧明文无感迁移）；App 生物锁（可选指纹/面容/系统密码，60s 宽限，全屏锁覆盖层）；高危操作二次确认（命令执行/删除/安装类审批红徽章 + 允许一次二次确认，批量放行自动跳过高危项）；PC 端首次配对确认（手机首次连接时 PC 端弹全局确认对话框，支持允许/拒绝/超时/撤销后重配对，插件未更新自动降级跳过）。⚠️ PC 端需同步更新 dsh-remote-access 插件并重启 DSH
-- **v?.?.?**：统一待办审批中心（S2）——首页铃铛待办徽章、三档待办页（审批/问答/异常）、批量允许/拒绝/跳过、点击跳转会话定位（异常带 seq）、会话内收编为轻提示、重启后扫描最近 5 会话恢复未决审批与报错
+- **v1.3.1**：会话与输入体验（S4）——通知渠道精细化（审批/问答与任务完成通知独立开关 + 一键跳系统渠道设置）；语音输入（输入栏麦克风按钮，系统语音识别回填文本，零新依赖）；会话搜索统一（标题+预览双字段过滤，四个布局分支均支持）；会话置顶（长按菜单置顶/取消置顶 + 图钉标记 + 置顶优先排序，本地持久化）；快捷指令栏（输入栏上方可编辑 chip 条，内置 4 条常用指令）；打断动效反馈（⚡ 插话发送瞬间显示「已插话」横幅 + 消息级插话标记）
+- **v1.3.1**：安全底座（S3）——凭证加密存储（AndroidKeyStore AES-GCM，代理密码不明文落盘、旧明文无感迁移）；App 生物锁（可选指纹/面容/系统密码，60s 宽限，全屏锁覆盖层）；高危操作二次确认（命令执行/删除/安装类审批红徽章 + 允许一次二次确认，批量放行自动跳过高危项）；PC 端首次配对确认（手机首次连接时 PC 端弹全局确认对话框，支持允许/拒绝/超时/撤销后重配对，插件未更新自动降级跳过）。⚠️ PC 端需同步更新 dsh-remote-access 插件并重启 DSH
+- **v1.3.1**：统一待办审批中心（S2）——首页铃铛待办徽章、三档待办页（审批/问答/异常）、批量允许/拒绝/跳过、点击跳转会话定位（异常带 seq）、会话内收编为轻提示、重启后扫描最近 5 会话恢复未决审批与报错
 - **v1.3.0**：任选 PC 目录作工作区——工作区面板新增「浏览电脑目录」（经 PC 插件 dsh-remote-access 的 fs/list 端点只读列举子目录：进/退导航 + 当前路径 + 选中即创建为工作区）；不再局限于 DSH 已划定的工作区；插件不可用时保留手动输入路径兜底。⚠️ PC 端需同步更新 dsh-remote-access 插件并重启 DSH
 - **v1.2.2**：连接页布局修复——整页 statusBarsPadding（扫码按钮不再被状态栏压住）+ 内容垂直居中（上下弹性留白，消除下半部大面积空白；小屏自动可滚动）
 - **v1.2.1**：修复 Pro 计费漏洞 + ChatGPT 文案——扣费结算窗口扩大（回合中途挂载监听也能计费：事件累计改 getOrPut + turn/end 无条目时按服务端 usage 兜底；usage 提取兼容 data.message.usage）；ChatGPT 空态文案改「今天想做点什么？」
@@ -126,15 +127,15 @@
 
 ## 安装（APK）
 
-- 仓库内提供 R8 精简版：[release/DSH-Remote-v1.1.4-min.apk](release/DSH-Remote-v1.1.4-min.apk)（已签名，约 4.6MB，可直接安装）
-- **debug 主包（约 62MB，与历次安装包一致）**：因 GitHub 单文件 >50MB 限制不进仓库，本地留档于 `release/DSH-Remote-v1.1.4.apk`（构建产物亦在 `app/build/outputs/apk/debug/`）；分发走 GitHub Release 附件或 Google Play
+- **推荐：应用内更新**——App 启动自动检查 GitHub Releases（每天最多一次），有新版弹窗询问后直接下载安装（多镜像加速、断源自动切换），**优先下载 debug 主包**（约 68MB，功能最全），无主包时回退 -min 精简包
+- **手动安装**：从 [Releases](https://github.com/Hyna-hla/harness-remote/releases) 下载 `DSH-Remote-vX.Y.Z.apk`（debug 主包）；仓库 `release/` 目录另存各版本 R8 精简版 `-min.apk`（约 4.6MB，已签名）
 - 传到手机 → 允许「未知来源」安装 → 填服务器地址 → 连接
-- Google Play 上架包（已签名 AAB）：[release/DSH-Remote-v1.1.4.aab](release/DSH-Remote-v1.1.4.aab)；上架清单见 [docs/play-listing.md](docs/play-listing.md)
+- ⚠️ v1.2.0 起更换签名证书，旧版（upload.jks 签名）需卸载重装；debug 包与 release 签名包互不兼容，升级请走同一通道
 - 自定义主题包格式与示例：[docs/theme-package-format.md](docs/theme-package-format.md)、[docs/aurora.dshTheme.zip](docs/aurora.dshTheme.zip)
 
 ## PC 端使用
 
-    cd "E:\AI搓的小东西\harness-remote"
+    cd <本仓库路径>   # 按需修改 dsh-remote-start.ps1 顶部的 $DshNode / $DshBin / $DshHome 为你的实际路径
 
     # 局域网模式（手机与电脑同一 Wi-Fi）
     .\dsh-remote-start.ps1
@@ -143,6 +144,7 @@
     # cpolar 穿透模式（任何网络；先装 cpolar 并登录）
     .\dsh-remote-start.ps1 -Mode cpolar
     # 默认自动探测桌面版 DSH 端口；把 cpolar 输出的 https://xxxx.cpolar.top 填进 App
+    # 桌面版探测不到时可用 -TargetPort <端口> 显式指定
 
 > 为什么 cpolar 模式用 -host-header=localhost:<port>：DSH 的 /api 有浏览器信任围栏
 > （Host 必须是 loopback 或 trusted-host），重写 Host 后所有请求视为本机发出。
@@ -169,11 +171,15 @@ cpolar/DSH 端口探测带缓存，通道生成更快。详见
 
 环境：JDK 17 + Android SDK（platform 36）+ Gradle 8.14.3（wrapper 已指向腾讯镜像）。
 
-    $env:JAVA_HOME = "C:\Program Files\Microsoft\jdk-17.0.20.8-hotspot"
-    Set-Location "E:\AI搓的小东西\harness-remote"
-    .\gradlew.bat assembleRelease
+    $env:JAVA_HOME = "<你的 JDK 17 路径>"
+    Set-Location <本仓库路径>
+    .\gradlew.bat assembleDebug      # debug 主包（应用内更新分发的就是这个）
+    .\gradlew.bat assembleRelease    # min 精简签名包
 
-签名：`local.properties` 指向发布密钥库 `C:\Users\Administrator\.android\dsh-remote-daniya.jks`
+`local.properties` 写 SDK 路径时**用正斜杠**（`sdk.dir=D:/android-sdk`）——反斜杠会被
+properties 转义吞掉导致 "文件名、目录名或卷标语法不正确" 启动失败。
+
+发布签名：`local.properties` 指向发布密钥库 `dsh-remote-daniya.jks`
 （alias `daniya`；证书 DN = `CN=残星会虚质空间分部达妮娅同学, OU=残星会, O=虚质空间分部`），
 构建产物自动签名。旧版 upload.jks 仅保留用于历史版本校验与 Play 上架迁移参考。
 
@@ -187,12 +193,12 @@ cpolar/DSH 端口探测带缓存，通道生成更快。详见
     │   ├── components/  # MarkdownText 轻量 Markdown 渲染
     │   ├── navigation/  # 路由：connect → home → session / settings（含通知深链跳转）
     │   ├── screens/     # Connect / Home / Session / Settings
-    │   └── theme/       # 三主题（深蓝/纯黑/暖白）+ 面板通透玻璃化
+    │   └── theme/       # 多主题注册表（深蓝/纯黑/暖白/Codex CLI/夜之城 2077 + 导入主题包）+ 面板通透玻璃化
     ├── service/         # 前台服务：审批/问答/完成通知 + 断线重连
     ├── MainActivity.kt
     └── DshApplication.kt
     dsh-remote-start.ps1 # PC 端一键启动脚本（lan / cpolar 两种模式，自动探测桌面版端口）
-    dsh-remote-access/   # PC 端微信遥控插件（iLink Bot 桥 + cpolar 隧道，含协议文档）
+    dsh-remote-access/   # PC 端 DSH 插件（远程访问路由：扫码/配对/fs/mcp + 微信 iLink 遥控桥 + cpolar 隧道，含协议文档）
 
 ## 已知限制与路线图
 

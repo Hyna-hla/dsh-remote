@@ -1023,7 +1023,7 @@ private fun SettingInfoRow(label: String, value: String) {
 /**
  * 应用内检查更新：
  *   idle → checking → latest / found → downloading → downloaded →（系统安装器）
- * 检查走 GitHub Releases latest API；下载取 release 的 -min.apk 资产（流式带进度）；
+ * 检查走 GitHub Releases latest API；下载取 release 的 debug 主包资产（无主包时回退 -min 精简包；流式带进度）；
  * 安装经 FileProvider 交给系统安装器（用户确认，无需额外权限）。
  */
 @Composable
