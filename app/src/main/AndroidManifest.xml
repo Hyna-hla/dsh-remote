@@ -8,6 +8,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- 语音输入：RecognizerIntent 系统语音识别需要录音权限 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- 应用内更新：PackageInstaller 会话安装兜底需要（同签名自更新通常无需授权） -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 

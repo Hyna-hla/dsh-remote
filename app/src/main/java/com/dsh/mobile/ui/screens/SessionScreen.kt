@@ -1,8 +1,14 @@
 package com.dsh.mobile.ui.screens
 
+import android.Manifest
+import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.speech.RecognizerIntent
 import android.util.Base64
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -24,6 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -42,6 +49,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.dsh.mobile.data.*
 import com.dsh.mobile.ui.components.MarkdownText
 import com.dsh.mobile.ui.theme.*
@@ -685,6 +693,44 @@ fun SessionScreen(
         }
     }
 
+    // 语音输入（T2）：麦克风按钮 → RECORD_AUDIO 权限（未授权先申请，拒绝 Toast 提示）
+    // → RecognizerIntent 系统语音识别 → EXTRA_RESULTS 首条文本回填输入栏（末尾补空格拼接）
+    var micGranted by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED,
+        )
+    }
+    val voiceLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val norm = result.data
+                ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                ?.firstOrNull()
+                ?.let { normalizeVoiceResult(it) }
+            if (norm != null) {
+                // 既有输入拼接：末尾补空格，避免两段文本粘连
+                input = if (input.isBlank()) norm else input.trimEnd() + " " + norm
+            }
+        }
+    }
+    val startVoiceRecognition: () -> Unit = {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "对着手机说话")
+        }
+        try {
+            voiceLauncher.launch(intent)
+        } catch (e: ActivityNotFoundException) {
+            // 设备无语音识别服务（如部分定制 ROM / 模拟器）
+            Toast.makeText(context, "此设备不支持语音输入", Toast.LENGTH_SHORT).show()
+        }
+    }
+    val micPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        micGranted = granted
+        if (granted) startVoiceRecognition()
+        else Toast.makeText(context, "需要麦克风权限", Toast.LENGTH_SHORT).show()
+    }
+
     LaunchedEffect(sessionId) {
         state.load()
         historyReady = true
@@ -1095,6 +1141,13 @@ fun SessionScreen(
             ) {
                 IconButton(onClick = { imagePicker.launch("image/*") }) {
                     Icon(Icons.Default.AttachFile, null)
+                }
+                // 语音输入：已授权直接拉起 RecognizerIntent；未授权先申请 RECORD_AUDIO
+                IconButton(onClick = {
+                    if (micGranted) startVoiceRecognition()
+                    else micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                }) {
+                    Icon(Icons.Rounded.Mic, "语音输入")
                 }
                 if (DshThemeStyle == ThemeStyle.CODEX) {
                     Text(
@@ -1818,3 +1871,8 @@ private fun SkillsDialog(
         confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
     )
 }
+
+// ──────────────────────────── 语音输入（T2） ────────────────────────────
+
+/** 语音识别结果回填输入栏前的最小清洗：null/空白/空串 → null（不回填）；有效文本 → trim 后返回 */
+internal fun normalizeVoiceResult(raw: String?): String? = raw?.trim()?.takeIf { it.isNotEmpty() }
