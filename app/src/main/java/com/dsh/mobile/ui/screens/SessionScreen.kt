@@ -53,6 +53,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import com.dsh.mobile.data.*
 import com.dsh.mobile.ui.components.MarkdownText
 import com.dsh.mobile.ui.theme.*
@@ -64,6 +65,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
+import java.io.File
 import java.util.Locale
 
 /** 判定「复杂任务」的关键词（命中即用 Pro） */
@@ -779,6 +781,9 @@ fun SessionScreen(
     var loadingAll by remember { mutableStateOf(false) }
     var renameDialog by remember { mutableStateOf(false) }
     var renameText by remember { mutableStateOf("") }
+    // S7 导出会话：顶栏菜单 → history 拉取 → Markdown → cacheDir/exports → ACTION_SEND
+    var exportMenu by remember { mutableStateOf(false) }
+    var exporting by remember { mutableStateOf(false) }
     // focusSeq 定位：历史加载完成标志 + 短暂高亮的目标 seq
     var historyReady by remember { mutableStateOf(false) }
     var highlightedSeq by remember { mutableStateOf<Long?>(null) }
@@ -1016,6 +1021,41 @@ fun SessionScreen(
         }
     }
 
+    /**
+     * S7：导出会话——拉 session.history 原始 events → historyToMarkdown →
+     * 写 cacheDir/exports/<sessionId>.md → ACTION_SEND（FileProvider URI）分享。
+     * 文件保留供多次分享；失败 Toast。
+     */
+    fun exportSession() {
+        if (exporting) return
+        exporting = true
+        scope.launch {
+            try {
+                val raw = connection.historyRawEvents(sessionId)
+                if (raw.isEmpty()) {
+                    Toast.makeText(context, "无内容可导出", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                val md = withContext(Dispatchers.Default) { historyToMarkdown(title, raw) }
+                val dir = File(context.cacheDir, "exports").apply { mkdirs() }
+                val file = File(dir, "$sessionId.md")
+                withContext(Dispatchers.IO) { file.writeText(md, Charsets.UTF_8) }
+                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+                val share = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/markdown"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    putExtra(Intent.EXTRA_TEXT, "DSH 会话日志：${title ?: sessionId}")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(Intent.createChooser(share, "导出会话日志"))
+            } catch (e: Exception) {
+                Toast.makeText(context, "导出失败：${e.message}", Toast.LENGTH_SHORT).show()
+            } finally {
+                exporting = false
+            }
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         TopAppBar(
             title = {
@@ -1079,6 +1119,23 @@ fun SessionScreen(
                     }
                 }) {
                     Icon(Icons.Default.Terminal, "斜杠命令")
+                }
+                // S7：导出会话（顶栏菜单）
+                Box {
+                    IconButton(onClick = { exportMenu = true }) {
+                        Icon(Icons.Default.MoreVert, "更多")
+                    }
+                    DropdownMenu(expanded = exportMenu, onDismissRequest = { exportMenu = false }) {
+                        DropdownMenuItem(
+                            text = { Text(if (exporting) "导出中…" else "导出会话") },
+                            leadingIcon = { Icon(Icons.Default.Share, null) },
+                            enabled = !exporting,
+                            onClick = {
+                                exportMenu = false
+                                exportSession()
+                            },
+                        )
+                    }
                 }
                 if (running) {
                     IconButton(onClick = { stopRun() }) {

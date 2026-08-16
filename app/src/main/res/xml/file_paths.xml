@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- FileProvider 路径授权：仅暴露更新 APK 所在目录 -->
+<!-- FileProvider 路径授权：更新 APK（update/）与会话导出（exports/） -->
 <paths>
     <cache-path name="update" path="update/" />
+    <cache-path name="exports" path="exports/" />
 </paths>

@@ -585,6 +585,21 @@ class DshConnection(private val appContext: Context? = null) {
         }
     }
 
+    /**
+     * S7 导出：拉 session.history 的原始 events[]（JsonElement，wire 原貌，不做类型解码），
+     * 供 historyToMarkdown/historyToJson 使用。与 history() 复用同一端点；
+     * 网络失败抛 ApiException（UI 负责失败提示），响应缺 events 字段 → 空列表。
+     */
+    suspend fun historyRawEvents(sessionId: String): List<JsonElement> {
+        val value = call(DshEndpoints.SESSION_HISTORY, buildJsonObject {
+            put("sessionId", sessionId)
+        })
+        // 大 payload 提取在后台线程完成，避免主线程卡顿
+        return withContext(Dispatchers.Default) {
+            value.jsonObject["events"]?.jsonArray?.toList() ?: emptyList()
+        }
+    }
+
     suspend fun cancel(sessionId: String) {
         call(DshEndpoints.SESSION_CANCEL, buildJsonObject { put("sessionId", sessionId) })
     }
