@@ -26,6 +26,7 @@
 
 ## 更新日志
 
+- **v1.3.6**：更新弹窗内嵌版本说明——发现新版本时直接展示 Release 日志摘录（6 行纯文本，不用跳仓库就能知道更新了啥）
 - **v1.3.5**：桌面小部件 + Cloudflare Tunnel——
   - **桌面小部件**：4x1 连接状态（鲸鱼 logo + 实时状态文字，点击拉起 App），RemoteViews 实现零新依赖，由前台服务驱动刷新；长按桌面添加「DSH Remote」
   - **dsh-cloudflared.ps1**：Cloudflare quick tunnel 一键穿透（免登录、不限带宽；自动下载 cloudflared 走镜像兜底；--http-host-header 重写绕信任围栏；XFF 会触发 token 鉴权，App 需 v1.3.4+ 已配对）

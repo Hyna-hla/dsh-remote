@@ -1104,6 +1104,25 @@ private fun UpdateSection(
                     style = MaterialTheme.typography.bodyMedium,
                     color = DshBrand,
                 )
+                // Release 说明摘录：纯文本化 + 去链接标记，最多 6 行（完整日志看仓库）
+                info?.body?.takeIf { it.isNotBlank() }?.let { body ->
+                    Text(
+                        body
+                            .replace(Regex("""\[([^\]]+)]\(([^)]+)\)"""), "$1")
+                            .replace('#', '№')
+                            .replace("**", "")
+                            .lineSequence()
+                            .map(String::trim)
+                            .filter { it.isNotEmpty() }
+                            .take(6)
+                            .joinToString("\n"),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 6,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 260.dp),
+                    )
+                }
                 TextButton(onClick = download) { Text("下载更新") }
             }
             "downloading" -> Column(horizontalAlignment = Alignment.End) {
