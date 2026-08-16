@@ -2,6 +2,7 @@ package com.dsh.mobile.data
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SettingsStoreSecretTest {
@@ -92,5 +93,30 @@ class SettingsStoreSecretTest {
         val legacy = profileWithProxy() // password = "secret123"（9 字节）
         val dec = decryptProfileFromStorage(legacy, FakeBox())
         assertEquals("secret123", dec.proxy!!.password)
+    }
+
+    @Test
+    fun ciphertextShapedPasswordIsNotReEncrypted() {
+        // 已是密文形态（合法 Base64、解码 >=28 字节）的密码 → 原样保留，不二次加密。
+        // 注意 FakeBox 产出的 "ENC:..." 不算密文形态，这里用真实形状（Base64>=28）。
+        val cipherPw = java.util.Base64.getEncoder().encodeToString(ByteArray(28) { 'A'.code.toByte() })
+        val input = profileWithProxy().copy(proxy = profileWithProxy().proxy!!.copy(password = cipherPw))
+        val stored = encryptProfileForStorage(input, FakeBox())
+        assertEquals(cipherPw, stored.proxy!!.password) // 原样保留，无 ENC: 二次包装
+        assertEquals(input, stored)
+    }
+
+    @Test
+    fun ciphertextShapeBoxDoesNotDoubleEncryptOnSecondPass() {
+        // 真实形状假箱（encrypt 产出合法 Base64>=28 密文）：第二次写入已是密文形态 → 不得再加密
+        val realShapeBox = object : SecretBox {
+            override fun encrypt(plain: String): String =
+                java.util.Base64.getEncoder().encodeToString(("0123456789012345678901234567" + plain).toByteArray())
+            override fun decrypt(enc: String): String? = null // 一律失败 = 密钥丢失
+        }
+        val once = encryptProfileForStorage(profileWithProxy(), realShapeBox)
+        assertTrue(isCiphertextShape(once.proxy!!.password)) // 前置：第一遍确实是密文形态
+        val twice = encryptProfileForStorage(once, realShapeBox)
+        assertEquals(once.proxy!!.password, twice.proxy!!.password) // 第二遍原样保留
     }
 }

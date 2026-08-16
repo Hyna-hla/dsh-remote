@@ -331,10 +331,17 @@ internal fun applyLegacyMigration(prefs: MutablePreferences): Boolean {
     return true
 }
 
-/** 写入前加密代理密码（无代理或空密码原样返回）。 */
+/** 密文形态判定：合法 Base64 且解码长度>=28（12 IV + 16 tag）→ 视为已加密（可能是密钥丢失后的残存密文），不再二次加密 */
+internal fun isCiphertextShape(value: String): Boolean = runCatching {
+    val raw = java.util.Base64.getDecoder().decode(value)
+    raw.size >= 28
+}.getOrDefault(false)
+
+/** 写入前加密代理密码：已是密文形态（密钥丢失残存密文）原样返回，不再二次加密；无代理或空密码原样返回。 */
 internal fun encryptProfileForStorage(p: HostProfile, box: SecretBox): HostProfile {
     val pw = p.proxy?.password
     if (pw.isNullOrBlank()) return p
+    if (isCiphertextShape(pw)) return p // 密钥丢失残存密文：不再二次加密
     return p.copy(proxy = p.proxy.copy(password = box.encrypt(pw)))
 }
 
