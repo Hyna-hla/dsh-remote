@@ -1,19 +1,17 @@
 package com.dsh.mobile.ui.components
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -25,11 +23,8 @@ fun BiometricLockOverlay(onUnlocked: () -> Unit) {
     val activity = remember(context) { context as FragmentActivity }
     var message by remember { mutableStateOf("验证身份以继续") }
 
-    val authLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) { /* BiometricPrompt 不用 intent 结果 */ }
-
-    LaunchedEffect(Unit) {
+    // 可重复触发的验证流程：失败/取消后由「重试」按钮再次拉起 BiometricPrompt
+    val authenticate = {
         val prompt = BiometricPrompt(
             activity,
             ContextCompat.getMainExecutor(context),
@@ -56,6 +51,10 @@ fun BiometricLockOverlay(onUnlocked: () -> Unit) {
         prompt.authenticate(info)
     }
 
+    LaunchedEffect(Unit) {
+        authenticate()
+    }
+
     Box(
         Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
         contentAlignment = Alignment.Center,
@@ -68,6 +67,10 @@ fun BiometricLockOverlay(onUnlocked: () -> Unit) {
             )
             Spacer(Modifier.height(16.dp))
             Text(message, style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(24.dp))
+            Button(onClick = { authenticate() }) {
+                Text("重试")
+            }
         }
     }
 }
