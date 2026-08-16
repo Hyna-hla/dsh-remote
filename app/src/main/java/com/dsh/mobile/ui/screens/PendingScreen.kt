@@ -87,7 +87,30 @@ fun PendingScreen(
                     item(key = "ap-b") {
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             OutlinedButton(
-                                onClick = { scope.launch { runBatch("全部允许") { center.allowAllApprovals() } } },
+                                onClick = {
+                                    scope.launch {
+                                        busy = true
+                                        val nonHigh = approvals.filter {
+                                            RiskClassifier.level(it.toolName, it.reason) != RiskLevel.HIGH
+                                        }
+                                        val skipped = approvals.size - nonHigh.size
+                                        val failures = mutableListOf<String>()
+                                        for (item in nonHigh) {
+                                            try { center.allow(item.sessionId, item.approvalId) }
+                                            catch (e: CancellationException) { throw e }
+                                            catch (e: Exception) { failures += e.message ?: "unknown" }
+                                        }
+                                        busy = false
+                                        val msg = buildString {
+                                            if (failures.isNotEmpty()) append("${failures.size} 条失败 —— ${failures.first().take(80)}")
+                                            if (skipped > 0) {
+                                                if (isNotEmpty()) append("；")
+                                                append("$skipped 项高危已跳过，需逐项确认")
+                                            }
+                                        }
+                                        if (msg.isNotEmpty()) snackbar.showSnackbar(msg)
+                                    }
+                                },
                                 enabled = !busy, modifier = Modifier.weight(1f),
                             ) { Text("全部允许") }
                             OutlinedButton(
@@ -97,6 +120,8 @@ fun PendingScreen(
                         }
                     }
                     items(approvals, key = { "ap-" + it.sessionId + "-" + it.approvalId }) { a ->
+                        val risk = remember(a.approvalId) { RiskClassifier.level(a.toolName, a.reason) }
+                        var confirmDialog by remember(a.approvalId) { mutableStateOf(false) }
                         Card(Modifier.fillMaxWidth().padding(vertical = 6.dp), shape = DshShape.card) {
                             Column(Modifier.padding(14.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -110,6 +135,11 @@ fun PendingScreen(
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.primary,
                                     )
+                                    if (risk == RiskLevel.HIGH) {
+                                        Badge(containerColor = MaterialTheme.colorScheme.error) { Text("高危") }
+                                    } else if (risk == RiskLevel.MEDIUM) {
+                                        Badge(containerColor = MaterialTheme.colorScheme.tertiary) { Text("中危") }
+                                    }
                                 }
                                 a.reason?.let {
                                     Spacer(Modifier.height(4.dp))
@@ -133,7 +163,8 @@ fun PendingScreen(
                                     ) { Text("拒绝") }
                                     Button(
                                         onClick = {
-                                            scope.launch {
+                                            if (risk == RiskLevel.HIGH) confirmDialog = true
+                                            else scope.launch {
                                                 runCatching { center.allow(a.sessionId, a.approvalId) }
                                                     .onFailure { e -> scope.launch { snackbar.showSnackbar(e.message ?: "失败") } }
                                             }
@@ -144,6 +175,23 @@ fun PendingScreen(
                                     TextButton(onClick = { onOpenSession(a.sessionId, null) }) { Text("去会话") }
                                 }
                             }
+                        }
+                        if (confirmDialog) {
+                            AlertDialog(
+                                onDismissRequest = { confirmDialog = false },
+                                title = { Text("高危操作二次确认") },
+                                text = { Text("工具「${a.toolName}」${a.reason?.let { "\n原因：$it" } ?: ""}\n允许该操作执行一次？") },
+                                confirmButton = {
+                                    TextButton(onClick = {
+                                        confirmDialog = false
+                                        scope.launch {
+                                            runCatching { center.allow(a.sessionId, a.approvalId) }
+                                                .onFailure { e -> scope.launch { snackbar.showSnackbar(e.message ?: "失败") } }
+                                        }
+                                    }) { Text("仍要允许", color = MaterialTheme.colorScheme.error) }
+                                },
+                                dismissButton = { TextButton(onClick = { confirmDialog = false }) { Text("取消") } },
+                            )
                         }
                     }
                 }
