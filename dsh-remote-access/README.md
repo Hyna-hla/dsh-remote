@@ -26,9 +26,16 @@ cpolar 公网隧道降级为「网页版」备选。
   - 地址可直接点击、一键复制
 - **移动端 App 配对确认（S3）**：手机 App 首次连接本电脑时，设置页会注入全局全屏确认对话框（允许/拒绝），
   允许后写入 `$DSH_HOME/remote-access/paired.json`；设置页「配对管理」小节可查看已配对设备并逐项撤销。
+- **移动端文件只读预览（S6）**：工作区面板浏览 PC 目录时同时列出文件，点文件在手机端只读预览——
+  文本等宽展示（>1MB 截断并提示）、二进制识别（base64 大小提示，不解码）；全程只读，不提供写入。
+  路由：`GET /api/remote-access/fs/read`（内容）+ `GET /api/remote-access/fs/list`（目录+文件列举）。
 
 ## 更新日志
 
+- **v?.?.?**：S6 文件内容只读预览 —— 新增 `GET /api/remote-access/fs/read?path=<abs>`（只读，
+  1MB 截断 `truncated: true`；非 UTF-8/含 NUL → `isBinary: true` + base64 `data` 字段；读取优先
+  注入的 fs 服务、回退 node:fs，大文件/二进制自动走 node:fs 读头部，不整读大文件）；
+  `fs/list` 增强返回 `files[]`（`{name, path, size, hidden}`，保留 `dirs[]` 兼容旧 App）
 - **v?.?.?**：S3 安全底座 —— 移动端首次配对确认：新增 `pair/request` / `pair/status` / `pair/respond` /
   `pair/list` / `pair/revoke` 路由，配对记录持久化到 `$DSH_HOME/remote-access/paired.json`（120s 超时自动清除）；
   设置页新增「配对管理」小节（已配对设备列表 + 撤销）；pending 时注入全局全屏确认对话框（允许/拒绝）

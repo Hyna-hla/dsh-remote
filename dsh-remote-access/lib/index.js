@@ -2,7 +2,18 @@
 // 微信桥：扫码登录微信 iLink Bot → 微信里给自己发消息遥控 DSH（会话注入、流式回复、审批、图片）
 // cpolar：网页版备选。内置一键安装（官网自动下载）、注册引导、authtoken 保存，无需手动装 cpolar
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
@@ -22,7 +33,8 @@ import QRCode from "qrcode";
 const execFileAsync = promisify(execFile);
 
 export const name = "dsh-remote-access";
-export const inject = ["webServer"];
+// fs 为可选注入：可用时文件读取走注入服务（工作区/sandbox 语义），不可用回退 node:fs
+export const inject = { required: ["webServer"], optional: ["fs"] };
 
 const json = (res, code, payload) => {
   res.statusCode = code;
@@ -45,6 +57,34 @@ const readBody = (req) =>
       }
     });
   });
+
+/** 只读文件头部：返回 {size: 文件总字节数, head: 至多 maxBytes 前缀}（大文件不整读，内存安全） */
+function readHeadSync(path, maxBytes) {
+  const fd = openSync(path, "r");
+  try {
+    const size = fstatSync(fd).size;
+    const want = Math.min(size, maxBytes + 1);
+    const buf = Buffer.allocUnsafe(want);
+    let off = 0;
+    while (off < want) {
+      const n = readSync(fd, buf, off, want - off, off);
+      if (n <= 0) break;
+      off += n;
+    }
+    return { size, head: buf.subarray(0, off) };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** 严格 UTF-8 解码：非法字节序列返回 null（与 DSH fs 层的 TextDecoder fatal 语义一致） */
+function decodeUtf8Strict(buf) {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(buf);
+  } catch {
+    return null;
+  }
+}
 
 // 探测结果短缓存：设置页轮询时不重复 spawn 进程
 let dshPortCache = { at: 0, value: 0 };
@@ -270,7 +310,8 @@ export const apply = (ctx) => {
     },
   });
 
-  // 目录浏览（移动端任选 PC 目录作工作区，不限于 DSH 已划定的工作区）：只读列举子目录，限 200 条
+  // 目录浏览（移动端任选 PC 目录作工作区，不限于 DSH 已划定的工作区）：只读列举子目录 + 文件
+  // dirs[] 仅目录名（兼容旧 App）；files[] = {name, path, size, hidden}（S6 文件预览用）
   reg({
     kind: "exact",
     path: "/api/remote-access/fs/list",
@@ -280,11 +321,79 @@ export const apply = (ctx) => {
       const p = u.searchParams.get("path") ?? "";
       if (!isAbsolute(p)) return json(res, 400, { error: "需要绝对路径" });
       try {
-        const dirs = readdirSync(p, { withFileTypes: true })
-          .filter((d) => d.isDirectory())
-          .slice(0, 200)
-          .map((d) => d.name);
-        json(res, 200, { ok: true, path: p, dirs });
+        const dirs = [];
+        const files = [];
+        for (const d of readdirSync(p, { withFileTypes: true })) {
+          if (d.isDirectory()) {
+            if (dirs.length < 200) dirs.push(d.name);
+          } else if (d.isFile()) {
+            if (files.length >= 200) continue;
+            let size = 0;
+            try {
+              size = statSync(join(p, d.name)).size;
+            } catch {}
+            files.push({ name: d.name, path: join(p, d.name), size, hidden: d.name.startsWith(".") });
+          }
+        }
+        json(res, 200, { ok: true, path: p, dirs, files });
+      } catch (err) {
+        json(res, 200, { ok: false, error: String(err?.message ?? err) });
+      }
+    },
+  });
+
+  // 文件内容只读预览（S6）：1MB 截断（truncated: true）+ 二进制识别（非 UTF-8 / 含 NUL → isBinary + base64 data）
+  // 读取优先注入的 fs 服务（工作区/sandbox 语义）：小文本走 ctx.fs.readText；超过 1MB / 二进制回退 node:fs 读头部
+  reg({
+    kind: "exact",
+    path: "/api/remote-access/fs/read",
+    handler: async (req, res) => {
+      if (req.method !== "GET") return json(res, 405, { error: "method not allowed" });
+      const u = new URL(req.url, "http://localhost");
+      const p = u.searchParams.get("path") ?? "";
+      if (!isAbsolute(p)) return json(res, 400, { error: "需要绝对路径" });
+      const MAX = 1024 * 1024; // 1MB
+      try {
+        const fsApi = ctx.fs;
+        let raw = null; // Buffer（头部或全量）
+        let size = 0;
+        if (fsApi && typeof fsApi.readText === "function") {
+          const target = await fsApi.resolve(p);
+          const info = typeof fsApi.stat === "function" ? await fsApi.stat(target) : null;
+          const statSize = typeof info?.size === "number" ? info.size : 0;
+          if (statSize > MAX) {
+            // 超大文件：注入 fs 的 readBytes 超限即抛错、readText 整读有内存风险 → node:fs 读 1MB 前缀
+            const got = readHeadSync(p, MAX);
+            raw = got.head;
+            size = got.size;
+          } else {
+            try {
+              raw = Buffer.from(await fsApi.readText(target), "utf8");
+              size = statSize || raw.length;
+            } catch (err) {
+              if (err?.code === "FS_NOT_TEXT") {
+                // 二进制：注入 fs 不提供原始字节 → node:fs 回退
+                const got = readHeadSync(p, MAX);
+                raw = got.head;
+                size = got.size;
+              } else {
+                throw err;
+              }
+            }
+          }
+        } else {
+          const got = readHeadSync(p, MAX);
+          raw = got.head;
+          size = got.size;
+        }
+        const truncated = size > MAX;
+        const slice = truncated ? raw.subarray(0, MAX) : raw;
+        const isBinary = slice.includes(0) || decodeUtf8Strict(slice) === null;
+        if (isBinary) {
+          json(res, 200, { ok: true, path: p, size, truncated, isBinary: true, data: slice.toString("base64") });
+        } else {
+          json(res, 200, { ok: true, path: p, size, truncated, isBinary: false, text: decodeUtf8Strict(slice) });
+        }
       } catch (err) {
         json(res, 200, { ok: false, error: String(err?.message ?? err) });
       }
