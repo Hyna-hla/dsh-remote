@@ -188,6 +188,7 @@ class DshConnectionService : Service() {
                 notificationIds.remove("a:${event.sessionId}:${event.approvalId}")?.let {
                     notificationManager().cancel(it)
                 }
+                WidgetState.pushPending(this, notificationIds.size)
             }
 
             is DshConnection.Event.QuestionRequested -> {
@@ -214,6 +215,7 @@ class DshConnectionService : Service() {
                 notificationIds.remove("q:${event.sessionId}")?.let {
                     notificationManager().cancel(it)
                 }
+                WidgetState.pushPending(this, notificationIds.size)
             }
 
             is DshConnection.Event.SessionStatus ->
@@ -288,6 +290,8 @@ class DshConnectionService : Service() {
         val id = 1000 + (notificationSeq++ % 100)
         manager.notify(id, notification)
         if (trackKey != null) notificationIds[trackKey] = id
+        // 待办数同步到桌面小部件（审批/问答横幅的活动计数）
+        WidgetState.pushPending(this, notificationIds.size)
     }
 
     override fun onDestroy() {

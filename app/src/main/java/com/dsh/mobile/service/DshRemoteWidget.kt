@@ -18,12 +18,30 @@ object WidgetState {
     var connectionText: String = "未连接"
         private set
 
+    /** 活动待办数（审批/问答横幅计数），>0 时小部件状态行追加「N 待办」 */
+    @Volatile
+    var pendingCount: Int = 0
+        private set
+
     fun push(context: Context, text: String) {
         connectionText = text
+        renderAll(context)
+    }
+
+    fun pushPending(context: Context, count: Int) {
+        pendingCount = count
+        renderAll(context)
+    }
+
+    private fun renderAll(context: Context) {
         val manager = AppWidgetManager.getInstance(context)
         val ids = manager.getAppWidgetIds(ComponentName(context, DshRemoteWidget::class.java))
         if (ids.isNotEmpty()) DshRemoteWidget.render(context, manager, ids)
     }
+
+    /** 小部件状态行文案：连接状态 +（有待办时）待办数 */
+    fun statusLine(): String =
+        if (pendingCount > 0) "$connectionText · $pendingCount 待办" else connectionText
 }
 
 /**
@@ -35,7 +53,7 @@ class DshRemoteWidget : BroadcastReceiver() {
     companion object {
         fun render(context: Context, manager: AppWidgetManager, ids: IntArray) {
             val views = RemoteViews(context.packageName, R.layout.dsh_widget).apply {
-                setTextViewText(R.id.widget_status, WidgetState.connectionText)
+                setTextViewText(R.id.widget_status, WidgetState.statusLine())
             }
             val intent = Intent(context, MainActivity::class.java)
             val pending = android.app.PendingIntent.getActivity(
