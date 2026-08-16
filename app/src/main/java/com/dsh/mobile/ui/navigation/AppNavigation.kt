@@ -9,6 +9,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import android.content.Intent
 import com.dsh.mobile.DshApplication
+import com.dsh.mobile.data.ApprovalCenter
 import com.dsh.mobile.data.DshConnection
 import com.dsh.mobile.service.DshConnectionService
 import com.dsh.mobile.ui.screens.*
@@ -20,6 +21,7 @@ sealed class Screen(val route: String) {
         fun createRoute(sessionId: String) = "session/$sessionId"
     }
     data object Settings : Screen("settings")
+    data object Pending : Screen("pending")
     data object Pro : Screen("pro")
     data object HostProfile : Screen("hostProfile/{profileId}") {
         fun createRoute(profileId: String?) = "hostProfile/${profileId ?: "new"}"
@@ -30,6 +32,7 @@ sealed class Screen(val route: String) {
 fun AppNavigation(
     navController: NavHostController,
     connection: DshConnection,
+    approvalCenter: ApprovalCenter,
 ) {
     val connState by connection.state.collectAsState()
     val context = LocalContext.current
@@ -74,6 +77,8 @@ fun AppNavigation(
         composable(Screen.Home.route) {
             HomeScreen(
                 connection = connection,
+                approvalCenter = approvalCenter,
+                onPending = { navController.navigate(Screen.Pending.route) },
                 onSessionClick = { id -> navController.navigate(Screen.Session.createRoute(id)) },
                 onSettings = { navController.navigate(Screen.Settings.route) },
                 onUpgrade = { navController.navigate(Screen.Pro.route) },
@@ -88,6 +93,14 @@ fun AppNavigation(
                 sessionId = it.arguments?.getString("sessionId") ?: "",
                 connection = connection,
                 onBack = { navController.popBackStack() },
+            )
+        }
+        composable(Screen.Pending.route) {
+            PendingScreen(
+                center = approvalCenter,
+                connection = connection,
+                onBack = { navController.popBackStack() },
+                onOpenSession = { sid, _ -> navController.navigate(Screen.Session.createRoute(sid)) },
             )
         }
         composable(Screen.Settings.route) {

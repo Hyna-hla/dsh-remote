@@ -224,6 +224,7 @@ class MainActivity : ComponentActivity() {
                         AppNavigation(
                             navController = navController,
                             connection = app.connection,
+                            approvalCenter = app.approvalCenter,
                         )
                     }
 

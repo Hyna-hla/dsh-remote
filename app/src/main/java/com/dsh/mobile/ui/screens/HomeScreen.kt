@@ -68,6 +68,8 @@ import java.util.*
 @Composable
 fun HomeScreen(
     connection: DshConnection,
+    approvalCenter: ApprovalCenter,
+    onPending: () -> Unit,
     onSessionClick: (String) -> Unit,
     onSettings: () -> Unit,
     onUpgrade: () -> Unit,
@@ -153,6 +155,7 @@ fun HomeScreen(
     }
 
     val connState by connection.state.collectAsState()
+    val pendingCount by approvalCenter.pendingCount.collectAsState()
 
     /** 后台预取最近 3 个会话首屏进内存缓存：点开即消费（SessionChatState.load 取走），跳过网络等待 */
     fun prefetchRecent(list: List<SessionSummary>) {
@@ -358,6 +361,8 @@ fun HomeScreen(
             onSessionClick = onSessionClick,
             onSettings = onSettings,
             onUpgrade = onUpgrade,
+            onPending = onPending,
+            pendingCount = pendingCount,
             onRefresh = {
                 refreshSessions()
                 refreshArchived()
@@ -406,6 +411,8 @@ fun HomeScreen(
             onSessionClick = onSessionClick,
             onSettings = onSettings,
             onUpgrade = onUpgrade,
+            onPending = onPending,
+            pendingCount = pendingCount,
             onRefresh = {
                 refreshSessions()
                 refreshArchived()
@@ -452,6 +459,8 @@ fun HomeScreen(
                 onRemoveImage = { i -> pendingImages = pendingImages.filterIndexed { j, _ -> j != i } },
                 onSessionClick = onSessionClick,
                 onSettings = onSettings,
+                onPending = onPending,
+                pendingCount = pendingCount,
                 onRefresh = {
                     refreshSessions()
                     refreshArchived()
@@ -482,6 +491,7 @@ fun HomeScreen(
                     }
                 },
                 actions = {
+                    PendingBell(pendingCount = pendingCount, onPending = onPending)
                     IconButton(onClick = onSettings) {
                         Icon(Icons.Default.Settings, null)
                     }
@@ -908,6 +918,24 @@ fun HomeScreen(
 
             // 工作区选择面板（对齐 Web WorkspacePicker：默认 / 已有工作区 / 新建）
             workspaceSheetOverlay()
+        }
+    }
+}
+
+/** 首页待办铃铛：徽章数字 = 待办总数，点击进入待办中心 */
+@Composable
+private fun PendingBell(
+    pendingCount: Int,
+    onPending: () -> Unit,
+    tint: Color = Color.Unspecified,
+) {
+    IconButton(onClick = onPending) {
+        BadgedBox(
+            badge = {
+                if (pendingCount > 0) Badge { Text(pendingCount.toString()) }
+            },
+        ) {
+            Icon(Icons.Default.Notifications, contentDescription = "待办中心", tint = tint)
         }
     }
 }
@@ -1380,6 +1408,8 @@ private fun ClaudeHomeLayout(
     onSessionClick: (String) -> Unit,
     onSettings: () -> Unit,
     onUpgrade: () -> Unit,
+    onPending: () -> Unit,
+    pendingCount: Int,
     onRefresh: () -> Unit,
     onRestoreArchived: (String) -> Unit,
 ) {
@@ -1586,17 +1616,27 @@ private fun ClaudeHomeLayout(
                             color = Color(0xFFF5F5F4),
                         )
                     }
-                    Icon(
-                        Icons.Default.Settings,
-                        "设置",
-                        Modifier
-                            .size(24.dp)
-                            .clickable {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        PendingBell(
+                            pendingCount = pendingCount,
+                            onPending = {
                                 closeDrawer()
-                                onSettings()
+                                onPending()
                             },
-                        tint = Color(0xFFA8A29E),
-                    )
+                            tint = Color(0xFFA8A29E),
+                        )
+                        Icon(
+                            Icons.Default.Settings,
+                            "设置",
+                            Modifier
+                                .size(24.dp)
+                                .clickable {
+                                    closeDrawer()
+                                    onSettings()
+                                },
+                            tint = Color(0xFFA8A29E),
+                        )
+                    }
                 }
             }
         },
@@ -1854,6 +1894,8 @@ private fun DeepLookHomeLayout(
     onRemoveImage: (Int) -> Unit,
     onSessionClick: (String) -> Unit,
     onSettings: () -> Unit,
+    onPending: () -> Unit,
+    pendingCount: Int,
     onRefresh: () -> Unit,
 ) {
     val deep = Color(0xFF0D1B2A)
@@ -1909,6 +1951,7 @@ private fun DeepLookHomeLayout(
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.weight(1f),
             )
+            PendingBell(pendingCount = pendingCount, onPending = onPending)
             Icon(
                 Icons.Default.Settings,
                 "设置",
@@ -2340,6 +2383,8 @@ private fun ChatGptHomeLayout(
     onSessionClick: (String) -> Unit,
     onSettings: () -> Unit,
     onUpgrade: () -> Unit,
+    onPending: () -> Unit,
+    pendingCount: Int,
     onRefresh: () -> Unit,
     onRestoreArchived: (String) -> Unit,
 ) {
@@ -2566,17 +2611,27 @@ private fun ChatGptHomeLayout(
                         Spacer(Modifier.width(8.dp))
                         Text("聊天", style = MaterialTheme.typography.labelLarge, color = Color.White)
                     }
-                    Box(
-                        Modifier
-                            .size(48.dp)
-                            .background(Color(0xFF1C1C1E), CircleShape)
-                            .clickable {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        PendingBell(
+                            pendingCount = pendingCount,
+                            onPending = {
                                 closeDrawer()
-                                onSettings()
+                                onPending()
                             },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(Icons.Default.Settings, null, Modifier.size(24.dp), tint = Color.White)
+                            tint = Color.White,
+                        )
+                        Box(
+                            Modifier
+                                .size(48.dp)
+                                .background(Color(0xFF1C1C1E), CircleShape)
+                                .clickable {
+                                    closeDrawer()
+                                    onSettings()
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.Default.Settings, null, Modifier.size(24.dp), tint = Color.White)
+                        }
                     }
                 }
             }

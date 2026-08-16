@@ -3,14 +3,18 @@ package com.dsh.mobile
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import com.dsh.mobile.data.ApprovalCenter
 import com.dsh.mobile.data.DshConnection
 import com.dsh.mobile.data.HistoryCache
 import com.dsh.mobile.data.ProTokenBank
 import com.dsh.mobile.data.UpdateChecker
+import kotlinx.coroutines.*
 
 class DshApplication : Application() {
 
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val connection = DshConnection(this)
+    val approvalCenter by lazy { ApprovalCenter(connection, appScope) }
 
     override fun onCreate() {
         super.onCreate()
