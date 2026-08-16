@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dsh.mobile.data.*
 import com.dsh.mobile.ui.components.MarkdownText
+import com.dsh.mobile.ui.components.QuestionCard
 import com.dsh.mobile.ui.theme.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -1053,7 +1054,7 @@ fun SessionScreen(
                     QuestionCard(
                         questions = qs,
                         onSubmit = { answers -> answerQuestions(answers) },
-                        onCancel = {
+                        onSkip = {
                             scope.launch {
                                 try {
                                     connection.answerQuestions(sessionId, emptyList())
@@ -1658,100 +1659,6 @@ private fun NoticeRow(item: ChatItem.Notice, modifier: Modifier = Modifier) {
             color = if (item.isError) MaterialTheme.colorScheme.error
             else MaterialTheme.colorScheme.onSurfaceVariant,
         )
-    }
-}
-
-// ──────────────────────────── 问答题卡片 ────────────────────────────
-
-@Composable
-private fun QuestionCard(
-    questions: List<QuestionItem>,
-    onSubmit: (List<DshConnection.QuestionAnswer>) -> Unit,
-    onCancel: () -> Unit,
-) {
-    var selections by remember(questions) {
-        mutableStateOf(
-            questions.associate { q -> q.id to mutableListOf<String>() }.toMutableMap()
-        )
-    }
-
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        questions.forEach { q ->
-            Column {
-                Text(
-                    q.header ?: q.question,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium,
-                )
-                if (q.options.isEmpty()) {
-                    var custom by remember(q.id) { mutableStateOf("") }
-                    OutlinedTextField(
-                        value = custom,
-                        onValueChange = {
-                            custom = it
-                            selections[q.id] = mutableListOf(it)
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("输入你的回答") },
-                        maxLines = 3,
-                    )
-                } else {
-                    q.options.forEach { opt ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 2.dp),
-                        ) {
-                            val checked = selections[q.id]?.contains(opt.label) == true
-                            Checkbox(
-                                checked = checked,
-                                onCheckedChange = { on ->
-                                    val cur = selections[q.id] ?: mutableListOf()
-                                    if (q.multiSelect) {
-                                        if (on) cur.add(opt.label) else cur.remove(opt.label)
-                                    } else {
-                                        cur.clear()
-                                        if (on) cur.add(opt.label)
-                                    }
-                                    selections = selections.toMutableMap().apply { this[q.id] = cur }
-                                },
-                            )
-                            Text(
-                                opt.label,
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                    }
-                }
-            }
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) {
-                Text("取消")
-            }
-            Button(
-                onClick = {
-                    val answers = questions.map { q ->
-                        DshConnection.QuestionAnswer(
-                            id = q.id,
-                            selected = selections[q.id] ?: emptyList(),
-                        )
-                    }
-                    onSubmit(answers)
-                },
-                modifier = Modifier
-                    .weight(1f)
-                    .background(brandGradient(), DshShape.small),
-                enabled = questions.all { q -> (selections[q.id] ?: emptyList()).isNotEmpty() },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.Transparent,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                ),
-            ) {
-                Text("提交")
-            }
-        }
     }
 }
 

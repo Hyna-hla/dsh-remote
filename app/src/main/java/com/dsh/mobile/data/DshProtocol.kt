@@ -4,6 +4,9 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 // ─────────────────────────────────────────────────────────────
 // 四象限 RPC 信封（与 dsh-client-connection 的 wire 格式一致）
@@ -147,6 +150,11 @@ data class SessionSummary(
     val agentPreset: String? = null,
     val projections: JsonElement? = null,
 )
+
+/** 会话标题：projections.values.title；无则 null（HomeScreen/PendingScreen 共用） */
+fun sessionTitleOf(session: SessionSummary): String? =
+    session.projections?.jsonObject?.get("values")?.jsonObject
+        ?.get("title")?.jsonPrimitive?.contentOrNull
 
 @Serializable
 data class SessionListValue(

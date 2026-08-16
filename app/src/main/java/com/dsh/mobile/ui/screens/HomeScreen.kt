@@ -2317,11 +2317,8 @@ private fun ArchivedRow(id: String, onRestore: () -> Unit) {
 // 纯黑 #000000 底、次级 #1C1C1E、品牌 #3B82F6、强调 #60A5FA、二级文本 #9CA3AF
 // 顶部导航 56dp / 胶囊输入 52dp(圆角26) / 抽屉 85% 宽 + 50% 遮罩 / 菜单项 56dp / 会话项 48dp
 
-private fun chatGptTitleOf(s: SessionSummary): String =
-    runCatching {
-        s.projections?.jsonObject?.get("values")?.jsonObject
-            ?.get("title")?.jsonPrimitive?.contentOrNull
-    }.getOrNull() ?: "会话 ${s.sessionId.take(8)}"
+private fun chatGptTitleOf(s: SessionSummary): String = sessionTitleOf(s)
+    ?: "会话 ${s.sessionId.take(8)}"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
