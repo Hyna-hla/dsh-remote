@@ -39,7 +39,16 @@ data class CachedItem(
 )
 
 @Serializable
-data class CachedHistory(val savedAt: Long, val items: List<CachedItem>)
+data class CachedHistory(
+    val savedAt: Long,
+    val items: List<CachedItem>,
+    /**
+     * 完整加载水位（seq 增量方案）：loadAll 翻到底时记录的最老 seq。
+     * 非空 = items 覆盖 [completeThroughSeq, 最新] 全区间，重进会话免翻页直接全量秒开；
+     * 旧格式缓存缺该字段 → null（退化为普通尾部缓存）。
+     */
+    val completeThroughSeq: Long? = null,
+)
 
 /**
  * 进程级内存热缓存：解码结果 LRU，避免返回会话/首页时重复读盘+解压+JSON 解码。
@@ -86,33 +95,42 @@ class HistoryCache(context: Context) {
 
     // ── 会话历史 ──
 
-    fun loadHistory(sessionId: String): List<CachedItem>? {
-        // 内存热缓存优先（零解码）；未命中才读盘解压
-        HistoryMemoryCache.history(sessionId)?.let { return it }
+    fun loadHistory(sessionId: String): List<CachedItem>? = loadHistoryWithMeta(sessionId)?.items
+
+    /** 读缓存并携带完整加载水位（loadAll 的 seq 增量标记）。 */
+    fun loadHistoryWithMeta(sessionId: String): CachedHistory? {
+        // 内存热缓存优先（零解码）；未命中才读盘解压（水位只存盘上，命中内存时条目必然同源）
+        HistoryMemoryCache.history(sessionId)?.let { return CachedHistory(0L, it, memoryComplete[sessionId]) }
         val f = historyFile(sessionId)
-        if (!f.exists() || f.length() > 4 * 1024 * 1024) return null
-        val items = runCatching {
+        if (!f.exists() || f.length() > 8 * 1024 * 1024) return null
+        val doc = runCatching {
             GZIPInputStream(f.inputStream()).use {
-                json.decodeFromString<CachedHistory>(it.readBytes().toString(Charsets.UTF_8)).items
+                json.decodeFromString<CachedHistory>(it.readBytes().toString(Charsets.UTF_8))
             }
-        }.getOrNull()
-        if (items != null) HistoryMemoryCache.putHistory(sessionId, items)
-        return items
+        }.getOrNull() ?: return null
+        HistoryMemoryCache.putHistory(sessionId, doc.items)
+        memoryComplete[sessionId] = doc.completeThroughSeq
+        return doc
     }
 
-    fun saveHistory(sessionId: String, items: List<CachedItem>) {
+    /** 内存中的完整水位（与会话条目同生命周期，磁盘读入时刷新） */
+    private val memoryComplete = HashMap<String, Long?>()
+
+    fun saveHistory(sessionId: String, items: List<CachedItem>, completeThroughSeq: Long? = null) {
         if (items.isEmpty()) return
         // 内存即时生效（返回再进零解码，含图片 base64），磁盘延迟由调用方防抖控制
         HistoryMemoryCache.putHistory(sessionId, items)
-        // 温缓存只留最近 120 条，避免膨胀；图片 base64 剥离（磁盘只留占位标记）
-        val capped = items.takeLast(120).map {
+        memoryComplete[sessionId] = completeThroughSeq
+        // 温缓存截断：仅普通尾部缓存限 120 条（省空间）；完整水位非空 = 覆盖到最老，
+        // 截断会破坏 [completeThroughSeq, 最新] 区间完整性 → 全量落盘（图片 base64 仍剥离）
+        val capped = (if (completeThroughSeq != null) items else items.takeLast(120)).map {
             if (it.images.isNotEmpty()) it.copy(images = emptyList(), hasImages = true) else it
         }
         runCatching {
             historyDir.mkdirs()
             val payload = json.encodeToString(
                 CachedHistory.serializer(),
-                CachedHistory(System.currentTimeMillis(), capped),
+                CachedHistory(System.currentTimeMillis(), capped, completeThroughSeq),
             )
             GZIPOutputStream(historyFile(sessionId).outputStream()).use {
                 it.write(payload.toByteArray(Charsets.UTF_8))

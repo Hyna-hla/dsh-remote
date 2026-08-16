@@ -287,6 +287,8 @@ class SessionChatState(
     val currentMode = MutableStateFlow<String?>(null)
     val imageLimits = MutableStateFlow<JsonObject?>(null)
     var hasMore = false
+    /** 完整加载水位：loadAll 翻到底时记录的最老 seq（缓存覆盖 [水位, 最新] 全区间） */
+    private var cacheCompleteThrough: Long? = null
     private var oldestSeq: Long? = null
     private var streamStart: Long? = null
     /** key 生成线程安全：load() 解析在 Default 线程、实时事件在主线程，并发自增不得冲突 */
@@ -330,7 +332,7 @@ class SessionChatState(
         cacheJob = scope.launch {
             delay(3_000)
             val snapshot = withContext(Dispatchers.Default) { _items.value.map { it.toCached() } }
-            cache.saveHistory(sessionId, snapshot)
+            cache.saveHistory(sessionId, snapshot, cacheCompleteThrough)
         }
     }
 
@@ -382,9 +384,10 @@ class SessionChatState(
 
     suspend fun load() {
         // 冷热分离：先渲染本地温缓存（秒开；gzip 解压+解码移出主线程），再刷网络冷数据
-        val cachedItems = withContext(Dispatchers.Default) {
-            cache.loadHistory(sessionId)?.mapIndexed { i, c -> c.toChatItem(nextKey()) }
-        }
+        // loadHistoryWithMeta 携带完整加载水位：loadAll 到过底的会话，缓存覆盖到最老 seq
+        val cachedDoc = withContext(Dispatchers.Default) { cache.loadHistoryWithMeta(sessionId) }
+        cacheCompleteThrough = cachedDoc?.completeThroughSeq
+        val cachedItems = cachedDoc?.items?.mapIndexed { i, c -> c.toChatItem(nextKey()) }
         if (!cachedItems.isNullOrEmpty()) {
             _items.value = cachedItems
             hasMore = true
@@ -480,7 +483,16 @@ class SessionChatState(
             // 缓存 + 网络合并：按 seq 拼接，避免网络 3 条到达后整页替换导致内容闪跳丢失
             val merged = withContext(Dispatchers.Default) { mergeCachedWithNet(cachedItems, net) }
             _items.value = merged
-            withContext(Dispatchers.Default) { cache.saveHistory(sessionId, merged.map { it.toCached() }) }
+            // 完整水位判定：合并后最老 seq 不早于缓存水位 = 缓存区间已覆盖全部更早消息，
+            // 服务端 hasMore 可忽略，「加载更早/全部」不再出现（重进大会话秒开全量的关键）
+            val mergedMinSeq = merged.mapNotNull { it.seq }.minOrNull()
+            oldestSeq = listOfNotNull(oldestSeq, mergedMinSeq).minOrNull()
+            if (cacheCompleteThrough != null && (mergedMinSeq == null || mergedMinSeq >= cacheCompleteThrough!!)) {
+                hasMore = false
+            }
+            withContext(Dispatchers.Default) {
+                cache.saveHistory(sessionId, merged.map { it.toCached() }, cacheCompleteThrough)
+            }
         } catch (e: Exception) {
             if (cachedItems.isNullOrEmpty()) {
                 _items.value = listOf(ChatItem.Notice(nextKey(), "加载历史失败：" + e.message, true))
@@ -570,7 +582,7 @@ class SessionChatState(
             hasMore = h.hasMore && h.events.isNotEmpty()
             val list = withContext(Dispatchers.Default) { parseHistoryPage(h) }
             if (list.isNotEmpty()) _items.value = list + _items.value
-            withContext(Dispatchers.Default) { cache.saveHistory(sessionId, _items.value.map { it.toCached() }) }
+            withContext(Dispatchers.Default) { cache.saveHistory(sessionId, _items.value.map { it.toCached() }, cacheCompleteThrough) }
         } catch (_: Exception) {}
     }
 
@@ -591,7 +603,11 @@ class SessionChatState(
                 guard++
             } catch (_: Exception) { break }
         }
-        withContext(Dispatchers.Default) { cache.saveHistory(sessionId, _items.value.map { it.toCached() }) }
+        withContext(Dispatchers.Default) {
+            // loadAll 到底：记录水位（此后重进该会话全量秒开，免翻页）
+            cacheCompleteThrough = if (!hasMore) oldestSeq else cacheCompleteThrough
+            cache.saveHistory(sessionId, _items.value.map { it.toCached() }, cacheCompleteThrough)
+        }
     }
 
     fun onSessionEvent(e: SessionEventWire) {
