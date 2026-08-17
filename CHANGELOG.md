@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 2026-08-18 修复：App 更新提示误报（无限推新版）
+
+- **症状**：App 无限提示"发现新版本"，且版本显示 1.8.1。
+- **根因**：更新器用 `releases/latest` 的 **tag** 与本地 versionName 比较；之前发布的 `v2.4.1` 是**插件里程碑 tag**，但其中 App APK 仍是 v1.8.1 → 误判 2.4.1>1.8.1 恒有新版，装了还是 1.8.1 → 死循环。
+- **修复**：
+  - 持久：`UpdateChecker.releaseAppVersion(info)` 改为**优先取 APK 资产名的真实版本**（如 `DSH-Remote-v1.8.1.apk`→1.8.1），失败才回退 tag；MainActivity/SettingsScreen 两处 `isNewer` 改传它。commit `c42ccd1`（需 CI 出包后生效）。
+  - 立即可用：创建并置为 `latest` 的 **v1.8.1 release**（App 自身版本、资产 `DSH-Remote-v1.8.1.apk`），让当前已装 App 判定 1.8.1≤1.8.1 → 不再提示。
+
 ## 更新日志
 
 - **插件 v2.4.1 / App v1.8.1**：配对码安全修复 + 四项健壮性改进——
