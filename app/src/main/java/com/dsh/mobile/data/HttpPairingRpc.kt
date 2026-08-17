@@ -52,6 +52,28 @@ class HttpPairingRpc(
     /** pair/check 结果：paired + 通道 token（仅已配对设备下发；旧插件无 token 字段为 null） */
     data class CheckResult(val paired: Boolean, val token: String?)
 
+    /** device/info：主机机型与 MAC（设备记录 + 重连校验）；旧插件 404/410 → null（降级不校验） */
+    data class DeviceInfo(val name: String, val model: String, val mac: String, val platform: String)
+
+    suspend fun deviceInfo(): DeviceInfo? = withContext(Dispatchers.IO) {
+        val req = Request.Builder()
+            .url(connection.baseUrl() + "/api/remote-access/device/info")
+            .get()
+            .build()
+        client.newCall(req).execute().use { resp ->
+            if (resp.code == 404 || resp.code == 410) return@withContext null
+            if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}")
+            val obj = JSONObject(resp.body?.string().orEmpty())
+            if (!obj.optBoolean("ok", false)) return@withContext null
+            DeviceInfo(
+                name = obj.optString("name", ""),
+                model = obj.optString("model", ""),
+                mac = obj.optString("mac", ""),
+                platform = obj.optString("platform", ""),
+            )
+        }
+    }
+
     /** 回查该设备在 PC 端是否仍配对（撤销后 App 重新握手）；失败抛异常由调用方 runCatching 兜底。 */
     suspend fun check(deviceId: String): CheckResult = withContext(Dispatchers.IO) {
         val encoded = java.net.URLEncoder.encode(deviceId, "UTF-8")

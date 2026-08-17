@@ -678,7 +678,7 @@ fun SettingsScreen(
                     ) {
                         Icon(Icons.Default.PowerSettingsNew, null, Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("断开并重新连接")
+                        Text("断开连接")
                     }
                 }
             }

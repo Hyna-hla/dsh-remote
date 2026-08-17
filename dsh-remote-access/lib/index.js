@@ -15,7 +15,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, hostname, networkInterfaces } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import { ILinkClient } from "./ilink.js";
@@ -435,6 +435,54 @@ export const apply = (ctx) => {
       } catch (err) {
         json(res, 200, { ok: false, error: String(err?.message ?? err) });
       }
+    },
+  });
+
+  // ---------- 主机设备信息（App 设备记录：机型展示 + MAC 重连校验） ----------
+  // MAC：优先带 IPv4 的物理网卡；本地管理位（随机化/虚拟网卡，首字节第二位十六进制为 2/6/A/E）的接口靠后
+  const isLocalAdminMac = (mac) => /^[0-9a-f][26ae]:/i.test(mac);
+  const primaryMac = () => {
+    const entries = Object.values(networkInterfaces()).flat().filter(
+      (a) => a && !a.internal && a.mac && a.mac !== "00:00:00:00:00:00",
+    );
+    const pick =
+      entries.find((a) => a.family === "IPv4" && !isLocalAdminMac(a.mac)) ||
+      entries.find((a) => !isLocalAdminMac(a.mac)) ||
+      entries.find((a) => a.family === "IPv4") ||
+      entries[0];
+    return pick?.mac ?? "";
+  };
+  // 机型：Win32_ComputerSystem 厂商+型号（10 分钟缓存，避免每次连接都 spawn PowerShell）
+  let hostModelCache = { at: 0, value: "" };
+  const hostModel = async () => {
+    if (hostModelCache.value && Date.now() - hostModelCache.at < 600000) return hostModelCache.value;
+    let model = "";
+    if (process.platform === "win32") {
+      try {
+        const ps =
+          "$ErrorActionPreference='SilentlyContinue'; " +
+          "$c = Get-CimInstance Win32_ComputerSystem | Select-Object -First 1; " +
+          "@(($c.Manufacturer -replace '\\s+$',''), ($c.Model -replace '\\s+$','')) -join ' '";
+        const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-Command", ps], { timeout: 15000 });
+        model = String(stdout).trim();
+      } catch {}
+    }
+    if (!model) model = `${hostname()} (${process.platform})`;
+    hostModelCache = { at: Date.now(), value: model };
+    return model;
+  };
+  reg({
+    kind: "exact",
+    path: "/api/remote-access/device/info",
+    handler: async (req, res) => {
+      if (req.method !== "GET") return json(res, 405, { error: "method not allowed" });
+      json(res, 200, {
+        ok: true,
+        name: hostname(),
+        model: await hostModel(),
+        mac: primaryMac(),
+        platform: process.platform,
+      });
     },
   });
 

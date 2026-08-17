@@ -133,10 +133,6 @@ var DshThemeId: String
 /** 品牌渐变（主按钮/强调装饰用）：brand → brandSoft，随主题色走 */
 fun brandGradient(): Brush = Brush.linearGradient(listOf(DshPalette.brand, DshPalette.brandSoft))
 
-/** 品牌渐变是否为高亮色（夜之城 NC 黄 × 霓虹青）：渐变按钮上的前景改用黑色，白字在亮黄/亮青上看不清 */
-fun brandGradientBright(): Boolean =
-    DshPalette.brand.luminance() > 0.5f || DshPalette.brandSoft.luminance() > 0.5f
-
 private fun applyShapeStyle(style: ThemeStyle) {
     when (style) {
         ThemeStyle.STANDARD -> {
@@ -344,6 +340,10 @@ private fun dshShapes(style: ThemeStyle): Shapes = when (style) {
     )
 }
 
+/** 品牌色高亮（夜之城 NC 黄 × 霓虹青类）：亮底主按钮/渐变按钮的前景用纯黑，白字看不清 */
+private fun brandBright(theme: ThemeDef): Boolean =
+    theme.colors.brand.luminance() > 0.5f || theme.colors.brandSoft.luminance() > 0.5f
+
 private fun dshColorScheme(theme: ThemeDef, bgActive: Boolean = false, glass: Float = 0f): ColorScheme {
     val (bgA, l1A, l2A) = surfaceAlphaFor(glass, bgActive)
     val c = theme.colors
@@ -355,7 +355,7 @@ private fun dshColorScheme(theme: ThemeDef, bgActive: Boolean = false, glass: Fl
     val lightContainer = if (style == ThemeStyle.DEEPLOOK) Color(0xFF0D1B2A) else Color(0xFFDCE7FB)
     val lightOnContainer = if (style == ThemeStyle.DEEPLOOK) Color(0xFFFFFFFF) else Color(0xFF12275C)
     return if (theme.light) lightColorScheme(
-        primary = c.brand, onPrimary = Color(0xFFFFFFFF),
+        primary = c.brand, onPrimary = if (brandBright(theme)) Color(0xFF000000) else Color(0xFFFFFFFF),
         primaryContainer = lightContainer, onPrimaryContainer = lightOnContainer,
         secondary = c.brandSoft, onSecondary = Color(0xFFFFFFFF),
         tertiary = c.warn, onTertiary = Color(0xFF2B2003),
@@ -366,7 +366,7 @@ private fun dshColorScheme(theme: ThemeDef, bgActive: Boolean = false, glass: Fl
         surfaceVariant = surfaceVariant, onSurfaceVariant = c.textSecondary,
         outline = c.border, outlineVariant = Color(0xFFE4EAF3),
     ) else darkColorScheme(
-        primary = c.brand, onPrimary = Color(0xFF0D1B2A),
+        primary = c.brand, onPrimary = if (brandBright(theme)) Color(0xFF000000) else Color(0xFF0D1B2A),
         // 容器色从品牌色推导（surface 与 brand 插值）：原硬编码蓝 #1B3A6B 会让
         // Claude 的陶土橙 / ChatGPT 的中性黑等非蓝主题的用户气泡与容器漏出蓝色。
         // 蓝鲸主题下插值结果 ≈ 原 #1B3A6B，视觉不变；其余主题容器色自动随品牌调。

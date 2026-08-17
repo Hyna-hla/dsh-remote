@@ -33,6 +33,10 @@ import com.journeyapps.barcodescanner.CaptureActivity
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
+/** 设备记录标题：自定义名 > 机型 > 占位（列表不展示公网 IP） */
+private fun deviceTitle(p: HostProfile): String =
+    p.remark.ifBlank { p.deviceModel.ifBlank { "未命名设备" } }
+
 @Composable
 fun ConnectScreen(
     connection: DshConnection,
@@ -45,6 +49,7 @@ fun ConnectScreen(
     val profiles by settingsStore.profiles.collectAsState(initial = emptyList())
     val activeId by settingsStore.activeProfileId.collectAsState(initial = null)
     val connState by connection.state.collectAsState()
+    var pendingDelete by remember { mutableStateOf<HostProfile?>(null) }
 
     val sortedProfiles = profiles.sortedByDescending { it.lastUsedAt }
     val activeProfile = profiles.firstOrNull { it.id == activeId }
@@ -68,7 +73,11 @@ fun ConnectScreen(
     fun connectTo(profile: HostProfile) {
         scope.launch {
             settingsStore.setActiveProfile(profile.id)
+            // 多设备记录共存：仅当前主机保留「启动自动连接」（记住上次使用），其余只取消标记、不删记录
             settingsStore.upsertProfile(profile.copy(autoConnect = true))
+            settingsStore.profiles.first()
+                .filter { it.id != profile.id && it.autoConnect }
+                .forEach { settingsStore.upsertProfile(it.copy(autoConnect = false)) }
         }
         connection.connect(profile) { info ->
             scope.launch { settingsStore.markAttempt(info.profileId, info.errorCode, info.hostVersion) }
@@ -84,10 +93,10 @@ fun ConnectScreen(
             val scanned = result.data?.getStringExtra("SCAN_RESULT")?.trim().orEmpty()
             if (scanned.isNotEmpty()) {
                 val existing = profiles.firstOrNull { it.url == scanned }
-                val profile = existing?.copy(remark = existing.remark.ifBlank { scanned })
+                val profile = existing
                     ?: HostProfile(
                         id = java.util.UUID.randomUUID().toString(),
-                        remark = scanned,
+                        remark = "",
                         url = scanned,
                     )
                 scope.launch { settingsStore.upsertProfile(profile) }
@@ -206,7 +215,7 @@ fun ConnectScreen(
                                 )
                                 Spacer(Modifier.width(8.dp))
                                 Text(
-                                    p.remark.ifBlank { p.url },
+                                    deviceTitle(p),
                                     style = MaterialTheme.typography.titleMedium,
                                     maxLines = 1,
                                 )
@@ -214,10 +223,10 @@ fun ConnectScreen(
                                 TextButton(onClick = { onEditHost(p.id) }) { Text("编辑") }
                             }
                             Text(
-                                p.url,
+                                p.deviceModel.ifBlank { "连接成功后自动记录设备机型" },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2,
+                                maxLines = 1,
                             )
                             if (connState is DshConnection.State.Connected) {
                                 val connected = connState as DshConnection.State.Connected
@@ -236,7 +245,7 @@ fun ConnectScreen(
             item {
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "已保存的主机",
+                    "设备记录",
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -245,7 +254,7 @@ fun ConnectScreen(
             if (sortedProfiles.isEmpty()) {
                 item {
                     Text(
-                        "还没有主机配置：扫码或点下方「添加主机」",
+                        "还没有设备记录：首次连接只需输入地址，连接后会记录设备机型",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -262,12 +271,12 @@ fun ConnectScreen(
                         onClick = { if (!isActive) connectTo(p) },
                     ) {
                         Row(
-                            Modifier.padding(14.dp),
+                            Modifier.padding(start = 14.dp, top = 14.dp, bottom = 14.dp, end = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(Modifier.weight(1f)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(p.remark.ifBlank { p.url }, style = MaterialTheme.typography.titleSmall)
+                                    Text(deviceTitle(p), style = MaterialTheme.typography.titleSmall, maxLines = 1)
                                     if (isActive) {
                                         Spacer(Modifier.width(6.dp))
                                         Text(
@@ -276,9 +285,18 @@ fun ConnectScreen(
                                             color = DshBrand,
                                         )
                                     }
+                                    if (p.deviceMac.isNotBlank()) {
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            "已验证",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = DshSuccess,
+                                        )
+                                    }
                                 }
                                 Text(
-                                    p.url,
+                                    if (p.deviceModel.isNotBlank()) p.deviceModel
+                                    else "连接一次后自动记录机型",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
@@ -293,7 +311,12 @@ fun ConnectScreen(
                                     }
                                 }
                             }
-                            Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            IconButton(onClick = { onEditHost(p.id) }, modifier = Modifier.size(36.dp)) {
+                                Icon(Icons.Default.Edit, "编辑设备", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            IconButton(onClick = { pendingDelete = p }, modifier = Modifier.size(36.dp)) {
+                                Icon(Icons.Default.Delete, "删除记录", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
                     }
                 }
@@ -323,6 +346,27 @@ fun ConnectScreen(
                 )
                 Spacer(Modifier.height(16.dp))
             }
+        }
+
+        // 删除设备记录（二次确认）：删活跃主机先断开前台连接
+        pendingDelete?.let { target ->
+            AlertDialog(
+                onDismissRequest = { pendingDelete = null },
+                title = { Text("删除设备记录") },
+                text = { Text("将删除「${deviceTitle(target)}」的连接记录与通道令牌，不影响电脑端数据。") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        scope.launch {
+                            if (activeId == target.id) connection.disconnect()
+                            settingsStore.deleteProfile(target.id)
+                            pendingDelete = null
+                        }
+                    }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingDelete = null }) { Text("取消") }
+                },
+            )
         }
     }
 }

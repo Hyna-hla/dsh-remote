@@ -37,6 +37,10 @@ data class HostProfile(
     val paired: Boolean = false,
     /** 远程通道 token（配对通过后由 pair/check 下发；密文落盘，请求时以 Bearer 头携带） */
     val channelToken: String = "",
+    /** 主机机型（device/info 抓取；设备记录列表展示用，不再展示公网 IP） */
+    val deviceModel: String = "",
+    /** 主机网卡 MAC（首次配对连接时记录；重连校验 MAC 一致才恢复连接，防动态 IP 被回收后误连他人主机） */
+    val deviceMac: String = "",
 )
 
 /**

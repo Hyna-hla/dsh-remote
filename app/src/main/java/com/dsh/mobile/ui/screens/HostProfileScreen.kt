@@ -90,7 +90,8 @@ fun HostProfileScreen(profileId: String?, connection: DshConnection, onBack: () 
     fun save() {
         val profile = (original ?: HostProfile(id = UUID.randomUUID().toString(), remark = "", url = ""))
             .copy(
-                remark = remark.ifBlank { url },
+                // 设备名称留空即用机型；不再把地址回填成名称（列表不展示 IP）
+                remark = remark.trim(),
                 url = normalizeBaseUrl(url),
                 trustSelfSigned = trustSelfSigned,
                 caCertUri = caCertUri,
@@ -178,18 +179,38 @@ fun HostProfileScreen(profileId: String?, connection: DshConnection, onBack: () 
         ) {
             OutlinedTextField(
                 value = remark, onValueChange = { remark = it },
-                label = { Text("备注名") },
-                placeholder = { Text("如：家里 / 公司 / 服务器") },
+                label = { Text("设备名称（可选）") },
+                placeholder = { Text("如：家里 / 公司 / 服务器；留空显示机型") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
                 value = url, onValueChange = { url = it },
-                label = { Text("服务器地址") },
+                label = { Text("服务器地址（首次连接仅需地址）") },
                 placeholder = { Text("192.168.1.100:8787 或你的 cpolar 域名") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
+            // 已记录的设备信息（只读）：重连校验依据
+            original?.let { p ->
+                if (p.deviceModel.isNotBlank() || p.deviceMac.isNotBlank()) {
+                    Card(Modifier.fillMaxWidth(), shape = DshShape.card) {
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("已记录设备", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                if (p.deviceModel.isNotBlank()) "机型：${p.deviceModel}" else "机型：未记录",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Text(
+                                if (p.deviceMac.isNotBlank()) "MAC：${p.deviceMac}（重连时校验一致才恢复连接）" else "MAC：未记录",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
 
             Card(Modifier.fillMaxWidth(), shape = DshShape.card) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

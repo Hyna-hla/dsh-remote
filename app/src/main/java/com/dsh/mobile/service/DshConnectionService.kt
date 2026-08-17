@@ -10,6 +10,7 @@ import com.dsh.mobile.DshApplication
 import com.dsh.mobile.MainActivity
 import com.dsh.mobile.data.DshConnection
 import com.dsh.mobile.data.HostProfile
+import com.dsh.mobile.data.PairingCoordinator
 import com.dsh.mobile.data.SettingsStore
 import com.dsh.mobile.data.TokenUsageWatcher
 import com.dsh.mobile.data.shouldNotifyApproval
@@ -37,6 +38,7 @@ class DshConnectionService : Service() {
     private var watchJob: Job? = null
     private var eventsJob: Job? = null
     private var stateJob: Job? = null
+    private var pairingJob: Job? = null
     private var notificationSeq = 0
 
     /** 会话活跃状态（运行中→空闲迁移触发完成通知） */
@@ -111,6 +113,7 @@ class DshConnectionService : Service() {
                 .collect { activeId ->
                     eventsJob?.cancel()
                     stateJob?.cancel()
+                    pairingJob?.cancel()
                     watcher?.disconnect()
                     watcher = null
                     seenApprovals.clear()
@@ -128,6 +131,10 @@ class DshConnectionService : Service() {
                     }
                     val connection = DshConnection(this@DshConnectionService)
                     watcher = connection
+                    // 后台重连同样过配对/设备校验：IP 被回收或配对被撤销时断开，不再无限重连
+                    pairingJob = scope.launch {
+                        PairingCoordinator(connection, settings, this).start()
+                    }
                     eventsJob = launch { connection.events.collect { handle(it) } }
                     stateJob = launch {
                         connection.state.collect { st ->

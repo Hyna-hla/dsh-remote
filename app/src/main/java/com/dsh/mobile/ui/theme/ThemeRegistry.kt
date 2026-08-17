@@ -58,6 +58,7 @@ private data class ThemeFile(
     val name: String = "",
     val light: Boolean = false,
     val version: String? = null,
+    val style: String? = null,
     val colors: Map<String, String> = emptyMap(),
 )
 
@@ -73,15 +74,6 @@ object ThemeRegistry {
             success = Color(0xFF3FB68B), warn = Color(0xFFE6B455), error = Color(0xFFE06C6C),
         ),
     )
-    val black = ThemeDef(
-        "black", "纯黑", light = false,
-        ThemeColors(
-            background = Color(0xFF000000), surface = Color(0xFF121418), surfaceHigh = Color(0xFF1B1E24),
-            brand = Color(0xFF4D7CFE), brandSoft = Color(0xFF64B5F6),
-            textPrimary = Color(0xFFE8EDF5), textSecondary = Color(0xFF9AA6B8), border = Color(0xFF2A2F3A),
-            success = Color(0xFF3FB68B), warn = Color(0xFFE6B455), error = Color(0xFFE06C6C),
-        ),
-    )
     val warm = ThemeDef(
         "warm", "暖白", light = true,
         ThemeColors(
@@ -92,89 +84,8 @@ object ThemeRegistry {
         ),
     )
 
-    /** Codex CLI 终端风格：黑底 + 橙棕主色 + 全局等宽字体 + 方角（模拟 OpenAI Codex CLI 终端观感） */
-    val codex = ThemeDef(
-        "codex", "Codex CLI", light = false,
-        ThemeColors(
-            background = Color(0xFF0B0D0E), surface = Color(0xFF151718), surfaceHigh = Color(0xFF1D2021),
-            brand = Color(0xFFCC7B5B), brandSoft = Color(0xFFE09A7C),
-            textPrimary = Color(0xFFF0F0EC), textSecondary = Color(0xFFA9A9A3), border = Color(0xFF2B2E2F),
-            success = Color(0xFF6FBF8F), warn = Color(0xFFD8B46E), error = Color(0xFFE06C6C),
-        ),
-        version = "1.0",
-        style = ThemeStyle.CODEX,
-    )
-
-    /** 夜之城（Cyberpunk 2077）：NC 黄 × 霓虹青、切角按钮、近黑夜蓝底（对齐 dsh-theme-cyberpunk2077） */
-    val cyberpunk = ThemeDef(
-        "cyberpunk", "夜之城 2077", light = false,
-        ThemeColors(
-            background = Color(0xFF05070D), surface = Color(0xFF0A0E18), surfaceHigh = Color(0xFF0D1322),
-            brand = Color(0xFFFCE300), brandSoft = Color(0xFF00F0FF),
-            textPrimary = Color(0xFFE8F1FF), textSecondary = Color(0xFF9FB2D6), border = Color(0xFF1B2A42),
-            success = Color(0xFF00E5A0), warn = Color(0xFFFF4DA6), error = Color(0xFFFF3B3B),
-        ),
-        version = "1.0",
-        style = ThemeStyle.CYBERPUNK,
-    )
-
-    /** ChatGPT 移动端深色：纯黑扁平 + 蓝 #3B82F6 + 胶囊输入（按用户提供的 1:1 设计令牌） */
-    val chatgpt = ThemeDef(
-        "chatgpt", "ChatGPT 深色", light = false,
-        ThemeColors(
-            background = Color(0xFF000000), surface = Color(0xFF1C1C1E), surfaceHigh = Color(0xFF2C2C2E),
-            brand = Color(0xFF3B82F6), brandSoft = Color(0xFF60A5FA),
-            textPrimary = Color(0xFFFFFFFF), textSecondary = Color(0xFF9CA3AF), border = Color(0xFF2C2C2E),
-            success = Color(0xFF34D399), warn = Color(0xFFFBBF24), error = Color(0xFFF87171),
-        ),
-        version = "1.0",
-        style = ThemeStyle.CHATGPT,
-    )
-
-    /** Claude 移动端暖调深色：暖炭黑 + 陶土橙 #E8755A + 淡紫 #A78BFA + 衬线大标题（1:1 设计令牌） */
-    val claude = ThemeDef(
-        "claude", "Claude 暖调", light = false,
-        ThemeColors(
-            background = Color(0xFF171716), surface = Color(0xFF242423), surfaceHigh = Color(0xFF2A2A29),
-            brand = Color(0xFFE8755A), brandSoft = Color(0xFFA78BFA),
-            textPrimary = Color(0xFFF5F5F4), textSecondary = Color(0xFFA8A29E), border = Color(0xFF2A2A29),
-            success = Color(0xFF7BC8A4), warn = Color(0xFFE8C36A), error = Color(0xFFE8715A),
-        ),
-        version = "1.0",
-        style = ThemeStyle.CLAUDE,
-    )
-
-    /** DeepLook 浅色：DeepSeek 移动端 1:1 设计令牌（#f8f8f8 背景 + 纯白分组卡片 + 品牌蓝，见 design/dsh-mobile-ui-spec.md） */
-    val deeplook = ThemeDef(
-        "deeplook", "DeepLook", light = true,
-        ThemeColors(
-            background = Color(0xFFF8F8F8), surface = Color(0xFFFFFFFF), surfaceHigh = Color(0xFFECECEC),
-            brand = Color(0xFF4D6BFE), brandSoft = Color(0xFF6D8BFF),
-            textPrimary = Color(0xFF081018), textSecondary = Color(0xFF585858), border = Color(0xFFE2E2E2),
-            success = Color(0xFF1F9D71), warn = Color(0xFFB07C10), error = Color(0xFFE5484D),
-        ),
-        version = "1.0",
-        style = ThemeStyle.DEEPLOOK,
-    )
-
-    /** DeepLook 深色变体：按规范 7.3 预留方案（#0d1117 底 + #161b22 卡片，品牌蓝不变） */
-    val deeplookDark = ThemeDef(
-        "deeplook-dark", "DeepLook 深色", light = false,
-        ThemeColors(
-            background = Color(0xFF0D1117), surface = Color(0xFF161B22), surfaceHigh = Color(0xFF21262D),
-            brand = Color(0xFF4D6BFE), brandSoft = Color(0xFF6D8BFF),
-            textPrimary = Color(0xFFE6EDF3), textSecondary = Color(0xFF9AA4B2), border = Color(0xFF21262D),
-            success = Color(0xFF3FB68B), warn = Color(0xFFE6B455), error = Color(0xFFE06C6C),
-        ),
-        version = "1.0",
-        style = ThemeStyle.DEEPLOOK,
-    )
-
-    /**
-     * 内置主题 9 套：每套都有真实的观感差异，不再提供"只换颜色"的皮肤。
-     * 旧皮肤 id（aurora/ocean/... ）不再内置，已选旧皮肤的用户自动回落到深蓝。
-     */
-    private val builtins = listOf(blue, black, warm, codex, cyberpunk, chatgpt, claude, deeplook, deeplookDark)
+    /** 内置仅深蓝/暖白两款底色，其余观感全部走主题市场（dsh-theme-market）按需安装 */
+    private val builtins = listOf(blue, warm)
     val builtinIds: Set<String> = builtins.map { it.id }.toSet()
 
     fun available(custom: List<ThemeDef>): List<ThemeDef> = builtins + custom
@@ -204,6 +115,12 @@ object ThemeRegistry {
             warn = c("warn") ?: return null,
             error = c("error") ?: return null,
         )
-        ThemeDef(file.id, file.name, file.light, colors, file.version?.takeIf { it.isNotBlank() })
+        ThemeDef(
+            file.id, file.name, file.light, colors,
+            file.version?.takeIf { it.isNotBlank() },
+            style = file.style
+                ?.let { s -> runCatching { ThemeStyle.valueOf(s.trim().uppercase()) }.getOrNull() }
+                ?: ThemeStyle.STANDARD,
+        )
     }.getOrNull()
 }
