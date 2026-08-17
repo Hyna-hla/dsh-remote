@@ -1,4 +1,4 @@
-// dsh-remote-access v2.1.0 — 远程互信认证（配对码 + 确认框）+ 只读辅助路由
+// dsh-remote-access v2.2.0 — 远程互信认证（配对码 + 确认框 + 公网域名白名单）+ 只读辅助路由
 // 保留：移动端配对握手（pair/*）、主机设备信息（device/info）、只读目录列举（fs/list）、
 //       只读文件预览（fs/read）、MCP 枚举（mcp/list）、远程通道 Bearer token 鉴权（/api 全量门禁，含 WebSocket）。
 // 移除：微信 iLink 桥（lib/ilink.js + lib/bridge.js）、cpolar 隧道供应（lib/cpolar.js），
@@ -13,6 +13,7 @@ import {
   readFileSync,
   readSync,
   readdirSync,
+  renameSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -435,6 +436,132 @@ export const apply = (ctx) => {
       devices.push({ deviceId, name: deviceName, at: now });
       writePaired(devices);
       json(res, 200, { ok: true, state: "approved", token: channelToken() });
+    },
+  });
+
+  // ---------- 公网域名信任白名单（settings.yaml → client-connection.trustedHosts） ----------
+  // DSH 核心 client-connection 对 /api 做 Host 围栏（防 DNS 重绑定）：只放行 loopback 与 trustedHosts。
+  // 手机经公网隧道访问时 Host 是公网域名，必须列入白名单（重启 DSH 后生效）。
+  // 直接读写 $DSH_HOME/settings.yaml：settings-file 提供者对「外部编辑热发布」，且自身写入时
+  // 先 reconcileFromDisk 再做叶级 diff——外部写入的区块会被保留，不会丢。
+  const settingsFile = join(home, "settings.yaml");
+
+  /** 校验条目为纯 域名[:端口]（与核心 assertTrustedAuthority 同口径：WHATWG 规范化后必须逐字一致） */
+  const validateAuthority = (entry) => {
+    const e = String(entry ?? "").trim();
+    if (!e) return "请输入域名或 域名:端口";
+    if (e.length > 253) return "条目过长";
+    let u;
+    try {
+      u = new URL(`http://${e}`);
+    } catch {
+      return `无法解析：${e}`;
+    }
+    const canonical = u.port ? `${u.hostname}:${u.port}` : u.hostname;
+    if (canonical !== e.toLowerCase()) {
+      return `必须是纯 域名[:端口] 形式（不带协议/路径/用户信息）：${e}`;
+    }
+    return null;
+  };
+
+  /** 读取 settings.yaml 顶层 client-connection 区块的 trustedHosts 列表（无区块/无文件 → []） */
+  const readTrustedHosts = () => {
+    let text;
+    try {
+      text = readFileSync(settingsFile, "utf8");
+    } catch {
+      return [];
+    }
+    const lines = text.split(/\r?\n/);
+    const start = lines.findIndex((l) => /^client-connection:\s*$/.test(l));
+    if (start < 0) return [];
+    const hosts = [];
+    let inList = false;
+    for (let j = start + 1; j < lines.length; j++) {
+      const line = lines[j];
+      if (!/^[ \t]/.test(line) && line.trim() !== "") break; // 区块结束
+      const t = line.trim();
+      if (/^trustedHosts:/.test(t)) {
+        inList = true;
+        continue;
+      }
+      if (inList && /^- /.test(t)) {
+        hosts.push(t.replace(/^-\s*/, "").replace(/^["']|["']$/g, "").trim());
+        continue;
+      }
+      if (inList && t !== "" && !/^- /.test(t)) inList = false; // 区块内其他键
+    }
+    return hosts;
+  };
+
+  /** 把 hosts 写回 client-connection 区块（只动 trustedHosts 行，其余内容原样保留）；空列表写 [] */
+  const writeTrustedHosts = (hosts) => {
+    let text;
+    try {
+      text = readFileSync(settingsFile, "utf8");
+    } catch {
+      text = "";
+    }
+    const nl = text.includes("\r\n") ? "\r\n" : "\n";
+    const lines = text.split(/\r?\n/);
+    while (lines.length && lines[lines.length - 1].trim() === "") lines.pop();
+    const newListLines = hosts.length
+      ? ["  trustedHosts:", ...hosts.map((h) => "    - " + h)]
+      : ["  trustedHosts: []"];
+    const start = lines.findIndex((l) => /^client-connection:\s*$/.test(l));
+    if (start < 0) {
+      if (lines.length) lines.push("");
+      lines.push("client-connection:", ...newListLines);
+    } else {
+      let end = start + 1;
+      while (end < lines.length && (/^[ \t]/.test(lines[end]) || lines[end].trim() === "")) end++;
+      const block = lines.slice(start + 1, end);
+      const ti = block.findIndex((l) => /^\s*trustedHosts:/.test(l));
+      if (ti >= 0) {
+        let ei = ti + 1;
+        while (ei < block.length && (/^[ \t]+- /.test(block[ei]) || block[ei].trim() === "")) ei++;
+        block.splice(ti, ei - ti, ...newListLines);
+      } else {
+        block.push(...newListLines);
+      }
+      lines.splice(start + 1, end - start - 1, ...block);
+    }
+    try {
+      const tmp = settingsFile + ".tmp-" + process.pid;
+      writeFileSync(tmp, lines.join(nl) + nl, "utf8");
+      renameSync(tmp, settingsFile);
+      return null;
+    } catch (err) {
+      return "settings.yaml 写入失败：" + (err?.message || String(err));
+    }
+  };
+
+  reg({
+    kind: "exact",
+    path: "/api/remote-access/trusted-hosts",
+    handler: async (req, res) => {
+      if (req.method === "GET") {
+        json(res, 200, { ok: true, hosts: readTrustedHosts(), settingsPath: settingsFile });
+        return;
+      }
+      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
+      const body = await readBody(req);
+      const action = String(body.action || "");
+      if (action !== "add" && action !== "remove") {
+        return json(res, 200, { ok: false, error: "action 必须是 add 或 remove" });
+      }
+      const host = String(body.host || "").trim();
+      const invalid = validateAuthority(host);
+      if (invalid) return json(res, 200, { ok: false, error: invalid });
+      const current = readTrustedHosts();
+      const next =
+        action === "remove"
+          ? current.filter((h) => h.toLowerCase() !== host.toLowerCase())
+          : [...current.filter((h) => h.toLowerCase() !== host.toLowerCase()), host];
+      const werr = writeTrustedHosts(next);
+      if (werr) return json(res, 200, { ok: false, error: werr });
+      log("trustedHosts 已更新：", next.join(", ") || "（空）");
+      json(res, 200, { ok: true, hosts: next, note: "重启 DSH 后生效" });
     },
   });
 

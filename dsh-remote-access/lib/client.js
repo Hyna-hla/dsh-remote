@@ -20,6 +20,12 @@ window.__ModuleLoader__.load({
       label: { fontSize: 12, color: "var(--dsw-alias-label-secondary)", lineHeight: 1.6 },
       sub: { fontSize: 12, color: "var(--dsw-alias-label-secondary)", lineHeight: 1.7 },
       mono: { fontFamily: "ui-monospace, monospace", fontSize: 12, color: "var(--dsw-alias-label-secondary)", wordBreak: "break-all" },
+      input: {
+        border: "1px solid var(--dsw-alias-border-l1)", borderRadius: "6px",
+        background: "var(--dsw-alias-bg-layer-1)", color: "var(--dsw-alias-label-primary)",
+        padding: "5px 10px", fontSize: 12, width: 140,
+      },
+      err: { fontSize: 12, color: "var(--dsw-alias-state-error-primary)", lineHeight: 1.6 },
       btn: {
         border: "1px solid var(--dsw-alias-border-l1)", borderRadius: "6px",
         background: "transparent", color: "var(--dsw-alias-label-primary)",
@@ -234,6 +240,63 @@ window.__ModuleLoader__.load({
       );
     }
 
+    // ---------- 公网域名信任白名单（v2.2.0）：写入 settings.yaml 的 client-connection.trustedHosts ----------
+    function TrustedHostsCard() {
+      var [hosts, setHosts] = useState(null);
+      var [input, setInput] = useState("");
+      var [busy, setBusy] = useState(false);
+      var [err, setErr] = useState(null);
+
+      function refresh() {
+        fetchJson("/api/remote-access/trusted-hosts")
+          .then(function (r) {
+            if (r && r.ok) { setHosts(r.hosts || []); setErr(null); }
+            else setErr((r && r.error) || "加载失败");
+          })
+          .catch(function () { setErr("无法连接插件后端（重启 DSH 后生效）"); });
+      }
+      useEffect(function () { refresh(); }, []);
+
+      function mutate(action, host) {
+        setBusy(true);
+        setErr(null);
+        fetchJson("/api/remote-access/trusted-hosts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: action, host: host }),
+        })
+          .then(function (r) {
+            if (r && r.ok) {
+              setHosts(r.hosts || []);
+              if (action === "add") setInput("");
+            } else {
+              setErr((r && r.error) || "操作失败");
+            }
+          })
+          .catch(function () { setErr("请求失败"); })
+          .finally(function () { setBusy(false); });
+      }
+
+      return h("div", { style: S.card },
+        h("div", { style: S.row },
+          h("div", { style: S.title }, "公网域名白名单"),
+          hosts !== null ? h("span", { style: Object.assign({}, S.badge, { background: "rgba(142,142,147,.15)", color: "var(--dsw-alias-label-secondary)" }) }, "共 " + hosts.length + " 条") : null),
+        h("div", { style: S.sub }, "手机通过公网隧道连接时，DSH 核心校验请求的 Host 域名（防 DNS 重绑定）；把隧道的公网域名加进来手机才能连上。填「域名」或「域名:端口」，不带 https://。"),
+        hosts === null ? h("div", { style: S.sub }, "加载中…") :
+          hosts.length === 0 ? h("div", { style: S.sub }, "暂无白名单条目（手机只能走局域网，或重写 Host 为 localhost 的隧道）。") :
+            hosts.map(function (x) {
+              return h("div", { key: x, style: Object.assign({}, S.row, { justifyContent: "space-between", marginBottom: 6 }) },
+                h("span", { style: S.mono }, x),
+                h("button", { style: S.btn, disabled: busy, onClick: function () { mutate("remove", x); } }, "删除"));
+            }),
+        h("div", { style: Object.assign({}, S.row, { marginTop: 10 }) },
+          h("input", { style: Object.assign({}, S.input, { width: 230 }), placeholder: "如 tunnel.example.com 或 域名:8080", value: input, onChange: function (e) { setInput(e.target.value); } }),
+          h("button", { style: S.btnPrimary, disabled: busy || !input.trim(), onClick: function () { mutate("add", input.trim()); } }, busy ? "处理中…" : "添加")),
+        err ? h("div", { style: Object.assign({}, S.err, { marginTop: 6 }) }, err) : null,
+        h("div", { style: S.sub, marginTop: 6 }, "⚠ 修改后需重启 DSH 生效；白名单只解决 Host 校验，手机请求仍需配对拿到通道 token。")
+      );
+    }
+
     // ---------- 设置页「远程控制」：远程互信认证 ----------
     function TrustSection() {
       return h("div", { style: S.root },
@@ -243,6 +306,7 @@ window.__ModuleLoader__.load({
         h("div", { style: S.sub }, "插件只负责远程互信：手机 App 首次连接后经配对码（或 PC 确认框）完成配对，获得远程通道 token；此后所有 /api 请求与实时通道（WebSocket）都要求该 token，拿到地址的陌生人无法遥控这台电脑。"),
         h("div", { style: S.ok }, "✔ 通道鉴权已挂载：本机浏览器放行；手机引导端点（配对握手、配对码校验、host.describe）豁免；其余 /api（含配对管理操作）一律需要 Bearer token。"),
         h(PairCodeCard, {}),
+        h(TrustedHostsCard, {}),
         h("hr", { style: S.divider }),
         h(PairSection, {})
       );

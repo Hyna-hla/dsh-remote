@@ -1,4 +1,4 @@
-// smoke-test.mjs — dsh-remote-access v2.1.0 冒烟测试（离线、零依赖、可重复运行）
+// smoke-test.mjs — dsh-remote-access v2.2.0 冒烟测试（离线、零依赖、可重复运行）
 // 用最小 fake webServer 驱动 apply()，经真实 HTTP 服务器走完整链路：
 //   配对握手（request → status → respond → check 下发 token → list/revoke）、
 //   远程通道 Bearer 门禁（loopback 放行 / XFF 模拟公网隧道 401 / 带 token 放行 / 引导通道豁免）、
@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { apply } from "./lib/index.js";
@@ -408,6 +408,70 @@ test("安全回归：self-approve 漏洞已修复（远程 respond 401，不写�
   // 远程 list/revoke 同样 401（设置页管理操作不可远程调用）
   r = await req("/api/remote-access/pair/list", { headers: { "x-forwarded-for": "3.4.5.6" } });
   assert.equal(r.status, 401);
+});
+
+test("公网域名白名单：校验/增删/去重/落盘 + 远程 401", async () => {
+  // 初始为空（DSH_HOME 临时目录，无 settings.yaml）
+  let r = await req("/api/remote-access/trusted-hosts");
+  assert.equal(r.body.ok, true);
+  assert.deepEqual(r.body.hosts, []);
+
+  // 远程（XFF）访问 → 401（非豁免，仅本机设置页可达）
+  r = await req("/api/remote-access/trusted-hosts", { headers: { "x-forwarded-for": "1.2.3.4" } });
+  assert.equal(r.status, 401);
+
+  // 非法条目逐个拒绝
+  for (const bad of ["https://x.com", "x.com/path", "user@x.com", "", "exa mple.com"]) {
+    r = await req("/api/remote-access/trusted-hosts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { action: "add", host: bad },
+    });
+    assert.equal(r.body.ok, false, JSON.stringify(bad) + " 应被拒绝");
+  }
+
+  // 正常添加 + 大小写去重
+  r = await req("/api/remote-access/trusted-hosts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { action: "add", host: "tunnel.example.com" },
+  });
+  assert.equal(r.body.ok, true);
+  assert.deepEqual(r.body.hosts, ["tunnel.example.com"]);
+  r = await req("/api/remote-access/trusted-hosts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { action: "add", host: "tunnel2.example.com:8080" },
+  });
+  assert.deepEqual(r.body.hosts, ["tunnel.example.com", "tunnel2.example.com:8080"]);
+  r = await req("/api/remote-access/trusted-hosts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { action: "add", host: "TUNNEL.example.com" },
+  });
+  assert.deepEqual(r.body.hosts, ["tunnel2.example.com:8080", "TUNNEL.example.com"]);
+
+  // 落盘检查：settings.yaml 出现顶层 client-connection 区块
+  const yamlText = readFileSync(join(home, "settings.yaml"), "utf8");
+  assert.match(yamlText, /^client-connection:/m);
+  assert.match(yamlText, /trustedHosts:/);
+  assert.match(yamlText, /tunnel2\.example\.com:8080/);
+
+  // 删除
+  r = await req("/api/remote-access/trusted-hosts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { action: "remove", host: "tunnel2.example.com:8080" },
+  });
+  assert.deepEqual(r.body.hosts, ["TUNNEL.example.com"]);
+  r = await req("/api/remote-access/trusted-hosts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { action: "remove", host: "TUNNEL.example.com" },
+  });
+  assert.deepEqual(r.body.hosts, []);
+  const yamlAfter = readFileSync(join(home, "settings.yaml"), "utf8");
+  assert.match(yamlAfter, /trustedHosts: \[\]/);
 });
 
 test.after(() => {
