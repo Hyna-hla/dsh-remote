@@ -1,11 +1,12 @@
-// dsh-remote-access：设置页「远程控制」——微信 iLink 桥（主要方式）+ cpolar 隧道（备选）
-// 微信桥：扫码登录微信 iLink Bot → 微信里给自己发消息遥控 DSH（会话注入、流式回复、审批、图片）
-// cpolar：网页版备选。内置一键安装（官网自动下载）、注册引导、authtoken 保存，无需手动装 cpolar
+// dsh-remote-access v2.0.0 — 远程互信认证 + 只读辅助路由
+// 保留：移动端配对握手（pair/*）、主机设备信息（device/info）、只读目录列举（fs/list）、
+//       只读文件预览（fs/read）、MCP 枚举（mcp/list）、远程通道 Bearer token 鉴权（/api 全量门禁，含 WebSocket）。
+// 移除：微信 iLink 桥（lib/ilink.js + lib/bridge.js）、cpolar 隧道供应（lib/cpolar.js），
+//       对应 wx/*、cpolar/*、/status、/start、/stop、/qr 路由与 qrcode 依赖一并删除。
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
   closeSync,
-  existsSync,
   fstatSync,
   mkdirSync,
   openSync,
@@ -18,18 +19,6 @@ import {
 import { homedir, hostname, networkInterfaces } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
-import { ILinkClient } from "./ilink.js";
-import { createBridge } from "./bridge.js";
-import {
-  findCpolar,
-  installCpolar,
-  cpolarStatus,
-  setAuthtoken,
-  startTunnel,
-  stopTunnel,
-  tunnel,
-} from "./cpolar.js";
-import QRCode from "qrcode";
 
 const execFileAsync = promisify(execFile);
 
@@ -90,34 +79,10 @@ function decodeUtf8Strict(buf) {
   }
 }
 
-// 探测结果短缓存：设置页轮询时不重复 spawn 进程
-let dshPortCache = { at: 0, value: 0 };
-
-/** 探测正在运行的桌面版 DSH web 端口（node 进程命令行匹配 dsh bin.js web） */
-async function findDshPort() {
-  if (Date.now() - dshPortCache.at < 60000) return dshPortCache.value;
-  const ps =
-    "$ErrorActionPreference='SilentlyContinue'; " +
-    "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | " +
-    "Where-Object { $_.CommandLine -match 'dsh[\\\\/]lib[\\\\/]bin\\.js' -and $_.CommandLine -match '\\bweb\\b' } | " +
-    "ForEach-Object { $p = $_; " +
-    "Get-NetTCPConnection -State Listen -OwningProcess $p.ProcessId -ErrorAction SilentlyContinue | " +
-    "Where-Object { $_.LocalAddress -in @('127.0.0.1','0.0.0.0','::') } | " +
-    "Select-Object -First 1 -ExpandProperty LocalPort } | Select-Object -First 1";
-  try {
-    const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-Command", ps], { timeout: 15000 });
-    const port = parseInt(String(stdout).trim(), 10);
-    dshPortCache = { at: Date.now(), value: Number.isFinite(port) && port > 0 ? port : 0 };
-    return dshPortCache.value;
-  } catch {
-    dshPortCache = { at: Date.now(), value: 0 };
-    return 0;
-  }
-}
-
 export const apply = (ctx) => {
   const webServer = ctx.webServer;
   const log = (...args) => console.error("[dsh-remote-access]", ...args);
+  const home = process.env.DSH_HOME || join(homedir(), ".dsh");
 
   // 路由注册统一收集 disposer，随 fiber 卸载自动清理（热重载不再残留路由）
   const disposers = [];
@@ -135,187 +100,8 @@ export const apply = (ctx) => {
     "dsh-remote-access: web routes"
   );
 
-  // ---------- 微信 iLink 桥 ----------
-  const home = process.env.DSH_HOME || join(homedir(), ".dsh");
-  const ilink = new ILinkClient({ stateFile: join(home, "remote-access", "wx-state.json"), log });
-  const { bridge, onSessionEvent, onApprovalRequest } = createBridge(ctx, { ilink, log });
-
-  // 会话事件流（助手文本 → 微信）
-  ctx.on("session/event", onSessionEvent);
-  // 审批应答器：prepend 先于 API 网关，仅接管微信绑定会话
-  ctx.on("approval/request", onApprovalRequest, true);
-
-  bridge.init().catch((err) => log("init failed", err));
-  ctx.effect(() => () => bridge.dispose(), "dsh-remote-access: wechat bridge");
-
-  // 装机自检：cpolar 未安装时后台预下载（延迟 10s，避开启动高峰），
-  // 用户打开设置页时大概率已就绪；本机已有 cpolar（E:\coplar / PATH）则跳过。
-  setTimeout(() => {
-    findCpolar()
-      .then((exe) => {
-        if (!exe) {
-          log("cpolar 未安装，后台预下载（装机自检）…");
-          installCpolar();
-        }
-      })
-      .catch(() => {});
-  }, 10000);
-
-  reg({
-    kind: "exact",
-    path: "/api/remote-access/wx/status",
-    handler: async (req, res) => {
-      if (req.method !== "GET") return json(res, 405, { error: "method not allowed" });
-      json(res, 200, bridge.getStatus());
-    },
-  });
-
-  reg({
-    kind: "exact",
-    path: "/api/remote-access/wx/login",
-    handler: async (req, res) => {
-      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
-      const body = await readBody(req);
-      const result = await bridge.login(body.verifyCode || undefined);
-      json(res, 200, { ok: true, ...result });
-    },
-  });
-
-  reg({
-    kind: "exact",
-    path: "/api/remote-access/wx/stop",
-    handler: async (req, res) => {
-      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
-      json(res, 200, await bridge.stop());
-    },
-  });
-
-  reg({
-    kind: "exact",
-    path: "/api/remote-access/wx/reset",
-    handler: async (req, res) => {
-      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
-      const result = await bridge.reset();
-      json(res, 200, { ok: true, ...result });
-    },
-  });
-
-  // ---------- cpolar 隧道（备选） ----------
-  reg({
-    kind: "exact",
-    path: "/api/remote-access/status",
-    handler: async (req, res) => {
-      if (req.method !== "GET") return json(res, 405, { error: "method not allowed" });
-      const cpolarFound = Boolean(await findCpolar());
-      const dshPort = await findDshPort();
-      json(res, 200, {
-        status: tunnel.status,
-        url: tunnel.url,
-        port: tunnel.port,
-        message: tunnel.message,
-        cpolarFound,
-        dshPort,
-      });
-    },
-  });
-
-  // cpolar 供应状态：是否已安装、安装进度、登录态、注册/token 链接
-  reg({
-    kind: "exact",
-    path: "/api/remote-access/cpolar/status",
-    handler: async (req, res) => {
-      if (req.method !== "GET") return json(res, 405, { error: "method not allowed" });
-      json(res, 200, await cpolarStatus());
-    },
-  });
-
-  // 一键安装：后台下载+解压，前端轮询 /cpolar/status 看进度
-  reg({
-    kind: "exact",
-    path: "/api/remote-access/cpolar/install",
-    handler: async (req, res) => {
-      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
-      installCpolar();
-      json(res, 200, { ok: true, installing: true });
-    },
-  });
-
-  // 保存 authtoken（等价 cpolar authtoken <token>）
-  reg({
-    kind: "exact",
-    path: "/api/remote-access/cpolar/authtoken",
-    handler: async (req, res) => {
-      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
-      const body = await readBody(req);
-      const exe = await findCpolar();
-      if (!exe) return json(res, 200, { ok: false, error: "cpolar 尚未安装" });
-      try {
-        await setAuthtoken(exe, body.token);
-        json(res, 200, { ok: true });
-      } catch (err) {
-        json(res, 200, { ok: false, error: err?.message || String(err) });
-      }
-    },
-  });
-
-  reg({
-    kind: "exact",
-    path: "/api/remote-access/start",
-    handler: async (req, res) => {
-      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
-      const body = await readBody(req);
-      let port = Number(body.port) || 0;
-      if (!port) port = await findDshPort();
-      if (!port) {
-        return json(res, 200, {
-          ok: false,
-          error: "未检测到正在运行的 DSH 桌面实例，请先启动 DeepSeek Harness",
-        });
-      }
-      const result = await startTunnel(port);
-      json(res, 200, result);
-    },
-  });
-
-  reg({
-    kind: "exact",
-    path: "/api/remote-access/stop",
-    handler: async (req, res) => {
-      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
-      stopTunnel();
-      tunnel.status = "idle";
-      tunnel.url = null;
-      tunnel.message = "";
-      json(res, 200, { ok: true });
-    },
-  });
-
-  // 本地生成二维码（不出本机、无第三方依赖、秒出图）
-  reg({
-    kind: "exact",
-    path: "/api/remote-access/qr",
-    handler: async (req, res) => {
-      if (req.method !== "GET") return json(res, 405, { error: "method not allowed" });
-      const u = new URL(req.url, "http://localhost");
-      const data = u.searchParams.get("data") ?? "";
-      if (!data) return json(res, 400, { error: "missing data" });
-      if (data.length > 2048) return json(res, 400, { error: "data too long" });
-      try {
-        const dataUrl = await QRCode.toDataURL(data, {
-          width: 336,
-          margin: 2,
-          errorCorrectionLevel: "M",
-          color: { dark: "#0D1B2A", light: "#FFFFFF" },
-        });
-        json(res, 200, { ok: true, dataUrl });
-      } catch (err) {
-        json(res, 500, { error: String(err?.message ?? err) });
-      }
-    },
-  });
-
-  // 目录浏览（移动端任选 PC 目录作工作区，不限于 DSH 已划定的工作区）：只读列举子目录 + 文件
-  // dirs[] 仅目录名（兼容旧 App）；files[] = {name, path, size, hidden}（S6 文件预览用）
+  // ---------- 目录浏览（移动端任选 PC 目录作工作区）：只读列举子目录 + 文件 ----------
+  // dirs[] 仅目录名（兼容旧 App）；files[] = {name, path, size, hidden}
   reg({
     kind: "exact",
     path: "/api/remote-access/fs/list",
@@ -346,7 +132,7 @@ export const apply = (ctx) => {
     },
   });
 
-  // 文件内容只读预览（S6）：1MB 截断（truncated: true）+ 二进制识别（非 UTF-8 / 含 NUL → isBinary + base64 data）
+  // ---------- 文件内容只读预览：1MB 截断（truncated: true）+ 二进制识别 ----------
   // 读取优先注入的 fs 服务（工作区/sandbox 语义）：小文本走 ctx.fs.readText；超过 1MB / 二进制回退 node:fs 读头部
   reg({
     kind: "exact",
@@ -404,10 +190,9 @@ export const apply = (ctx) => {
     },
   });
 
-  // ---------- MCP 服务列表（S5） ----------
-  // 上游 dsh-mcp-client 只把工具以 mcp__<server>__<tool> 注册进 ctx.tools，无连接态查询 API
-  // （侦察 §2.2）：按 mcp__ 前缀聚合 serverName → tools[]，status 恒 "unknown"。
-  // ctx.get 惰性读取：tools 由 mcp-client 挂载（可能晚于本插件），未挂载/异常 → 空 servers。
+  // ---------- MCP 服务列表 ----------
+  // 上游 dsh-mcp-client 只把工具以 mcp__<server>__<tool> 注册进 ctx.tools，无连接态查询 API：
+  // 按 mcp__ 前缀聚合 serverName → tools[]，status 恒 "unknown"。
   reg({
     kind: "exact",
     path: "/api/remote-access/mcp/list",
@@ -439,7 +224,7 @@ export const apply = (ctx) => {
   });
 
   // ---------- 主机设备信息（App 设备记录：机型展示 + MAC 重连校验） ----------
-  // MAC：优先带 IPv4 的物理网卡；本地管理位（随机化/虚拟网卡，首字节第二位十六进制为 2/6/A/E）的接口靠后
+  // MAC：优先带 IPv4 的物理网卡；本地管理位（随机化/虚拟网卡）的接口靠后
   const isLocalAdminMac = (mac) => /^[0-9a-f][26ae]:/i.test(mac);
   const primaryMac = () => {
     const entries = Object.values(networkInterfaces()).flat().filter(
@@ -514,7 +299,7 @@ export const apply = (ctx) => {
       if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
       const body = await readBody(req);
       const deviceId = String(body.deviceId || "").trim();
-      const deviceName = String(body.deviceName || "未知设备").trim();
+      const deviceName = String(body.deviceName || "未知设备").trim().slice(0, 64);
       if (!deviceId) return json(res, 400, { error: "missing deviceId" });
       if (readPaired().some((d) => d.deviceId === deviceId)) {
         return json(res, 200, { ok: true, state: "paired" });
@@ -598,15 +383,12 @@ export const apply = (ctx) => {
   });
 
   // ---------- 远程通道 token 鉴权 ----------
-  // 远程通道此前无鉴权（已知限制）：拿到 cpolar/局域网地址的任何人都能遥控 DSH。
-  // 本层给 /api 加 Bearer token 门禁，规则：
-  //   - 本机浏览器放行：loopback 远端且无 X-Forwarded-For（cpolar 隧道虽从 127.0.0.1
+  // /api 全量 Bearer 门禁（含 WebSocket 升级），规则：
+  //   - 本机浏览器放行：loopback 远端且无 X-Forwarded-For（公网隧道虽从 127.0.0.1
   //     连入，但携带 XFF/x-real-ip 头，据此与真本机请求区分）；
-  //   - 局域网直连（非 loopback 远端）一律要求 token；
-  //   - 引导通道豁免：/api/remote-access/pair/*（配对握手）与 /api/host.describe
-  //     （连接探测）——未配对手机先完成配对、经 pair/check 拿到 token 后才有完整访问；
+  //   - 局域网直连（非 loopback 远端）与任何公网隧道一律要求 token；
+  //   - 引导通道豁免：/api/remote-access/pair/*（配对握手）与 /api/host.describe（连接探测）；
   //   - token 首次加载时自动生成，存放 $DSH_HOME/remote-access/channel-token。
-  //   - WebSocket 升级（events.mux）同样校验：未带 token 的握手直接 401 断开。
   const tokenFile = join(home, "remote-access", "channel-token");
   let cachedToken = null;
   const channelToken = () => {

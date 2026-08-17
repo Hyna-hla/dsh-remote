@@ -31,8 +31,6 @@
   - **重进 App 一键重连**：连接页活跃主机卡片新增「连接」按钮（未连接时显示）；设备记录卡片在未连接状态下点击即重连——退出重进后不再「没有按键可连接」
   - **配套插件 v1.3.1**：配对批准按设备名合并旧记录（重装 App 后 deviceId 变化不再导致 PC 端配对名单重复堆积）；fs/list 支持计算机根盘符列表
 
-
-
 - **v1.6.1**：修复更新下载误切镜像——原下载设 25s 总超时，慢速下载（如 100KB/s）25 秒一到即被掐断切下一源；现改为无总时长限制，仅「连续 30s 无任何数据」或「60s 宽限后均速仍 <20KB/s」才换源，慢速稳定下载不再中断
 - **v1.6.0**：连接记录升级为**设备记录 + 多主机切换**——
   - **设备记录**：连接页不再展示公网 IP，改为显示 PC 机型（首次连接仅需地址，配对通过后自动经插件 `device/info` 记录机型与 MAC）；机型可自定义设备名，记录可自由删除（二次确认，删除活跃主机自动断开）
@@ -255,6 +253,7 @@ properties 转义吞掉导致 "文件名、目录名或卷标语法不正确" �
 ## 皮肤素材署名与许可
 
 鲸鱼娘皮肤素材来自 [dsh-deep-whale](https://github.com/Small-tailqwq/dsh-deep-whale)（深海女仆工坊 maid-atelier）：
+
 - 鲸鱼娘角色原作：**上善**（[Pixiv](https://www.pixiv.net/users/62155430) · [Bilibili](https://b23.tv/8h5L4xz)）
 - 女仆鲸鱼娘二次设计：**ZipZipPipe**（[Pixiv](https://www.pixiv.net/users/18604994) · [Bilibili](https://b23.tv/Pnw6nG8)）
 - 完整署名链见 [docs/maid-atelier-NOTICE.md](docs/maid-atelier-NOTICE.md)

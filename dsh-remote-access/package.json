@@ -1,10 +1,7 @@
 {
   "name": "dsh-remote-access",
-  "version": "1.3.0",
-  "dependencies": {
-    "qrcode": "^1.5.4"
-  },
-  "description": "设置页「远程控制」：微信 iLink 桥（主要方式，扫码后微信内直接遥控 DSH）+ cpolar 公网隧道（备选，内置一键安装/注册/token，个人自用，非官方）",
+  "version": "2.0.0",
+  "description": "DSH 远程互信认证：移动端首次配对确认、已配对设备管理、主机设备信息、只读目录/文件预览、MCP 枚举、远程通道 Bearer token 鉴权（不含微信桥与 cpolar 隧道）",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -15,7 +12,9 @@
   "dsh": {
     "client": {
       "platform": "web",
-      "inject": ["slots"],
+      "inject": [
+        "slots"
+      ],
       "immediately": true
     },
     "bundle": {

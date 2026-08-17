@@ -4,7 +4,7 @@
 
 ## 项目现状速览
 
-- **仓库**:https://github.com/Hyna-hla/dsh-remote(原名 harness-remote,旧地址自动重定向)
+- **仓库**:<https://github.com/Hyna-hla/dsh-remote(原名> harness-remote,旧地址自动重定向)
 - **构建环境(本机 Legion)**:JDK 17 + Android SDK 在 `D:\android-env\`(jdk17 / android-sdk),工程在 `D:\harness-remote`
 - 构建:`cd /d/harness-remote && JAVA_HOME=D:\android-env\jdk17 ./gradlew.bat assembleDebug --no-daemon`
 - 发布流程:改 `app/build.gradle.kts` 版本号 → 构建 → `git push`(直连超时就带 token 走 gh-proxy,见下) → GitHub API 建 Release → uploads.github.com 传 `DSH-Remote-vX.Y.Z.apk` → 拷贝到 `release/`(已 gitignore,>50MB 不进 git)→ Downloads 留一份
@@ -35,11 +35,13 @@
 **目标**:打开缓存过的会话只拉增量,不重新分页。
 
 **现状**(`SessionScreen.kt` 的 `SessionChatState`):
+
 - `load()`:先读 HistoryCache(gzip 磁盘)得 `cachedItems`,再 `connection.history(sessionId, maxMessages=3)` 拿最近 3 条,`mergeCachedWithNet` 按 seq 拼接
 - `loadMore()` 每页 15 条往老翻;`loadAll()` 循环翻到底
 - `HistoryCache`(`data/HistoryCache.kt`):gzip JSON,条目带 seq
 
 **方案**(按此实施):
+
 1. HistoryCache 元数据加 `completeThroughOldestSeq: Long?`(loadAll 到 hasMore=false 时记录当时的 oldestSeq)与 `completeUpToSeq: Long`(缓存最新 seq)
 2. 打开会话:缓存有 completeThrough 标记时,跳过「加载更早」按钮(hasMore 仅当 net 首屏 seq 老于缓存缺口);`loadAll` 发现缓存已完整覆盖到某 seq,只从缺口往下翻,不整页重来
 3. 合并逻辑复用 `mergeCachedWithNet`(seq 去重已支持)
