@@ -248,7 +248,7 @@ export const apply = (ctx) => {
                 const ps = "$ErrorActionPreference='SilentlyContinue'; " +
                     "$c = Get-CimInstance Win32_ComputerSystem | Select-Object -First 1; " +
                     "@(($c.Manufacturer -replace '\\s+$',''), ($c.Model -replace '\\s+$','')) -join ' '";
-                const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-Command", ps], { timeout: 15000 });
+                const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-Command", ps], { timeout: 5000 });
                 model = String(stdout).trim();
             }
             catch { }
@@ -701,8 +701,11 @@ export const apply = (ctx) => {
             return cachedToken;
         try {
             const t = readFileSync(tokenFile, "utf8").trim();
-            if (/^[0-9a-f]{32,}$/.test(t))
+            if (/^[0-9a-f]{32,}$/.test(t)) {
+                // token 一旦载入进程内缓存即不重读磁盘：外部替换/轮换 channel-token 文件需重启 DSH 才生效
+                log("远程通道 token 已在进程内缓存；如需轮换请重写 " + tokenFile + " 后重启 DSH");
                 return (cachedToken = t);
+            }
         }
         catch { }
         try {

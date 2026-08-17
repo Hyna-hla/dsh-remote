@@ -97,7 +97,9 @@ function Sync-Once {
 
         # 4) 可选：自动提交本地工作区改动（保留时间线，便于回滚/差分）
         if (-not $PullOnly) {
-            $dirty = (& git status --porcelain) -ne $null -and ((& git status --porcelain) -join '') -ne ''
+            # 只调一次 git status；porcelain 无改动时为空输出 → Trim 后为 '' → 判定干净
+            $st = (& git status --porcelain) 2>$null
+            $dirty = (($st | Out-String).Trim()) -ne ''
             if ($dirty) {
                 $msg = if ($CommitMessage) { $CommitMessage } else { "auto-sync $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" }
                 Write-Host "自动提交本地改动：$msg" -ForegroundColor Green
@@ -155,8 +157,16 @@ if ($Once) {
 
 # 定时循环模式
 Write-Host "进入定时同步模式：每 $PullIntervalSeconds 秒同步一次，Ctrl+C 停止。" -ForegroundColor Cyan
-while ($true) {
-    if (Test-ScriptStop) { Write-Host "`n[退出]" -ForegroundColor Yellow; break }
+$stop = $false
+while (-not $stop) {
+    if (Test-ScriptStop) { $stop = $true; break }
     Sync-Once
-    Start-Sleep -Seconds $PullIntervalSeconds
+    # 分段休眠（每 200ms 检查一次 Ctrl+C），避免单次长休眠期间 Ctrl+C 不响应
+    $waited = 0.0
+    while ($waited -lt $PullIntervalSeconds) {
+        if (Test-ScriptStop) { $stop = $true; break }
+        Start-Sleep -Milliseconds 200
+        $waited += 0.2
+    }
 }
+Write-Host "`n[退出]" -ForegroundColor Yellow

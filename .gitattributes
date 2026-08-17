@@ -1,0 +1,5 @@
+# 插件源码与产物统一 LF（避免 Windows 检出/构建产生 CRLF 行尾噪音 diff）
+dsh-remote-access/src/** text eol=lf
+dsh-remote-access/lib/** text eol=lf
+*.ts text eol=lf
+*.js text eol=lf
