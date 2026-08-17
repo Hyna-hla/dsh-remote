@@ -1,4 +1,4 @@
-﻿# git-sync.ps1 — 通用「先拉取再提交」Git 同步脚本
+# git-sync.ps1 — 通用「先拉取再提交」Git 同步脚本
 #
 # 核心理念（按你的要求）：
 #   1. 每次提交前必须先同步（先 git fetch + pull 合并远端更新，冲突在本机解决，再推送）。
@@ -32,6 +32,11 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
+
+# Windows 控制台默认代码页常为 GBK(936)，会把脚本输出的 UTF-8 中文渲染成乱码：
+# 强制本进程以 UTF-8 读写控制台，保证 Write-Host 中文在 PowerShell(5.1/7) 均正常显示。
+$OutputEncoding = [System.Text.UTF8Encoding]::new()
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
 
 if (-not $Repo) { $Repo = (Get-Location).Path }
 

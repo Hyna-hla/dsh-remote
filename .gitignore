@@ -25,5 +25,8 @@ release/*.apk
 release/DSH-Remote-v*.apk
 *.tgz
 
+# Node / 插件
+node_modules/
+dist/
 .dsh-test
 .npm-cache-tmp
