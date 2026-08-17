@@ -293,7 +293,7 @@ window.__ModuleLoader__.load({
           h("input", { style: Object.assign({}, S.input, { width: 230 }), placeholder: "如 tunnel.example.com 或 域名:8080", value: input, onChange: function (e) { setInput(e.target.value); } }),
           h("button", { style: S.btnPrimary, disabled: busy || !input.trim(), onClick: function () { mutate("add", input.trim()); } }, busy ? "处理中…" : "添加")),
         err ? h("div", { style: Object.assign({}, S.err, { marginTop: 6 }) }, err) : null,
-        h("div", { style: S.sub, marginTop: 6 }, "⚠ 修改后需重启 DSH 生效；白名单只解决 Host 校验，手机请求仍需配对拿到通道 token。")
+        h("div", { style: S.sub, marginTop: 6 }, "✔ 修改后通常立即生效（DSH 热监视 cordis.patch.yml 自动应用）；如未生效请重启 DSH。白名单只解决 Host 校验，手机请求仍需配对拿到通道 token。")
       );
     }
 

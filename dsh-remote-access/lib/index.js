@@ -1,4 +1,4 @@
-// dsh-remote-access v2.2.0 — 远程互信认证（配对码 + 确认框 + 公网域名白名单）+ 只读辅助路由
+// dsh-remote-access v2.3.0 — 远程互信认证（配对码 + 确认框 + 公网域名白名单）+ 只读辅助路由
 // 保留：移动端配对握手（pair/*）、主机设备信息（device/info）、只读目录列举（fs/list）、
 //       只读文件预览（fs/read）、MCP 枚举（mcp/list）、远程通道 Bearer token 鉴权（/api 全量门禁，含 WebSocket）。
 // 移除：微信 iLink 桥（lib/ilink.js + lib/bridge.js）、cpolar 隧道供应（lib/cpolar.js），
@@ -439,12 +439,13 @@ export const apply = (ctx) => {
     },
   });
 
-  // ---------- 公网域名信任白名单（settings.yaml → client-connection.trustedHosts） ----------
-  // DSH 核心 client-connection 对 /api 做 Host 围栏（防 DNS 重绑定）：只放行 loopback 与 trustedHosts。
-  // 手机经公网隧道访问时 Host 是公网域名，必须列入白名单（重启 DSH 后生效）。
-  // 直接读写 $DSH_HOME/settings.yaml：settings-file 提供者对「外部编辑热发布」，且自身写入时
-  // 先 reconcileFromDisk 再做叶级 diff——外部写入的区块会被保留，不会丢。
-  const settingsFile = join(home, "settings.yaml");
+  // ---------- 公网域名信任白名单（profile cordis.patch.yml → web-runtime 条目 config.trustedHosts） ----------
+  // DSH 核心 client-connection 的 /api Host 围栏（防 DNS 重绑定）只放行 loopback 与 trustedHosts，
+  // 而 trustedHosts 的真实来源是 web-runtime 插件（dsh-web-app）的配置——基础包用
+  // !!js ctx.webStartup.trustedHosts（CLI --trusted-host）提供。在 profile 的 cordis.patch.yml
+  // 给 web-runtime 条目打 config 覆盖即可注入白名单；加载器 watchUserPatches 热监视该文件，
+  // 写入后立即生效（实测无需重启）。
+  const profilePatchFile = join(home, "profiles", "web", "cordis.patch.yml");
 
   /** 校验条目为纯 域名[:端口]（与核心 assertTrustedAuthority 同口径：WHATWG 规范化后必须逐字一致） */
   const validateAuthority = (entry) => {
@@ -464,22 +465,22 @@ export const apply = (ctx) => {
     return null;
   };
 
-  /** 读取 settings.yaml 顶层 client-connection 区块的 trustedHosts 列表（无区块/无文件 → []） */
+  /** 读取 cordis.patch.yml 中 web-runtime 覆盖条目的 trustedHosts 列表（无条目/无文件 → []） */
   const readTrustedHosts = () => {
     let text;
     try {
-      text = readFileSync(settingsFile, "utf8");
+      text = readFileSync(profilePatchFile, "utf8");
     } catch {
       return [];
     }
     const lines = text.split(/\r?\n/);
-    const start = lines.findIndex((l) => /^client-connection:\s*$/.test(l));
+    const start = lines.findIndex((l) => /^- id: web-runtime\s*$/.test(l));
     if (start < 0) return [];
     const hosts = [];
     let inList = false;
     for (let j = start + 1; j < lines.length; j++) {
       const line = lines[j];
-      if (!/^[ \t]/.test(line) && line.trim() !== "") break; // 区块结束
+      if (!/^[ \t]/.test(line) && line.trim() !== "") break; // 条目结束
       const t = line.trim();
       if (/^trustedHosts:/.test(t)) {
         inList = true;
@@ -489,50 +490,63 @@ export const apply = (ctx) => {
         hosts.push(t.replace(/^-\s*/, "").replace(/^["']|["']$/g, "").trim());
         continue;
       }
-      if (inList && t !== "" && !/^- /.test(t)) inList = false; // 区块内其他键
+      if (inList && t !== "" && !/^- /.test(t)) inList = false; // 条目内其他键
     }
     return hosts;
   };
 
-  /** 把 hosts 写回 client-connection 区块（只动 trustedHosts 行，其余内容原样保留）；空列表写 [] */
+  /** 写回 web-runtime 覆盖条目（只动 trustedHosts 行，保留 printUrl/surfaceContext）；空列表删除整个条目 */
   const writeTrustedHosts = (hosts) => {
     let text;
     try {
-      text = readFileSync(settingsFile, "utf8");
+      text = readFileSync(profilePatchFile, "utf8");
     } catch {
       text = "";
     }
     const nl = text.includes("\r\n") ? "\r\n" : "\n";
     const lines = text.split(/\r?\n/);
     while (lines.length && lines[lines.length - 1].trim() === "") lines.pop();
-    const newListLines = hosts.length
-      ? ["  trustedHosts:", ...hosts.map((h) => "    - " + h)]
-      : ["  trustedHosts: []"];
-    const start = lines.findIndex((l) => /^client-connection:\s*$/.test(l));
-    if (start < 0) {
-      if (lines.length) lines.push("");
-      lines.push("client-connection:", ...newListLines);
-    } else {
-      let end = start + 1;
-      while (end < lines.length && (/^[ \t]/.test(lines[end]) || lines[end].trim() === "")) end++;
-      const block = lines.slice(start + 1, end);
-      const ti = block.findIndex((l) => /^\s*trustedHosts:/.test(l));
-      if (ti >= 0) {
-        let ei = ti + 1;
-        while (ei < block.length && (/^[ \t]+- /.test(block[ei]) || block[ei].trim() === "")) ei++;
-        block.splice(ti, ei - ti, ...newListLines);
-      } else {
-        block.push(...newListLines);
+    const start = lines.findIndex((l) => /^- id: web-runtime\s*$/.test(l));
+    if (hosts.length === 0) {
+      // 空列表：删除整个 web-runtime 覆盖条目（含其后紧跟的空行）
+      if (start >= 0) {
+        let end = start + 1;
+        while (end < lines.length && (/^[ \t]/.test(lines[end]) || lines[end].trim() === "")) end++;
+        lines.splice(start, end - start);
+        if (lines[start] !== undefined && lines[start].trim() === "") lines.splice(start, 1);
       }
-      lines.splice(start + 1, end - start - 1, ...block);
+    } else {
+      const newListLines = hosts.map((h) => "        - " + h);
+      if (start < 0) {
+        if (lines.length) lines.push("");
+        lines.push("- id: web-runtime");
+        lines.push("  config:");
+        lines.push("    printUrl: true");
+        lines.push("    surfaceContext: true");
+        lines.push("    trustedHosts:", ...newListLines);
+      } else {
+        let end = start + 1;
+        while (end < lines.length && (/^[ \t]/.test(lines[end]) || lines[end].trim() === "")) end++;
+        const block = lines.slice(start + 1, end);
+        const ti = block.findIndex((l) => /^\s*trustedHosts:/.test(l));
+        if (ti >= 0) {
+          let ei = ti + 1;
+          while (ei < block.length && (/^[ \t]+- /.test(block[ei]) || block[ei].trim() === "")) ei++;
+          block.splice(ti + 1, ei - ti - 1, ...newListLines);
+        } else {
+          block.push("    trustedHosts:", ...newListLines);
+        }
+        lines.splice(start + 1, end - start - 1, ...block);
+      }
     }
     try {
-      const tmp = settingsFile + ".tmp-" + process.pid;
+      mkdirSync(join(home, "profiles", "web"), { recursive: true });
+      const tmp = profilePatchFile + ".tmp-" + process.pid;
       writeFileSync(tmp, lines.join(nl) + nl, "utf8");
-      renameSync(tmp, settingsFile);
+      renameSync(tmp, profilePatchFile);
       return null;
     } catch (err) {
-      return "settings.yaml 写入失败：" + (err?.message || String(err));
+      return "cordis.patch.yml 写入失败：" + (err?.message || String(err));
     }
   };
 
@@ -541,7 +555,7 @@ export const apply = (ctx) => {
     path: "/api/remote-access/trusted-hosts",
     handler: async (req, res) => {
       if (req.method === "GET") {
-        json(res, 200, { ok: true, hosts: readTrustedHosts(), settingsPath: settingsFile });
+        json(res, 200, { ok: true, hosts: readTrustedHosts(), patchFile: profilePatchFile });
         return;
       }
       if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
@@ -561,7 +575,7 @@ export const apply = (ctx) => {
       const werr = writeTrustedHosts(next);
       if (werr) return json(res, 200, { ok: false, error: werr });
       log("trustedHosts 已更新：", next.join(", ") || "（空）");
-      json(res, 200, { ok: true, hosts: next, note: "重启 DSH 后生效" });
+      json(res, 200, { ok: true, hosts: next, note: "已热生效（DSH 监视 cordis.patch.yml 自动应用）" });
     },
   });
 
