@@ -375,6 +375,145 @@ export const apply = (ctx) => {
             }
         },
     });
+    // ---------- MCP 资源 / 提示词只读暴露（M3，能力清册 v1） ----------
+    // 上游无连接态查询 API，插件无法直接枚举真实资源/提示词或 RPC 渲染；
+    // 依约定从工具名（mcp__<server>__*resource* / *prompt*）聚合出「能力清册」，
+    // 并把工具 schema 作为可浏览/可插入的占位内容。真实拉取/渲染需 App/宿主侧发起 MCP 调用。
+    const mcpSchemas = () => {
+        const tools = ctx.get("tools");
+        return tools && typeof tools.schemas === "function" ? tools.schemas() : [];
+    };
+    const mcpByServer = (pred) => {
+        const by = new Map();
+        for (const s of mcpSchemas()) {
+            const name = typeof s?.name === "string" ? s.name : "";
+            const parts = name.startsWith("mcp__") ? name.split("__") : null;
+            if (!parts || parts.length < 3 || !parts[1])
+                continue;
+            const serverName = parts[1];
+            const tail = parts.slice(2).join("__");
+            if (!pred(tail))
+                continue;
+            if (!by.has(serverName))
+                by.set(serverName, []);
+            by.get(serverName).push({ ...s, tail });
+        }
+        return by;
+    };
+    reg({
+        kind: "exact",
+        path: "/api/remote-access/mcp/resources/list",
+        handler: async (req, res) => {
+            if (req.method !== "GET")
+                return json(res, 405, { error: "method not allowed" });
+            try {
+                const servers = [];
+                for (const [serverName, list] of mcpByServer((t) => t.toLowerCase().includes("resource"))) {
+                    servers.push({
+                        serverName,
+                        status: "unknown",
+                        resources: list.map((s) => ({
+                            uri: "mcp://" + serverName + "/" + s.tail,
+                            name: s.tail,
+                            mimeType: typeof s.mimeType === "string" ? s.mimeType : "text/plain",
+                            description: typeof s.description === "string" ? s.description : "",
+                        })),
+                    });
+                }
+                json(res, 200, { ok: true, servers });
+            }
+            catch (err) {
+                json(res, 200, { ok: false, error: String(err?.message ?? err) });
+            }
+        },
+    });
+    reg({
+        kind: "exact",
+        path: "/api/remote-access/mcp/resources/read",
+        handler: async (req, res) => {
+            if (req.method !== "GET")
+                return json(res, 405, { error: "method not allowed" });
+            const u = new URL(req.url, "http://localhost");
+            const uri = u.searchParams.get("uri") ?? "";
+            let found = null;
+            let foundSn = null;
+            outer: for (const [sn, list] of mcpByServer((t) => t.toLowerCase().includes("resource"))) {
+                for (const s of list) {
+                    if ("mcp://" + sn + "/" + s.tail === uri) {
+                        found = s;
+                        foundSn = sn;
+                        break outer;
+                    }
+                }
+            }
+            if (!found)
+                return json(res, 200, { ok: false, error: "resource_not_found", uri });
+            json(res, 200, {
+                ok: true,
+                uri,
+                serverName: foundSn,
+                isBinary: false,
+                text: JSON.stringify(found, null, 2),
+                note: "capability_schema",
+            });
+        },
+    });
+    reg({
+        kind: "exact",
+        path: "/api/remote-access/mcp/prompts/list",
+        handler: async (req, res) => {
+            if (req.method !== "GET")
+                return json(res, 405, { error: "method not allowed" });
+            try {
+                const servers = [];
+                for (const [serverName, list] of mcpByServer((t) => t.toLowerCase().includes("prompt"))) {
+                    servers.push({
+                        serverName,
+                        status: "unknown",
+                        prompts: list.map((s) => ({
+                            name: s.tail,
+                            description: typeof s.description === "string" ? s.description : "",
+                            argumentsSchema: s.inputSchema ?? s.argumentsSchema ?? {},
+                        })),
+                    });
+                }
+                json(res, 200, { ok: true, servers });
+            }
+            catch (err) {
+                json(res, 200, { ok: false, error: String(err?.message ?? err) });
+            }
+        },
+    });
+    reg({
+        kind: "exact",
+        path: "/api/remote-access/mcp/prompts/render",
+        handler: async (req, res) => {
+            if (req.method !== "POST")
+                return json(res, 405, { error: "method not allowed" });
+            const body = await readBody(req);
+            const name = String(body.name || "");
+            let schema = null;
+            let server = null;
+            for (const [sn, list] of mcpByServer((t) => t.toLowerCase().includes("prompt"))) {
+                const s = list.find((x) => x.tail === name);
+                if (s) {
+                    schema = s;
+                    server = sn;
+                    break;
+                }
+            }
+            if (!schema)
+                return json(res, 200, { ok: false, error: "prompt_not_found", name });
+            const args = body.arguments && typeof body.arguments === "object" ? body.arguments : {};
+            json(res, 200, {
+                ok: true,
+                serverName: server,
+                prompt: name,
+                messages: [{ role: "user", content: "[MCP 提示词 " + server + "/" + name + "] " + JSON.stringify(args) }],
+                note: "best_effort_without_mcp_rpc",
+            });
+        },
+    });
     // ---------- 主机设备信息（App 设备记录：机型展示 + MAC 重连校验） ----------
     // MAC：优先带 IPv4 的物理网卡；本地管理位（随机化/虚拟网卡）的接口靠后
     const isLocalAdminMac = (mac) => /^[0-9a-f][26ae]:/i.test(mac);

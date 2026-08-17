@@ -723,6 +723,55 @@ test("M4 token 运维：rotate 换新 / 旧失效 / revoke 清配对 / audit 有
   assert.equal(r.status, 401);
 });
 
+test("M3 MCP 资源/提示词：resources/list + read / prompts/list + render（能力清册）", async () => {
+  ctx.get = (key) =>
+    key === "tools"
+      ? {
+          schemas: () => [
+            { name: "mcp__github__resources__list", description: "列出 GitHub 资源" },
+            { name: "mcp__github__resources__read", description: "读取 GitHub 资源", mimeType: "text/markdown" },
+            { name: "mcp__github__prompts__code_review", description: "代码评审", inputSchema: { type: "object", properties: { pr: { type: "string" } } } },
+            { name: "mcp__filesystem__resources__read" },
+            { name: "plain" },
+          ],
+        }
+      : undefined;
+
+  let r = await req("/api/remote-access/mcp/resources/list");
+  assert.equal(r.body.ok, true);
+  const github = r.body.servers.find((s) => s.serverName === "github");
+  assert.equal(github.resources.length, 2);
+  assert.ok(github.resources.some((x) => x.uri === "mcp://github/resources__list"));
+
+  r = await req("/api/remote-access/mcp/resources/read?uri=" + encodeURIComponent("mcp://github/resources__list"));
+  assert.equal(r.body.ok, true);
+  assert.equal(r.body.note, "capability_schema");
+
+  r = await req("/api/remote-access/mcp/prompts/list");
+  const g2 = r.body.servers.find((s) => s.serverName === "github");
+  assert.equal(g2.prompts.length, 1);
+  // 能力清册：条目 = 能力工具全名（prompts__code_review）
+  assert.equal(g2.prompts[0].name, "prompts__code_review");
+  assert.ok(g2.prompts[0].argumentsSchema.properties.pr);
+
+  r = await req("/api/remote-access/mcp/prompts/render", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { name: "prompts__code_review", arguments: { pr: "https://github.com/x/y/pull/1" } },
+  });
+  assert.equal(r.body.ok, true);
+  assert.equal(r.body.messages[0].role, "user");
+
+  r = await req("/api/remote-access/mcp/prompts/render", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { name: "ghost_prompt", arguments: {} },
+  });
+  assert.equal(r.body.error, "prompt_not_found");
+
+  ctx.get = () => undefined;
+});
+
 test.after(() => {
   srv.close();
   rmSync(home, { recursive: true, force: true });

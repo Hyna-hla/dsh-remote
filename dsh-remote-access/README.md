@@ -61,7 +61,11 @@ dsh plugin --profile web add ./dsh-remote-access-2.4.1.tgz
 | POST | /api/remote-access/fs/write | 上传文件（M1：json `{path, content=base64, overwrite?}`；沙箱限 home；返回 path/size） |
 | POST | /api/remote-access/fs/mkdir | 建目录（M1：json `{path, recursive?}`） |
 | POST | /api/remote-access/fs/delete | 删除（M1：软删进回收站 `trash/`, 返回 trashId） |
-| GET | /api/remote-access/mcp/list | MCP 枚举 |
+| GET | /api/remote-access/mcp/list | MCP 枚举（工具） |
+| GET | /api/remote-access/mcp/resources/list | MCP 资源能力清册（M3） |
+| GET | /api/remote-access/mcp/resources/read?uri= | 读取资源能力 schema（M3，capability_schema） |
+| GET | /api/remote-access/mcp/prompts/list | MCP 提示词能力清册（M3） |
+| POST | /api/remote-access/mcp/prompts/render | 渲染提示词 → 可插入消息（M3，best_effort） |
 
 鉴权规则（/api 全量门禁，含 WebSocket 升级）：
 
@@ -74,6 +78,11 @@ dsh plugin --profile web add ./dsh-remote-access-2.4.1.tgz
 
 - **双向文件（M1）**：`fs/write`（base64 json）、`fs/mkdir`、`fs/delete`、`fs/stat` 提供手机↔PC 的文件上传/管理；`fs/read` 反向读取预览。**写/删/建目录是破坏性操作，一律沙箱到 `$DSH_HOME` 内**（`resolve`+`relative` 归一化防 `../` 穿越），并额外校验 `overwrite`。均复用通道 Bearer 鉴权，远程未持 token 一律 401。
 - **Token 运维（M4）**：`token/rotate`（轮换，旧 token 即时失效）、`token/revoke`（吊销 + 清空配对表，强制所有设备重新配对）、`token/audit`（最近 50 条审计）。均**非豁免**——仅本机设置页或已配对设备（带当前 Bearer）可达。
+
+## MCP 只读能力清册（M3）
+
+- `mcp/resources/list`、`mcp/resources/read`、`mcp/prompts/list`、`mcp/prompts/render`：依约定从工具名（`mcp__<server>__*resource*/*prompt*`）聚合各 MCP 服务器的资源/提示词**能力**及其 schema。
+- ⚠️ **能力基事实**：上游 DSH 插件仅暴露 `ctx.tools.schemas()`（无连接态 MCP RPC），本 v1 返回的是**能力清册**（能力工具名 + schema），非真实资源枚举/渲染；真实拉取/渲染需 App/宿主侧发起 MCP 调用。
 
 ## 状态文件
 
