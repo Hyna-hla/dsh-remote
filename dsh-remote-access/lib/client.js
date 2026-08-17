@@ -1,5 +1,4 @@
-window.__ModuleLoader__ = window.__ModuleLoader__ || { load: () => {} };
-var __ModuleLoader__ = (() => {
+(() => {
   // src/client.ts
   window.__ModuleLoader__.load({
     id: "dsh-remote-access",

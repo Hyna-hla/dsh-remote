@@ -20,7 +20,7 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "tsc -p tsconfig.json",
-    "build:client": "esbuild src/client.ts --bundle --platform=browser --format=iife --global-name=__ModuleLoader__ --outfile=lib/client.js --banner:js=\"window.__ModuleLoader__ = window.__ModuleLoader__ || { load: () => {} };\" --target=es2020",
+    "build:client": "esbuild src/client.ts --bundle --platform=browser --format=iife --outfile=lib/client.js --target=es2020",
     "test": "node --test smoke-test.mjs",
     "prepack": "npm run typecheck && npm run build && npm run build:client && npm test",
     "pack": "npm pack"
