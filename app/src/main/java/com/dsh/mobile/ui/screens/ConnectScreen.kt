@@ -39,6 +39,55 @@ import kotlinx.coroutines.launch
 private fun deviceTitle(p: HostProfile): String =
     p.remark.ifBlank { p.deviceModel.ifBlank { "未命名设备" } }
 
+/** M1：发送文件到 PC（系统选文件 → fs/write 上传到插件 uploads 目录） */
+@Composable
+private fun UploadToPcCard(profile: HostProfile, connection: DshConnection) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var uploading by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf<String?>(null) }
+
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            uploading = true
+            status = "读取文件…"
+            try {
+                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: error("无法读取所选文件")
+                val name = uri.lastPathSegment?.takeIf { it.isNotBlank() } ?: "upload.bin"
+                status = "上传中… (${bytes.size / 1024} KB)"
+                val rpc = HttpPairingRpc(connection, OkHttpClientFactory.build(profile).first)
+                val res = rpc.uploadFile(name, bytes)
+                status = if (res.ok) "已上传 ✓ ${res.path ?: ""}"
+                else "上传失败：" + (res.error ?: "未知错误")
+            } catch (e: Exception) {
+                status = "上传失败：" + (e.message ?: e.javaClass.simpleName)
+            } finally {
+                uploading = false
+            }
+        }
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = DshShape.card,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            Text("发送文件到 PC（M1）", style = MaterialTheme.typography.titleSmall)
+            Spacer(Modifier.height(6.dp))
+            Button(onClick = { picker.launch("*/*") }, enabled = !uploading) {
+                Text(if (uploading) "上传中…" else "选择文件")
+            }
+            status?.let {
+                Spacer(Modifier.height(6.dp))
+                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
 @Composable
 fun ConnectScreen(
     connection: DshConnection,
@@ -259,6 +308,13 @@ fun ConnectScreen(
                             }
                         }
                     }
+                }
+            }
+
+            // M1：连接后可在首页直接上传文件到 PC
+            if (activeProfile != null && connState is DshConnection.State.Connected) {
+                item {
+                    UploadToPcCard(activeProfile!!, connection)
                 }
             }
 

@@ -230,7 +230,12 @@ export const apply = (ctx) => {
             const body = await readBodyMax(req, UP_MAX);
             if (!body)
                 return json(res, 413, { ok: false, error: "payload_too_large", max: UP_MAX });
-            const target = resolveSandboxed(String(body.path || "").trim());
+            const path = String(body.path || "").trim();
+            let target = resolveSandboxed(path);
+            if (!target && String(body.name || "").trim()) {
+                // App 友好快捷：只给文件名 → 写 $DSH_HOME/remote-access/uploads/ 下（basename 去路径、防穿越）
+                target = resolve(join(home, "remote-access", "uploads", basename(String(body.name).trim())));
+            }
             if (!target)
                 return json(res, 200, { ok: false, error: "path_not_in_workspace" });
             let buf;

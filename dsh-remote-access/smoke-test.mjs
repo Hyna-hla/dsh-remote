@@ -610,6 +610,17 @@ test("M1 双向文件：fs/write → stat → read 回读；沙箱拒穿越；ov
   r = await req("/api/remote-access/fs/read?path=" + encodeURIComponent(target));
   assert.equal(r.body.isBinary, false);
   assert.equal(r.body.text, text);
+
+  // App 友好：只给 name → 自动落入 uploads/ 且 basename 去路径（../ 被剥离）
+  r = await req("/api/remote-access/fs/write", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { name: "../evil-name.txt", content: Buffer.from("by name").toString("base64") },
+  });
+  assert.equal(r.body.ok, true);
+  assert.match(r.body.path, /[\\/]uploads[\\/]evil-name\.txt$/);
+  r = await req("/api/remote-access/fs/read?path=" + encodeURIComponent(r.body.path));
+  assert.equal(r.body.text, "by name");
 });
 
 test("M1 双向文件：fs/mkdir（recursive）+ fs/delete 进回收站（trash）", async () => {

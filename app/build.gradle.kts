@@ -37,8 +37,8 @@ android {
     }
 
     signingConfigs {
-        // 显式 debug 签名（标准 debug.keystore，可复现、CI 默认态稳定）
-        create("debug") {
+        // 显式 debug 签名（AGP 内置 debug，仅覆写为标准 debug.keystore，避免重复 create 冲突）
+        getByName("debug").apply {
             storeFile = file("${System.getProperty("user.home")}/.android/debug.keystore")
             storePassword = "android"
             keyAlias = "androiddebugkey"

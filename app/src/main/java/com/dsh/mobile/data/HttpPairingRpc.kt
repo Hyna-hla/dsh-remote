@@ -1,5 +1,6 @@
 package com.dsh.mobile.data
 
+import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -128,4 +129,33 @@ class HttpPairingRpc(
                 }
             }
         }
+
+    // ---------- M1 双向文件：App → PC 上传（插件 fs/write，App 友好 name 契约） ----------
+    data class UploadResult(val ok: Boolean, val path: String?, val size: Long?, val error: String?)
+
+    /** 上传文件到 PC：只给文件名，插件自动写入其 $DSH_HOME/remote-access/uploads/ 下。 */
+    suspend fun uploadFile(name: String, bytes: ByteArray): UploadResult = withContext(Dispatchers.IO) {
+        val json = JSONObject()
+            .put("name", name)
+            .put("content", Base64.encodeToString(bytes, Base64.NO_WRAP))
+            .put("overwrite", true)
+        val req = Request.Builder()
+            .url(connection.baseUrl() + "/api/remote-access/fs/write")
+            .post(json.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+        client.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) return@withContext UploadResult(false, null, null, "HTTP ${resp.code}")
+            val obj = JSONObject(resp.body?.string().orEmpty())
+            if (!obj.optBoolean("ok", false)) {
+                UploadResult(false, null, null, obj.optString("error", "unknown"))
+            } else {
+                UploadResult(
+                    ok = true,
+                    path = obj.optString("path", "").ifBlank { null },
+                    size = if (obj.has("size")) obj.optLong("size") else null,
+                    error = null,
+                )
+            }
+        }
+    }
 }
