@@ -29,7 +29,7 @@ jobs:
       - name: Pack
         run: npm pack
       - name: Upload package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dsh-remote-access-tgz
           path: dsh-remote-access/dsh-remote-access-*.tgz
@@ -51,7 +51,7 @@ jobs:
       - name: Assemble debug APK
         run: ./gradlew assembleDebug --no-daemon --console=plain
       - name: Upload APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: app-debug-apk
           path: app/build/outputs/apk/debug/*.apk
