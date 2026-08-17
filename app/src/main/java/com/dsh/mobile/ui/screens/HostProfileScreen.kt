@@ -187,7 +187,7 @@ fun HostProfileScreen(profileId: String?, connection: DshConnection, onBack: () 
             OutlinedTextField(
                 value = url, onValueChange = { url = it },
                 label = { Text("服务器地址（首次连接仅需地址）") },
-                placeholder = { Text("192.168.1.100:8787 或你的 cpolar 域名") },
+                placeholder = { Text("192.168.1.100:8787 或你的内网穿透域名") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )

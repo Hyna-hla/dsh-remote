@@ -179,14 +179,70 @@ window.__ModuleLoader__.load({
       );
     }
 
-    // ---------- 设置页「远程控制」：远程互信认证（v2.0.0 起仅此一项） ----------
+    // ---------- 配对码（v2.1.0）：PC 生成随机码，手机 App 输入即完成配对 ----------
+    function PairCodeCard() {
+      var [pc, setPc] = useState(null);
+      var [busy, setBusy] = useState(false);
+      var [left, setLeft] = useState(0);
+      var timer = useRef(null);
+
+      function generate() {
+        setBusy(true);
+        fetchJson("/api/remote-access/pair/code/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        })
+          .then(function (r) {
+            if (r && r.ok && r.code) {
+              setPc(r);
+              setLeft(Math.floor(r.expiresInSec || 600));
+              if (timer.current) clearInterval(timer.current);
+              timer.current = setInterval(function () {
+                setLeft(function (prev) {
+                  if (prev <= 1) {
+                    if (timer.current) clearInterval(timer.current);
+                    timer.current = null;
+                    setPc(null);
+                    return 0;
+                  }
+                  return prev - 1;
+                });
+              }, 1000);
+            }
+          })
+          .catch(function () {})
+          .finally(function () { setBusy(false); });
+      }
+
+      useEffect(function () {
+        return function () { if (timer.current) clearInterval(timer.current); };
+      }, []);
+
+      var mm = String(Math.floor(left / 60)).padStart(2, "0");
+      var ss = String(left % 60).padStart(2, "0");
+
+      return h("div", { style: S.card },
+        h("div", { style: S.row },
+          h("div", { style: S.title }, "配对码（推荐）"),
+          pc ? h("span", { style: Object.assign({}, S.badge, { background: "rgba(52,199,89,.15)", color: "var(--dsw-alias-state-success-primary)" }) }, "有效 " + mm + ":" + ss) : null),
+        h("div", { style: S.sub }, "生成一个 6 位随机配对码，在手机 App 连接本机后输入即完成配对——不用再守着确认框点允许。"),
+        pc ? h("div", { style: Object.assign({}, S.mono, { fontSize: 30, fontWeight: 700, letterSpacing: "0.4em", color: "var(--dsw-alias-brand-primary)", marginTop: 8, marginBottom: 2 }) }, pc.code) : null,
+        pc ? h("div", { style: S.sub }, "10 分钟有效 · 最多试错 5 次 · 验证通过立即作废") : null,
+        h("div", { style: Object.assign({}, S.row, { marginTop: 10 }) },
+          h("button", { style: S.btnPrimary, disabled: busy, onClick: generate }, busy ? "生成中…" : pc ? "重新生成" : "生成配对码"))
+      );
+    }
+
+    // ---------- 设置页「远程控制」：远程互信认证 ----------
     function TrustSection() {
       return h("div", { style: S.root },
         h("div", { style: S.row },
           h("div", { style: S.title }, "远程互信认证"),
           h("span", { style: Object.assign({}, S.badge, { background: "rgba(52,199,89,.15)", color: "var(--dsw-alias-state-success-primary)" }) }, "● 已启用")),
-        h("div", { style: S.sub }, "插件只负责远程互信：手机 App 首次连接经配对确认后，获得远程通道 token；此后所有 /api 请求与实时通道（WebSocket）都要求该 token，拿到地址的陌生人无法遥控这台电脑。"),
-        h("div", { style: S.ok }, "✔ 通道鉴权已挂载：本机浏览器放行，配对引导通道（pair/* 与 host.describe）豁免，其余 /api 一律需要 Bearer token。"),
+        h("div", { style: S.sub }, "插件只负责远程互信：手机 App 首次连接后经配对码（或 PC 确认框）完成配对，获得远程通道 token；此后所有 /api 请求与实时通道（WebSocket）都要求该 token，拿到地址的陌生人无法遥控这台电脑。"),
+        h("div", { style: S.ok }, "✔ 通道鉴权已挂载：本机浏览器放行；手机引导端点（配对握手、配对码校验、host.describe）豁免；其余 /api（含配对管理操作）一律需要 Bearer token。"),
+        h(PairCodeCard, {}),
         h("hr", { style: S.divider }),
         h(PairSection, {})
       );

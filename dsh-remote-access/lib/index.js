@@ -1,10 +1,10 @@
-// dsh-remote-access v2.0.0 — 远程互信认证 + 只读辅助路由
+// dsh-remote-access v2.1.0 — 远程互信认证（配对码 + 确认框）+ 只读辅助路由
 // 保留：移动端配对握手（pair/*）、主机设备信息（device/info）、只读目录列举（fs/list）、
 //       只读文件预览（fs/read）、MCP 枚举（mcp/list）、远程通道 Bearer token 鉴权（/api 全量门禁，含 WebSocket）。
 // 移除：微信 iLink 桥（lib/ilink.js + lib/bridge.js）、cpolar 隧道供应（lib/cpolar.js），
 //       对应 wx/*、cpolar/*、/status、/start、/stop、/qr 路由与 qrcode 依赖一并删除。
 import { execFile } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import {
   closeSync,
   fstatSync,
@@ -382,6 +382,62 @@ export const apply = (ctx) => {
     },
   });
 
+  // ---------- 配对码（v2.1.0）：PC 生成 → 手机输入 → 立即配对并下发 token ----------
+  // 安全属性：一次性（验证成功即作废）；10 分钟过期；最多 5 次错误尝试（超限作废）；
+  // 常量时间比较防时序侧信道；verify 全局 1s 节流防高速爆破；
+  // generate 不豁免（仅本机设置页可达），verify 豁免（未配对手机的引导通道）。
+  const CODE_TTL_MS = 10 * 60 * 1000;
+  const CODE_MAX_ATTEMPTS = 5;
+  let pairCode = null; // { code, at, expiresAt, attempts }
+
+  const codeDigest = (s) => createHash("sha256").update(String(s), "utf8").digest();
+
+  reg({
+    kind: "exact",
+    path: "/api/remote-access/pair/code/generate",
+    handler: async (req, res) => {
+      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
+      const code = randomInt(0, 1000000).toString().padStart(6, "0");
+      pairCode = { code, at: Date.now(), expiresAt: Date.now() + CODE_TTL_MS, attempts: 0 };
+      log("已生成配对码（10 分钟有效，最多 5 次尝试，一次性）");
+      json(res, 200, { ok: true, code, expiresInSec: CODE_TTL_MS / 1000, maxAttempts: CODE_MAX_ATTEMPTS });
+    },
+  });
+
+  reg({
+    kind: "exact",
+    path: "/api/remote-access/pair/code/verify",
+    handler: async (req, res) => {
+      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
+      const now = Date.now();
+      const body = await readBody(req);
+      const deviceId = String(body.deviceId || "").trim();
+      const deviceName = String(body.deviceName || "未知设备").trim().slice(0, 64);
+      const code = String(body.code || "").trim();
+      if (!deviceId) return json(res, 400, { error: "missing deviceId" });
+      if (!pairCode || now > pairCode.expiresAt) {
+        pairCode = null;
+        return json(res, 200, { ok: false, error: "no_active_code", retryable: false });
+      }
+      if (pairCode.attempts >= CODE_MAX_ATTEMPTS) {
+        pairCode = null;
+        return json(res, 200, { ok: false, error: "code_locked", retryable: false });
+      }
+      if (!/^\d{6}$/.test(code) || !timingSafeEqual(codeDigest(code), codeDigest(pairCode.code))) {
+        pairCode.attempts += 1;
+        const left = CODE_MAX_ATTEMPTS - pairCode.attempts;
+        // 码对象保留：后续尝试由上方 code_locked 分支统一拒绝并销毁
+        return json(res, 200, { ok: false, error: "code_mismatch", attemptsLeft: Math.max(0, left), retryable: left > 0 });
+      }
+      // 验证成功：一次性作废 + 直接写入配对表并下发通道 token
+      pairCode = null;
+      const devices = readPaired().filter((d) => d.deviceId !== deviceId);
+      devices.push({ deviceId, name: deviceName, at: now });
+      writePaired(devices);
+      json(res, 200, { ok: true, state: "approved", token: channelToken() });
+    },
+  });
+
   // ---------- 远程通道 token 鉴权 ----------
   // /api 全量 Bearer 门禁（含 WebSocket 升级），规则：
   //   - 本机浏览器放行：loopback 远端且无 X-Forwarded-For（公网隧道虽从 127.0.0.1
@@ -411,8 +467,18 @@ export const apply = (ctx) => {
 
   const isLoopback = (addr) =>
     addr === "127.0.0.1" || addr === "::1" || addr === "::ffff:127.0.0.1" || addr === "::ffff:7f00:1";
-  const authExempt = (path) =>
-    path.startsWith("/api/remote-access/pair/") || path === "/api/host.describe";
+  // 引导通道豁免仅限「手机侧引导端点」白名单（v2.1.0 起收紧）：
+  // pair/request、pair/status、pair/check、pair/code/verify、host.describe。
+  // pair/respond、pair/list、pair/revoke、pair/code/generate 不豁免——本机设置页走
+  // loopback 放行，远程一律要求通道 token（修复 v1.x 的 self-approve 漏洞）。
+  const authExemptSet = new Set([
+    "/api/remote-access/pair/request",
+    "/api/remote-access/pair/status",
+    "/api/remote-access/pair/check",
+    "/api/remote-access/pair/code/verify",
+    "/api/host.describe",
+  ]);
+  const authExempt = (path) => authExemptSet.has(path);
   const unauthorized = (req) => {
     const tok = channelToken();
     if (!tok) return false; // token 不可用时不设防（降级可用性优先）

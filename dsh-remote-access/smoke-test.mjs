@@ -1,4 +1,4 @@
-// smoke-test.mjs — dsh-remote-access v2.0.0 冒烟测试（离线、零依赖、可重复运行）
+// smoke-test.mjs — dsh-remote-access v2.1.0 冒烟测试（离线、零依赖、可重复运行）
 // 用最小 fake webServer 驱动 apply()，经真实 HTTP 服务器走完整链路：
 //   配对握手（request → status → respond → check 下发 token → list/revoke）、
 //   远程通道 Bearer 门禁（loopback 放行 / XFF 模拟公网隧道 401 / 带 token 放行 / 引导通道豁免）、
@@ -54,11 +54,15 @@ const srv = http.createServer((req, res) => {
   route.handler(req, res);
 });
 
-async function listen() {
-  await new Promise((r) => srv.listen(0, "127.0.0.1", r));
-  return srv.address().port;
+let listening = null;
+function listen() {
+  if (!listening) {
+    listening = new Promise((r) => srv.listen(0, "127.0.0.1", r));
+  }
+  return listening;
 }
-function req(path, opts = {}) {
+async function req(path, opts = {}) {
+  await listen(); // 幂等：并发测试下等待服务器就绪
   const port = srv.address().port;
   return new Promise((resolve, reject) => {
     const r = http.request({ host: "127.0.0.1", port, path, method: opts.method || "GET", headers: opts.headers || {} }, (res) => {
@@ -289,6 +293,121 @@ test("device/info：主机名 + MAC + 平台（win32 机型探测失败时降级
   assert.equal(typeof r.body.platform, "string");
   assert.equal(typeof r.body.model, "string");
   assert.ok(r.body.model.length > 0);
+});
+
+test("配对码流程：generate → 正确码一次配对下发 token → 一次性作废", async () => {
+  // generate 不豁免：本机 loopback（无 XFF）放行，模拟设置页浏览器
+  let r = await req("/api/remote-access/pair/code/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: {},
+  });
+  assert.equal(r.body.ok, true);
+  assert.match(r.body.code, /^\d{6}$/);
+  const code = r.body.code;
+
+  // 公网隧道（XFF）调 generate → 401（不可远程生成）
+  r = await req("/api/remote-access/pair/code/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-forwarded-for": "1.2.3.4" },
+    body: {},
+  });
+  assert.equal(r.status, 401);
+
+  // 错误码 → code_mismatch + 剩余次数（verify 豁免，XFF 可达）
+  const wrong = code === "000000" ? "000001" : "000000";
+  r = await req("/api/remote-access/pair/code/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-forwarded-for": "2.3.4.5" },
+    body: { code: wrong, deviceId: "device-code-1111", deviceName: "配对码机" },
+  });
+  assert.equal(r.body.ok, false);
+  assert.equal(r.body.error, "code_mismatch");
+  assert.equal(r.body.attemptsLeft, 4);
+
+  // 正确码 → 立即配对 + 下发通道 token
+  r = await req("/api/remote-access/pair/code/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-forwarded-for": "2.3.4.5" },
+    body: { code, deviceId: "device-code-1111", deviceName: "配对码机" },
+  });
+  assert.equal(r.body.ok, true);
+  assert.equal(r.body.state, "approved");
+  assert.match(r.body.token, /^[0-9a-f]{32,}$/);
+
+  // 一次性：同码再来 → no_active_code
+  r = await req("/api/remote-access/pair/code/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { code, deviceId: "device-code-2222", deviceName: "蹭码机" },
+  });
+  assert.equal(r.body.ok, false);
+  assert.equal(r.body.error, "no_active_code");
+
+  // 已写入配对表（本机 list 放行）
+  r = await req("/api/remote-access/pair/list");
+  assert.ok(r.body.devices.some((d) => d.deviceId === "device-code-1111"));
+
+  // 无活跃码时的 verify → no_active_code（无爆破面）
+  r = await req("/api/remote-access/pair/code/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { code: "123456", deviceId: "device-code-3333", deviceName: "无人码" },
+  });
+  assert.equal(r.body.error, "no_active_code");
+});
+
+test("配对码锁定：连续 5 次错误 → 第 6 次即使用对码也 locked", async () => {
+  let r = await req("/api/remote-access/pair/code/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: {},
+  });
+  const code = r.body.code;
+  const wrong = code === "000000" ? "000001" : "000000";
+  for (let i = 0; i < 5; i++) {
+    r = await req("/api/remote-access/pair/code/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { code: wrong, deviceId: "device-bruteforce", deviceName: "爆破机" },
+    });
+    assert.equal(r.body.error, "code_mismatch", "第" + (i + 1) + "次应为 mismatch");
+  }
+  r = await req("/api/remote-access/pair/code/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { code, deviceId: "device-bruteforce", deviceName: "爆破机" },
+  });
+  assert.equal(r.body.error, "code_locked");
+});
+
+test("安全回归：self-approve 漏洞已修复（远程 respond 401，不写入配对表）", async () => {
+  // 旧漏洞路径：远程 request 建立 pending 后远程自我 approve
+  let r = await req("/api/remote-access/pair/request", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-forwarded-for": "3.4.5.6" },
+    body: { deviceId: "device-evil-3333", deviceName: "恶意机" },
+  });
+  assert.equal(r.body.state, "pending");
+  r = await req("/api/remote-access/pair/respond", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-forwarded-for": "3.4.5.6" },
+    body: { deviceId: "device-evil-3333", outcome: "approve" },
+  });
+  assert.equal(r.status, 401);
+  // 未写入配对表
+  r = await req("/api/remote-access/pair/list");
+  assert.ok(!r.body.devices.some((d) => d.deviceId === "device-evil-3333"));
+  // 本机清理 pending（loopback 放行）
+  r = await req("/api/remote-access/pair/respond", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { deviceId: "device-evil-3333", outcome: "deny" },
+  });
+  assert.equal(r.body.ok, true);
+  // 远程 list/revoke 同样 401（设置页管理操作不可远程调用）
+  r = await req("/api/remote-access/pair/list", { headers: { "x-forwarded-for": "3.4.5.6" } });
+  assert.equal(r.status, 401);
 });
 
 test.after(() => {

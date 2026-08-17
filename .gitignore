@@ -20,26 +20,7 @@ build-log.txt
 # OS
 .DS_Store
 Thumbs.db
-# ����� debug ��װ�������ֿ⣨>50MB���߱������ / Release ���� / Play��
+
 release/*.apk
-!release/DSH-Remote-v1.0.15-min.apk
-!release/DSH-Remote-v1.0.22-min.apk
-!release/DSH-Remote-v1.0.23-min.apk
-!release/DSH-Remote-v1.0.24-min.apk
-!release/DSH-Remote-v1.0.25-min.apk
-!release/DSH-Remote-v1.0.26-min.apk
-!release/DSH-Remote-v1.1.1-min.apk
-!release/DSH-Remote-v1.1.2-min.apk
-!release/DSH-Remote-v1.1.3-min.apk
-!release/DSH-Remote-v1.1.4-min.apk
-!release/DSH-Remote-v1.1.5-min.apk
-!release/DSH-Remote-v1.1.6-min.apk
-!release/DSH-Remote-v1.1.7-min.apk
-!release/DSH-Remote-v1.1.8-min.apk
-!release/DSH-Remote-v1.1.9-min.apk
-!release/DSH-Remote-v1.2.0-min.apk
-!release/DSH-Remote-v1.2.1-min.apk
-!release/DSH-Remote-v1.2.2-min.apk
-!release/DSH-Remote-v1.3.0-min.apk
-!release/DSH-Remote-v1.3.1-min.apk
 release/DSH-Remote-v*.apk
+*.tgz

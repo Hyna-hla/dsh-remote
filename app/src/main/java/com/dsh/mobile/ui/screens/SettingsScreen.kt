@@ -683,15 +683,14 @@ fun SettingsScreen(
                 }
             }
 
-            Text("远程连接（cpolar）", style = MaterialTheme.typography.titleMedium)
+            Text("远程连接（内网穿透）", style = MaterialTheme.typography.titleMedium)
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        "1. 在 PC 访问 cpolar.com 注册并下载安装客户端\n" +
-                            "2. 运行：cpolar http 8787（8787 是 DSH 服务端口）\n" +
-                            "3. 客户端会显示一个公网域名，形如 https://xxx.cpolar.top\n" +
-                            "4. 把这个域名填进 App 的服务器地址即可，任何网络都能连\n" +
-                            "（或在 DSH 设置 → 远程控制里一键生成地址）",
+                        "1. 同一局域网：把 PC 地址直接填进 App 服务器地址（形如 192.168.1.100:8787）\n" +
+                            "2. 公网访问：任选内网穿透工具（cpolar / cloudflared / ZeroTier 等）把 DSH 端口映射到公网域名\n" +
+                            "3. 把公网域名填进 App 的服务器地址即可，任何网络都能连\n" +
+                            "4. 首次连接需在 PC 端 DSH「设置 → 远程控制」确认配对，配对后自动携带通道令牌",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         lineHeight = MaterialTheme.typography.bodySmall.lineHeight * 1.6,

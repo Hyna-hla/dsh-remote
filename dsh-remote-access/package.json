@@ -1,7 +1,7 @@
 {
   "name": "dsh-remote-access",
-  "version": "2.0.0",
-  "description": "DSH 远程互信认证：移动端首次配对确认、已配对设备管理、主机设备信息、只读目录/文件预览、MCP 枚举、远程通道 Bearer token 鉴权（不含微信桥与 cpolar 隧道）",
+  "version": "2.1.0",
+  "description": "DSH 远程互信认证：配对码快速配对（v2.1.0）、首次配对确认、已配对设备管理、主机设备信息、只读目录/文件预览、MCP 枚举、远程通道 Bearer token 鉴权（不含微信桥与 cpolar 隧道）",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -9,6 +9,11 @@
     "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
+  ],
   "dsh": {
     "client": {
       "platform": "web",
