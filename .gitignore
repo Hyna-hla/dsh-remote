@@ -24,3 +24,6 @@ Thumbs.db
 release/*.apk
 release/DSH-Remote-v*.apk
 *.tgz
+
+.dsh-test
+.npm-cache-tmp

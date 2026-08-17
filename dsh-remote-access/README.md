@@ -1,6 +1,6 @@
 # dsh-remote-access
 
-DSH 远程互信认证插件（v2.2.0）。设置页「远程控制」与安卓 App「DSH Remote」配对使用：**只做远程互信**——配对码快速配对、首次配对确认（旧式兜底）、已配对设备管理、公网域名信任白名单（v2.2.0）、主机设备信息、只读目录/文件辅助、MCP 枚举、远程通道 Bearer token 鉴权。
+DSH 远程互信认证插件（v2.4.0）。设置页「远程控制」与安卓 App「DSH Remote」配对使用：**只做远程互信**——配对码快速配对、首次配对确认（旧式兜底）、已配对设备管理、公网域名信任白名单（v2.4.0）、主机设备信息、只读目录/文件辅助、MCP 枚举、远程通道 Bearer token 鉴权。
 
 > v2.0.0 起移除：微信 iLink 桥（扫码登录、微信遥控、审批回传）与 cpolar 隧道供应（一键安装/注册/authtoken/隧道管理），以及配套的二维码生成路由。公网访问请自行使用任意内网穿透工具（cpolar / cloudflared / ZeroTier / 自建隧道等），把 DSH 端口映射到公网后填入 App——通道鉴权对任意隧道同样生效。
 
@@ -24,7 +24,7 @@ dsh plugin --profile web add ./dsh-remote-access-2.0.0.tgz
 3. **已配对设备管理**：列表展示、随时撤销；撤销后该设备下次连接需重新配对。
 4. **远程通道 token 鉴权**：配对通过后把通道 token 下发到 App（密文落盘），此后 App 的所有 `/api` 请求与 WebSocket（events.mux）都携带 `Authorization: Bearer <token>`，未配对/无 token 的远程请求一律 401。
 5. **主机设备信息**：`device/info` 下发主机名、机型、MAC、平台；App 用于设备记录展示与重连 MAC 校验（公网 IP 被回收时不会误连他人主机）。
-6. **公网域名信任白名单（v2.2.0）**：设置页可直接增删 DSH 核心 Host 围栏的 `client-connection.trustedHosts`（写入 `settings.yaml`）。手机经公网隧道访问时 Host 是公网域名，默认被核心 403 拒绝；把隧道域名加进白名单并重启 DSH 后即可连上。条目为纯「域名」或「域名:端口」，按 WHATWG 规范化校验（与核心同口径）。
+6. **公网域名信任白名单（v2.4.0）**：设置页可直接增删 DSH 核心 Host 围栏的白名单。手机经公网隧道访问时 Host 是公网域名，默认被核心 403 拒绝；把隧道域名加进白名单后立即生效（无需重启）。实现对齐 DSH ≥0.1.0-rc.7：写入 profile 的 `cordis.patch.yml`，给 `connection`（client-connection）行渲染 `trustedHosts: !!js '[...ctx.webRuntime.trustedHosts, "域名"]'`——把用户条目拼回运行时派生的 LAN 地址与 `--trusted-host` 值（v2.3.0 顶掉 web-runtime 配置的做法会让 `--trusted-host` 静默失效，本版已废弃并自动迁移清理旧条目）。条目为纯「域名」或「域名:端口」（IDN 用 punycode），按 WHATWG 规范化 + 字符集白名单校验（与核心同口径）。
 
 ### 只读辅助路由（App 直连）
 

@@ -240,7 +240,7 @@ window.__ModuleLoader__.load({
       );
     }
 
-    // ---------- 公网域名信任白名单（v2.2.0）：写入 settings.yaml 的 client-connection.trustedHosts ----------
+    // ---------- 公网域名信任白名单（v2.4.0）：写入 cordis.patch.yml 的 connection 行（!!js 拼接 ctx.webRuntime.trustedHosts） ----------
     function TrustedHostsCard() {
       var [hosts, setHosts] = useState(null);
       var [input, setInput] = useState("");
@@ -281,7 +281,7 @@ window.__ModuleLoader__.load({
         h("div", { style: S.row },
           h("div", { style: S.title }, "公网域名白名单"),
           hosts !== null ? h("span", { style: Object.assign({}, S.badge, { background: "rgba(142,142,147,.15)", color: "var(--dsw-alias-label-secondary)" }) }, "共 " + hosts.length + " 条") : null),
-        h("div", { style: S.sub }, "手机通过公网隧道连接时，DSH 核心校验请求的 Host 域名（防 DNS 重绑定）；把隧道的公网域名加进来手机才能连上。填「域名」或「域名:端口」，不带 https://。"),
+        h("div", { style: S.sub }, "手机通过公网隧道连接时，DSH 核心校验请求的 Host 域名（防 DNS 重绑定）；把隧道的公网域名加进来手机才能连上。填「域名」或「域名:端口」（不带 https://；中文域名请用 punycode）。"),
         hosts === null ? h("div", { style: S.sub }, "加载中…") :
           hosts.length === 0 ? h("div", { style: S.sub }, "暂无白名单条目（手机只能走局域网，或重写 Host 为 localhost 的隧道）。") :
             hosts.map(function (x) {
@@ -293,7 +293,7 @@ window.__ModuleLoader__.load({
           h("input", { style: Object.assign({}, S.input, { width: 230 }), placeholder: "如 tunnel.example.com 或 域名:8080", value: input, onChange: function (e) { setInput(e.target.value); } }),
           h("button", { style: S.btnPrimary, disabled: busy || !input.trim(), onClick: function () { mutate("add", input.trim()); } }, busy ? "处理中…" : "添加")),
         err ? h("div", { style: Object.assign({}, S.err, { marginTop: 6 }) }, err) : null,
-        h("div", { style: S.sub, marginTop: 6 }, "✔ 修改后通常立即生效（DSH 热监视 cordis.patch.yml 自动应用）；如未生效请重启 DSH。白名单只解决 Host 校验，手机请求仍需配对拿到通道 token。")
+        h("div", { style: S.sub, marginTop: 6 }, "✔ 白名单写入 connection 行的 trustedHosts（拼回 LAN 地址与 --trusted-host），修改后立即生效（DSH 热监视 cordis.patch.yml）；如未生效请重启 DSH。白名单只解决 Host 校验，手机请求仍需配对拿到通道 token。")
       );
     }
 

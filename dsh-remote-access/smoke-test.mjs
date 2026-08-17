@@ -1,4 +1,4 @@
-// smoke-test.mjs — dsh-remote-access v2.2.0 冒烟测试（离线、零依赖、可重复运行）
+// smoke-test.mjs — dsh-remote-access v2.4.0 冒烟测试（离线、零依赖、可重复运行）
 // 用最小 fake webServer 驱动 apply()，经真实 HTTP 服务器走完整链路：
 //   配对握手（request → status → respond → check 下发 token → list/revoke）、
 //   远程通道 Bearer 门禁（loopback 放行 / XFF 模拟公网隧道 401 / 带 token 放行 / 引导通道豁免）、
@@ -410,8 +410,8 @@ test("安全回归：self-approve 漏洞已修复（远程 respond 401，不写�
   assert.equal(r.status, 401);
 });
 
-test("公网域名白名单：校验/增删/去重/落盘 + 远程 401", async () => {
-  // 初始为空（DSH_HOME 临时目录，无 settings.yaml）
+test("公网域名白名单：校验/增删/去重 + connection 行 !!js 渲染 + 空列表清理", async () => {
+  // 初始为空（DSH_HOME 临时目录）
   let r = await req("/api/remote-access/trusted-hosts");
   assert.equal(r.body.ok, true);
   assert.deepEqual(r.body.hosts, []);
@@ -420,8 +420,8 @@ test("公网域名白名单：校验/增删/去重/落盘 + 远程 401", async (
   r = await req("/api/remote-access/trusted-hosts", { headers: { "x-forwarded-for": "1.2.3.4" } });
   assert.equal(r.status, 401);
 
-  // 非法条目逐个拒绝
-  for (const bad of ["https://x.com", "x.com/path", "user@x.com", "", "exa mple.com"]) {
+  // 非法条目逐个拒绝（含会破坏 !!js 表达式 / YAML 的引号、反斜杠、用户信息、路径）
+  for (const bad of ["https://x.com", "x.com/path", "user@x.com", "", "exa mple.com", "a'b.com", 'a"b.com', "x.com\\y", "例子.测试"]) {
     r = await req("/api/remote-access/trusted-hosts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -451,11 +451,12 @@ test("公网域名白名单：校验/增删/去重/落盘 + 远程 401", async (
   });
   assert.deepEqual(r.body.hosts, ["tunnel2.example.com:8080", "TUNNEL.example.com"]);
 
-  // 落盘检查：settings.yaml 出现顶层 client-connection 区块
-  const yamlText = readFileSync(join(home, "settings.yaml"), "utf8");
-  assert.match(yamlText, /^client-connection:/m);
-  assert.match(yamlText, /trustedHosts:/);
-  assert.match(yamlText, /tunnel2\.example\.com:8080/);
+  // 落盘：cordis.patch.yml 渲染 connection 行（!!js 拼接运行时派生权威），JSON 为真身
+  const patchText = readFileSync(join(home, "profiles", "web", "cordis.patch.yml"), "utf8");
+  assert.match(patchText, /^- id: connection$/m);
+  assert.match(patchText, /trustedHosts: !!js '\[\.\.\.ctx\.webRuntime\.trustedHosts, "tunnel2\.example\.com:8080", "TUNNEL\.example\.com"\]'/);
+  const json = JSON.parse(readFileSync(join(home, "remote-access", "trusted-hosts.json"), "utf8"));
+  assert.deepEqual(json, ["tunnel2.example.com:8080", "TUNNEL.example.com"]);
 
   // 删除
   r = await req("/api/remote-access/trusted-hosts", {
@@ -470,8 +471,84 @@ test("公网域名白名单：校验/增删/去重/落盘 + 远程 401", async (
     body: { action: "remove", host: "TUNNEL.example.com" },
   });
   assert.deepEqual(r.body.hosts, []);
-  const yamlAfter = readFileSync(join(home, "settings.yaml"), "utf8");
-  assert.match(yamlAfter, /trustedHosts: \[\]/);
+  const after = readFileSync(join(home, "profiles", "web", "cordis.patch.yml"), "utf8");
+  assert.ok(!/^- id: connection$/m.test(after), "空列表应删除 connection 条目");
+  assert.match(after, /\[\]/, "文件必须仍是合法顶层数组（空文件会让 Loader loud fail）");
+});
+
+test("公网域名白名单：v2.3.0 旧 web-runtime 块自动迁移到 connection 行", async () => {
+  // 模拟 v2.3.0 残留：删掉 JSON 真身，patch 文件里只有旧 web-runtime 字面量块
+  rmSync(join(home, "remote-access", "trusted-hosts.json"), { force: true });
+  const legacy = [
+    "- id: web-runtime",
+    "  config:",
+    "    printUrl: true",
+    "    surfaceContext: true",
+    "    trustedHosts:",
+    "      - legacy.example.com",
+    "      - legacy2.example.com:9090",
+    "",
+  ].join("\n");
+  mkdirSync(join(home, "profiles", "web"), { recursive: true });
+  writeFileSync(join(home, "profiles", "web", "cordis.patch.yml"), legacy, "utf8");
+
+  const r = await req("/api/remote-access/trusted-hosts");
+  assert.equal(r.body.ok, true);
+  assert.deepEqual(r.body.hosts, ["legacy.example.com", "legacy2.example.com:9090"]);
+
+  // 迁移后：JSON 真身写入 + patch 文件换成 connection 行，旧块删除
+  const patchText = readFileSync(join(home, "profiles", "web", "cordis.patch.yml"), "utf8");
+  assert.ok(!/^- id: web-runtime$/m.test(patchText), "旧 web-runtime 条目应被清理");
+  assert.match(patchText, /^- id: connection$/m);
+  assert.match(patchText, /legacy2\.example\.com:9090/);
+  const json = JSON.parse(readFileSync(join(home, "remote-access", "trusted-hosts.json"), "utf8"));
+  assert.deepEqual(json, ["legacy.example.com", "legacy2.example.com:9090"]);
+
+  // 复位：清空白名单，保证后续用例环境干净
+  await req("/api/remote-access/trusted-hosts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { action: "remove", host: "legacy.example.com" },
+  });
+  await req("/api/remote-access/trusted-hosts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { action: "remove", host: "legacy2.example.com:9090" },
+  });
+});
+
+test("公网域名白名单：DSH 模板占位 [] 会被剥离（不产生非法 YAML）", async () => {
+  // 模拟 DSH 初始化的 profile patch：模板注释 + `[]` 占位（真实 web profile 的初始内容）
+  const template = [
+    "# Your patch layer for this dsh profile, applied after every bundle layer:",
+    "# a top-level YAML array of loader patch entries (id-targeted config",
+    "# overrides, disables, and insert lists; `!!js` expressions allowed).",
+    "[]",
+    "",
+  ].join("\n");
+  writeFileSync(join(home, "profiles", "web", "cordis.patch.yml"), template, "utf8");
+  rmSync(join(home, "remote-access", "trusted-hosts.json"), { force: true });
+
+  let r = await req("/api/remote-access/trusted-hosts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { action: "add", host: "placeholder.example.com" },
+  });
+  assert.equal(r.body.ok, true);
+  const text = readFileSync(join(home, "profiles", "web", "cordis.patch.yml"), "utf8");
+  assert.ok(!/^\s*\[\]\s*$/m.test(text), "模板 [] 占位必须被剥离，否则文件非法 YAML");
+  assert.match(text, /^- id: connection$/m);
+  assert.match(text, /placeholder\.example\.com/);
+
+  // 恢复空状态：条目删除、文件回到模板占位
+  r = await req("/api/remote-access/trusted-hosts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { action: "remove", host: "placeholder.example.com" },
+  });
+  assert.deepEqual(r.body.hosts, []);
+  const after = readFileSync(join(home, "profiles", "web", "cordis.patch.yml"), "utf8");
+  assert.match(after, /^\[\]$/m);
 });
 
 test.after(() => {
