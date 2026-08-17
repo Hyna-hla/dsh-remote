@@ -34,7 +34,7 @@ data class ReleaseInfo(
 
 /**
  * GitHub 加速镜像（ghproxy 系）：国内直连 GitHub 慢/被墙，检查更新 API 与
- * Release 下载都按列表顺序尝试，逐个失败后自动切下一个，最后兜底直连。
+ * Release 下载都按列表顺序尝试，失败后自动切下一个，最后兜底直连。
  * 空串表示直连 GitHub（不经过镜像）。
  */
 object UpdateMirrors {
@@ -53,14 +53,26 @@ object UpdateMirrors {
         "", // 直连兜底
     )
 
-    /** 单个镜像尝试的硬超时（防止某个镜像挂死拖慢整体） */
-    const val ATTEMPT_TIMEOUT_MS = 25_000L
+    /** 检查更新 API 单镜像硬超时（响应体很小，25s 足够） */
+    const val API_TIMEOUT_MS = 25_000L
+
+    /**
+     * 下载换源只看「停滞」不看「总时长」：连续这么久没收到任何一个字节才判死换源。
+     * 慢速但持续有数据的下载（哪怕只有几十 KB/s）绝不换源。
+     */
+    const val DOWNLOAD_STALL_MS = 30_000L
+
+    /** 极慢兜底：下载开始 GRACE 毫秒后整体平均速度仍低于此值才换源（20KB/s） */
+    const val DOWNLOAD_SLOW_BPS = 20L * 1024
+
+    /** 极慢判定的宽限期（ms）：镜像刚连上时速度低是正常的，先给它时间爬升 */
+    const val DOWNLOAD_SLOW_GRACE_MS = 60_000L
 }
 
 /**
  * 应用内检查更新 + 下载：
  * - 检查：GET api.github.com/repos/Hyna-hla/dsh-remote/releases/latest（多镜像）
- * - 下载：GitHub release 资产直链（多镜像失败切换），流式写盘带进度
+ * - 下载：GitHub release 资产直链（仅在停滞/极慢/出错时切换镜像），流式写盘带进度
  * - 安装：由调用方用 FileProvider/系统安装器完成
  */
 object UpdateChecker {
@@ -76,6 +88,16 @@ object UpdateChecker {
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
+
+    /**
+     * 下载专用 client：不设总时长限制（大文件慢速下载几十分钟也允许），
+     * 仅靠 readTimeout 做「无数据停滞」检测——停 DOWNLOAD_STALL_MS 才断开换源。
+     */
+    private val downloadClient: OkHttpClient by lazy {
+        client.newBuilder()
+            .readTimeout(UpdateMirrors.DOWNLOAD_STALL_MS, TimeUnit.MILLISECONDS)
+            .build()
+    }
 
     /** "1.0.21" / "v1.0.21" → (1,0,21)；解析失败返回 null */
     fun parseVersion(text: String?): Triple<Int, Int, Int>? {
@@ -99,7 +121,7 @@ object UpdateChecker {
             val r = runCatching {
                 val request = Request.Builder().url(url).header("User-Agent", USER_AGENT).build()
                 val call = client.newCall(request)
-                call.timeout().timeout(UpdateMirrors.ATTEMPT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                call.timeout().timeout(UpdateMirrors.API_TIMEOUT_MS, TimeUnit.MILLISECONDS)
                 call.execute().use { resp ->
                     if (!resp.isSuccessful) return@use null
                     json.decodeFromString<ReleaseInfo>(resp.body?.string() ?: return@use null)
@@ -183,8 +205,9 @@ object UpdateChecker {
     }
 
     /**
-     * 下载事件流：连接镜像 → 实时进度（含速度）→ 成功；镜像失败发 failed 事件并自动切下一个。
-     * 全部失败以异常结束。collect 的协程上下文决定执行线程。
+     * 下载事件流：连接镜像 → 实时进度（含速度）→ 成功。
+     * 仅在镜像真坏（停滞 30s / 宽限期后均速 <20KB/s / 网络错误）时发 failed 并自动切下一个；
+     * 慢速但持续下载中不换源。全部失败以异常结束。collect 的协程上下文决定执行线程。
      */
     fun downloadApkFlow(url: String, dest: File): Flow<DownloadEvent> = flow {
         var lastErr: IOException? = null
@@ -232,15 +255,14 @@ object UpdateChecker {
         }
     }
 
-    /** 单次下载实现（写入 .part 临时文件；按 150ms 节流上报速度） */
+    /** 单次下载实现（写入 .part 临时文件；按 150ms 节流上报速度；无总时长限制） */
     private suspend fun downloadTo(
         url: String,
         tmp: File,
         onProgress: suspend (doneBytes: Long, totalBytes: Long, speed: Long) -> Unit,
     ) {
         val request = Request.Builder().url(url).header("User-Agent", USER_AGENT).build()
-        val call = client.newCall(request)
-        call.timeout().timeout(UpdateMirrors.ATTEMPT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        val call = downloadClient.newCall(request)
         call.execute().use { resp ->
             if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
             val body = resp.body ?: throw IOException("空响应")
@@ -263,6 +285,13 @@ object UpdateChecker {
                         val speed = done * 1000 / elapsedMs
                         if (now - lastEmitAt >= 150_000_000L || done >= total) {
                             lastEmitAt = now
+                            // 极慢兜底：宽限期后均速仍 <20KB/s 才放弃该镜像；
+                            // 单次 read 卡死由 readTimeout(30s) 自动断开
+                            if (elapsedMs > UpdateMirrors.DOWNLOAD_SLOW_GRACE_MS &&
+                                speed < UpdateMirrors.DOWNLOAD_SLOW_BPS
+                            ) {
+                                throw IOException("镜像过慢（${speed / 1024} KB/s），换下一源")
+                            }
                             onProgress(done, total, speed)
                         }
                     }
