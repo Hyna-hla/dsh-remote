@@ -8,6 +8,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -20,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.dsh.mobile.R
 import androidx.core.content.ContextCompat
@@ -136,6 +138,19 @@ fun ConnectScreen(
             Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
         }
     }
+
+    // —— 首次配对对话框（v1.8.0：配对码优先；「等待 PC 确认」旧式兜底）——
+    val appCtx = context.applicationContext as? DshApplication
+    var pairCode by remember { mutableStateOf("") }
+    var pairError by remember { mutableStateOf<String?>(null) }
+    var pairBusy by remember { mutableStateOf(false) }
+    var pairDismissedFor by remember { mutableStateOf<String?>(null) }
+    val awaitingId = appCtx?.pairingCoordinator?.awaitingDecision?.collectAsState(initial = null)?.value
+    LaunchedEffect(awaitingId) {
+        // 决策清除（断线/配对完成）后复位「本会话已关」标记，下次连接可再弹
+        if (awaitingId == null) pairDismissedFor = null
+    }
+    val showPairDialog = awaitingId != null && pairDismissedFor != awaitingId
 
     Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
         // 错误横幅（spec §6：错误码 → 原因 → 建议；不可恢复错误标注已停止重连）
@@ -377,6 +392,59 @@ fun ConnectScreen(
                 },
                 dismissButton = {
                     TextButton(onClick = { pendingDelete = null }) { Text("取消") }
+                },
+            )
+        }
+
+        // 首次配对：配对码优先（PC 端「设置 → 远程控制 → 生成配对码」）
+        if (showPairDialog) {
+            AlertDialog(
+                onDismissRequest = { pairDismissedFor = awaitingId },
+                title = { Text("首次配对") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "在 PC 端 DSH「设置 → 远程控制」点「生成配对码」，把 6 位配对码填到这里即完成配对（无需电脑端确认）。",
+                        )
+                        OutlinedTextField(
+                            value = pairCode,
+                            onValueChange = { v ->
+                                pairCode = v.filter { it.isDigit() }.take(6)
+                                pairError = null
+                            },
+                            label = { Text("6 位配对码") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        pairError?.let {
+                            Text(
+                                it,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = pairCode.length == 6 && !pairBusy,
+                        onClick = {
+                            scope.launch {
+                                pairBusy = true
+                                val r = appCtx?.pairingCoordinator?.pairWithCode(pairCode)
+                                    ?: PairingCoordinator.PairCodeResult(false, "初始化失败")
+                                if (!r.ok) pairError = r.message
+                                pairBusy = false
+                            }
+                        },
+                    ) { Text(if (pairBusy) "配对中…" else "配对") }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        pairDismissedFor = awaitingId
+                        scope.launch { appCtx?.pairingCoordinator?.chooseLegacyHandshake() }
+                    }) { Text("等待 PC 确认") }
                 },
             )
         }

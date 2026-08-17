@@ -10,7 +10,7 @@
 
 ## 功能
 
-- **远程操控**：连接 PC 上的 DSH（局域网直连 或 cpolar 内网穿透，任何网络可用）；连接页右上角**扫码自动连接**（扫描 DSH「远程控制」插件生成的二维码，含相机权限申请）
+- **远程操控**：连接 PC 上的 DSH（局域网直连 或 自备内网穿透，任何网络可用）；连接页右上角**扫码连接**（扫描任意 URL 二维码自动填入服务器地址，含相机权限申请）
 - **通知提醒（前台服务常驻）**：需要**审批 / 问答确认**时高优先级横幅通知（去重、点击直达对应会话）；**任务完成**自动提醒（运行→空闲 8 秒防抖确认）；Android 13+ 首次启动自动申请通知权限，设置页可补授权与开关
 - **实时聊天流**：用户/助手消息、流式输出（思考过程不上屏，仅显示"已思考 x 秒"）、Markdown 渲染、工具调用卡片（含参数与结果）
 - **审批与问答**：审批横幅（允许一次/拒绝）、问答题卡片（单选/多选）
@@ -26,12 +26,23 @@
 
 ## 更新日志
 
+- **插件 v2.2.0**：设置页「远程控制」新增**公网域名白名单**——增删 DSH 核心 Host 围栏的 `client-connection.trustedHosts`（写入 settings.yaml，重启 DSH 生效）；手机经公网隧道连接不再 403，域名条目按核心同口径校验（纯 域名[:端口]）；配套冒烟测试 10/10 全绿
+
+- **v1.8.0**：配对码快速配对 + 通道安全加固——
+  - **配对码配对（推荐）**：PC 端插件 v2.1.0 在设置页「远程控制」一键生成 6 位随机配对码（10 分钟有效、最多 5 次试错、用后即废、常量时间比较）；App 连接新主机后弹出配对对话框，输入配对码即完成配对并直接拿到通道令牌——不用再守着电脑点确认框
+  - **旧式握手保留为兜底**：对话框可选「等待 PC 确认」（PC 弹窗批准，120 秒超时），旧插件（≤v2.0.x）自动降级此路径
+  - **修复 self-approve 漏洞**：v1.x 插件把 `pair/*` 全前缀豁免鉴权，拿到隧道地址的人可远程自我批准配对；v2.1.0 起豁免面收紧为手机引导端点白名单（request/status/check/code-verify/host.describe），respond/list/revoke/生成配对码仅本机可达
+  - ⚠️ 配对码功能需 PC 端插件 v2.1.0；旧插件只能走「等待 PC 确认」
+
+- **v1.7.0**：配套插件 v2.0.0 纯互信化 + App 文案对齐——
+  - **插件大重写**：dsh-remote-access v2.0.0 移除微信 iLink 桥（扫码登录/微信遥控/审批回传）与 cpolar 隧道供应（一键安装/authtoken/隧道管理/二维码生成），只保留远程互信认证（配对确认、设备管理、通道 token 鉴权）与只读辅助路由（fs/list、fs/read、mcp/list、device/info）；零运行时依赖，新增离线冒烟测试（node --test）
+  - **App 兼容**：配对握手、通道令牌、目录浏览、文件预览、MCP 列表、设备记录全部沿用不改；连接指引改为自备内网穿透（cpolar / cloudflared / ZeroTier 等任选）；旧插件（≤v1.3.x）对 App 连接无影响
+  - ⚠️ PC 端需更新 dsh-remote-access 至 v2.0.0 并重启 DSH（微信遥控与插件内置 cpolar 功能随 v2.0.0 移除，仓库内隧道辅助脚本与 release 归档同步清理；公网访问自备任意内网穿透即可）
+
 - **v1.6.2**：三修——跨盘浏览 / 一键重连 / 配套插件 v1.3.1——
   - **目录浏览跨盘**：工作区浏览从「计算机根（盘符列表）」开始，可选任意盘符下的目录（PC 端插件 ≥ v1.3.1 的 fs/list 根路径盘符枚举；旧插件回退默认盘内容）
   - **重进 App 一键重连**：连接页活跃主机卡片新增「连接」按钮（未连接时显示）；设备记录卡片在未连接状态下点击即重连——退出重进后不再「没有按键可连接」
   - **配套插件 v1.3.1**：配对批准按设备名合并旧记录（重装 App 后 deviceId 变化不再导致 PC 端配对名单重复堆积）；fs/list 支持计算机根盘符列表
-
-
 
 - **v1.6.1**：修复更新下载误切镜像——原下载设 25s 总超时，慢速下载（如 100KB/s）25 秒一到即被掐断切下一源；现改为无总时长限制，仅「连续 30s 无任何数据」或「60s 宽限后均速仍 <20KB/s」才换源，慢速稳定下载不再中断
 - **v1.6.0**：连接记录升级为**设备记录 + 多主机切换**——
@@ -180,28 +191,25 @@
 
 ## PC 端使用
 
-    cd <本仓库路径>   # 按需修改 dsh-remote-start.ps1 顶部的 $DshNode / $DshBin / $DshHome 为你的实际路径
+    # 局域网模式（手机与电脑同一 Wi-Fi）：DSH 启动后，把电脑局域网地址填进 App，形如
+    http://192.168.1.100:8787
 
-    # 局域网模式（手机与电脑同一 Wi-Fi）
-    .\dsh-remote-start.ps1
-    # 控制台会显示局域网地址，如 http://192.168.1.100:8787
+    # 公网模式：任选内网穿透工具（cpolar / cloudflared / ZeroTier / 自建隧道等），
+    # 把 DSH 服务端口映射成公网域名后填进 App。首次连接需在 PC 端 DSH「设置 → 远程控制」
+    # 确认配对，之后所有请求自动携带通道令牌，任意网络可用。
 
-    # cpolar 穿透模式（任何网络；先装 cpolar 并登录）
-    .\dsh-remote-start.ps1 -Mode cpolar
-    # 默认自动探测桌面版 DSH 端口；把 cpolar 输出的 https://xxxx.cpolar.top 填进 App
-    # 桌面版探测不到时可用 -TargetPort <端口> 显式指定
+## PC 端插件：远程互信认证（dsh-remote-access）
 
-> 为什么 cpolar 模式用 -host-header=localhost:<port>：DSH 的 /api 有浏览器信任围栏
-> （Host 必须是 loopback 或 trusted-host），重写 Host 后所有请求视为本机发出。
+除手机 App 外，仓库还附 PC 端 DSH 插件 [dsh-remote-access/](dsh-remote-access/)：**只做远程互信**——
+推荐在 DSH 设置页「远程控制」点「生成配对码」，手机 App 连接后输入 6 位码即完成配对（也可沿用旧式
+PC 弹窗确认）；配对后远程通道 token 下发到 App，此后所有 /api 与实时通道请求都要求该 token，拿到地址
+的陌生人无法遥控你的 DSH；同时提供主机设备信息、只读目录/文件浏览、MCP 枚举等辅助路由。
+**手机经公网隧道连接时**，还需把隧道公网域名加进「远程控制 → 公网域名白名单」（写入 DSH 核心
+`client-connection.trustedHosts`，重启 DSH 生效）——否则核心 Host 围栏会拒绝 403。
+详见 [dsh-remote-access/README.md](dsh-remote-access/README.md)。
 
-## PC 端插件：微信遥控（dsh-remote-access）
-
-除手机 App 外，仓库还附 PC 端 DSH 插件 dsh-remote-access/：在 DSH 设置页「远程控制」扫码绑定
-微信 iLink Bot 后，直接在**微信里给自己发消息**即可遥控 DSH —— 消息注入专用会话、回复流式回传、
-审批在微信里回复 同意/拒绝 处理、支持图片与语音转文字。二维码由插件**本机生成**（不经过第三方），
-cpolar/DSH 端口探测带缓存，通道生成更快。详见
-[dsh-remote-access/README.md](dsh-remote-access/README.md) 与
-[dsh-remote-access/protocol-spec.md](dsh-remote-access/protocol-spec.md)。
+> v2.0.0 起不再内置微信遥控与 cpolar 隧道（仓库内的隧道辅助脚本已一并移除）。公网访问用
+> 任意自备内网穿透工具即可，通道鉴权对任何隧道同样生效。
 
 ## 协议（逆向自 dsh-client-connection，仅个人学习用途）
 
@@ -242,19 +250,19 @@ properties 转义吞掉导致 "文件名、目录名或卷标语法不正确" �
     ├── service/         # 前台服务：审批/问答/完成通知 + 断线重连
     ├── MainActivity.kt
     └── DshApplication.kt
-    dsh-remote-start.ps1 # PC 端一键启动脚本（lan / cpolar 两种模式，自动探测桌面版端口）
-    dsh-remote-access/   # PC 端 DSH 插件（远程访问路由：扫码/配对/fs/mcp + 微信 iLink 遥控桥 + cpolar 隧道，含协议文档）
+    dsh-remote-access/   # PC 端 DSH 插件（远程互信认证：配对/设备/fs/mcp 路由 + 通道 token 鉴权；v2.0.0 已移除微信桥与 cpolar）
 
 ## 已知限制与路线图
 
 - 会话首屏取最近 3 条 + 「加载更早」15 条/页 + 「加载全部历史」（循环翻页到底）；超大会话全量加载耗时取决于网络
 - 图片消息仅支持 DSH 协议核心接受的图片内容块（PNG/JPEG/WebP/GIF），长图不缩放仅采样显示
 - 权限审批只支持「允许一次 / 拒绝」两个决策（与 web 端一致）；若服务端审批策略为 never 则不会出现审批请求
-- 后续：推送通知云端化（App 被杀也能收到，需接三方推送）、远程通道访问鉴权（token）
+- 后续：推送通知云端化（App 被杀也能收到，需接三方推送）
 
 ## 皮肤素材署名与许可
 
 鲸鱼娘皮肤素材来自 [dsh-deep-whale](https://github.com/Small-tailqwq/dsh-deep-whale)（深海女仆工坊 maid-atelier）：
+
 - 鲸鱼娘角色原作：**上善**（[Pixiv](https://www.pixiv.net/users/62155430) · [Bilibili](https://b23.tv/8h5L4xz)）
 - 女仆鲸鱼娘二次设计：**ZipZipPipe**（[Pixiv](https://www.pixiv.net/users/18604994) · [Bilibili](https://b23.tv/Pnw6nG8)）
 - 完整署名链见 [docs/maid-atelier-NOTICE.md](docs/maid-atelier-NOTICE.md)

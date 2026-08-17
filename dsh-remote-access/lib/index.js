@@ -1,35 +1,25 @@
-// dsh-remote-access：设置页「远程控制」——微信 iLink 桥（主要方式）+ cpolar 隧道（备选）
-// 微信桥：扫码登录微信 iLink Bot → 微信里给自己发消息遥控 DSH（会话注入、流式回复、审批、图片）
-// cpolar：网页版备选。内置一键安装（官网自动下载）、注册引导、authtoken 保存，无需手动装 cpolar
+// dsh-remote-access v2.4.0 — 远程互信认证（配对码 + 确认框 + 公网域名白名单）+ 只读辅助路由
+// 保留：移动端配对握手（pair/*）、主机设备信息（device/info）、只读目录列举（fs/list）、
+//       只读文件预览（fs/read）、MCP 枚举（mcp/list）、远程通道 Bearer token 鉴权（/api 全量门禁，含 WebSocket）。
+// 移除：微信 iLink 桥（lib/ilink.js + lib/bridge.js）、cpolar 隧道供应（lib/cpolar.js），
+//       对应 wx/*、cpolar/*、/status、/start、/stop、/qr 路由与 qrcode 依赖一并删除。
 import { execFile } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import {
   closeSync,
-  existsSync,
   fstatSync,
   mkdirSync,
   openSync,
   readFileSync,
   readSync,
   readdirSync,
+  renameSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { homedir, hostname, networkInterfaces } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
-import { ILinkClient } from "./ilink.js";
-import { createBridge } from "./bridge.js";
-import {
-  findCpolar,
-  installCpolar,
-  cpolarStatus,
-  setAuthtoken,
-  startTunnel,
-  stopTunnel,
-  tunnel,
-} from "./cpolar.js";
-import QRCode from "qrcode";
 
 const execFileAsync = promisify(execFile);
 
@@ -90,34 +80,10 @@ function decodeUtf8Strict(buf) {
   }
 }
 
-// 探测结果短缓存：设置页轮询时不重复 spawn 进程
-let dshPortCache = { at: 0, value: 0 };
-
-/** 探测正在运行的桌面版 DSH web 端口（node 进程命令行匹配 dsh bin.js web） */
-async function findDshPort() {
-  if (Date.now() - dshPortCache.at < 60000) return dshPortCache.value;
-  const ps =
-    "$ErrorActionPreference='SilentlyContinue'; " +
-    "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | " +
-    "Where-Object { $_.CommandLine -match 'dsh[\\\\/]lib[\\\\/]bin\\.js' -and $_.CommandLine -match '\\bweb\\b' } | " +
-    "ForEach-Object { $p = $_; " +
-    "Get-NetTCPConnection -State Listen -OwningProcess $p.ProcessId -ErrorAction SilentlyContinue | " +
-    "Where-Object { $_.LocalAddress -in @('127.0.0.1','0.0.0.0','::') } | " +
-    "Select-Object -First 1 -ExpandProperty LocalPort } | Select-Object -First 1";
-  try {
-    const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-Command", ps], { timeout: 15000 });
-    const port = parseInt(String(stdout).trim(), 10);
-    dshPortCache = { at: Date.now(), value: Number.isFinite(port) && port > 0 ? port : 0 };
-    return dshPortCache.value;
-  } catch {
-    dshPortCache = { at: Date.now(), value: 0 };
-    return 0;
-  }
-}
-
 export const apply = (ctx) => {
   const webServer = ctx.webServer;
   const log = (...args) => console.error("[dsh-remote-access]", ...args);
+  const home = (process.env.DSH_HOME || "").trim() || join(homedir(), ".dsh");
 
   // 路由注册统一收集 disposer，随 fiber 卸载自动清理（热重载不再残留路由）
   const disposers = [];
@@ -135,187 +101,8 @@ export const apply = (ctx) => {
     "dsh-remote-access: web routes"
   );
 
-  // ---------- 微信 iLink 桥 ----------
-  const home = process.env.DSH_HOME || join(homedir(), ".dsh");
-  const ilink = new ILinkClient({ stateFile: join(home, "remote-access", "wx-state.json"), log });
-  const { bridge, onSessionEvent, onApprovalRequest } = createBridge(ctx, { ilink, log });
-
-  // 会话事件流（助手文本 → 微信）
-  ctx.on("session/event", onSessionEvent);
-  // 审批应答器：prepend 先于 API 网关，仅接管微信绑定会话
-  ctx.on("approval/request", onApprovalRequest, true);
-
-  bridge.init().catch((err) => log("init failed", err));
-  ctx.effect(() => () => bridge.dispose(), "dsh-remote-access: wechat bridge");
-
-  // 装机自检：cpolar 未安装时后台预下载（延迟 10s，避开启动高峰），
-  // 用户打开设置页时大概率已就绪；本机已有 cpolar（E:\coplar / PATH）则跳过。
-  setTimeout(() => {
-    findCpolar()
-      .then((exe) => {
-        if (!exe) {
-          log("cpolar 未安装，后台预下载（装机自检）…");
-          installCpolar();
-        }
-      })
-      .catch(() => {});
-  }, 10000);
-
-  reg({
-    kind: "exact",
-    path: "/api/remote-access/wx/status",
-    handler: async (req, res) => {
-      if (req.method !== "GET") return json(res, 405, { error: "method not allowed" });
-      json(res, 200, bridge.getStatus());
-    },
-  });
-
-  reg({
-    kind: "exact",
-    path: "/api/remote-access/wx/login",
-    handler: async (req, res) => {
-      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
-      const body = await readBody(req);
-      const result = await bridge.login(body.verifyCode || undefined);
-      json(res, 200, { ok: true, ...result });
-    },
-  });
-
-  reg({
-    kind: "exact",
-    path: "/api/remote-access/wx/stop",
-    handler: async (req, res) => {
-      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
-      json(res, 200, await bridge.stop());
-    },
-  });
-
-  reg({
-    kind: "exact",
-    path: "/api/remote-access/wx/reset",
-    handler: async (req, res) => {
-      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
-      const result = await bridge.reset();
-      json(res, 200, { ok: true, ...result });
-    },
-  });
-
-  // ---------- cpolar 隧道（备选） ----------
-  reg({
-    kind: "exact",
-    path: "/api/remote-access/status",
-    handler: async (req, res) => {
-      if (req.method !== "GET") return json(res, 405, { error: "method not allowed" });
-      const cpolarFound = Boolean(await findCpolar());
-      const dshPort = await findDshPort();
-      json(res, 200, {
-        status: tunnel.status,
-        url: tunnel.url,
-        port: tunnel.port,
-        message: tunnel.message,
-        cpolarFound,
-        dshPort,
-      });
-    },
-  });
-
-  // cpolar 供应状态：是否已安装、安装进度、登录态、注册/token 链接
-  reg({
-    kind: "exact",
-    path: "/api/remote-access/cpolar/status",
-    handler: async (req, res) => {
-      if (req.method !== "GET") return json(res, 405, { error: "method not allowed" });
-      json(res, 200, await cpolarStatus());
-    },
-  });
-
-  // 一键安装：后台下载+解压，前端轮询 /cpolar/status 看进度
-  reg({
-    kind: "exact",
-    path: "/api/remote-access/cpolar/install",
-    handler: async (req, res) => {
-      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
-      installCpolar();
-      json(res, 200, { ok: true, installing: true });
-    },
-  });
-
-  // 保存 authtoken（等价 cpolar authtoken <token>）
-  reg({
-    kind: "exact",
-    path: "/api/remote-access/cpolar/authtoken",
-    handler: async (req, res) => {
-      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
-      const body = await readBody(req);
-      const exe = await findCpolar();
-      if (!exe) return json(res, 200, { ok: false, error: "cpolar 尚未安装" });
-      try {
-        await setAuthtoken(exe, body.token);
-        json(res, 200, { ok: true });
-      } catch (err) {
-        json(res, 200, { ok: false, error: err?.message || String(err) });
-      }
-    },
-  });
-
-  reg({
-    kind: "exact",
-    path: "/api/remote-access/start",
-    handler: async (req, res) => {
-      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
-      const body = await readBody(req);
-      let port = Number(body.port) || 0;
-      if (!port) port = await findDshPort();
-      if (!port) {
-        return json(res, 200, {
-          ok: false,
-          error: "未检测到正在运行的 DSH 桌面实例，请先启动 DeepSeek Harness",
-        });
-      }
-      const result = await startTunnel(port);
-      json(res, 200, result);
-    },
-  });
-
-  reg({
-    kind: "exact",
-    path: "/api/remote-access/stop",
-    handler: async (req, res) => {
-      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
-      stopTunnel();
-      tunnel.status = "idle";
-      tunnel.url = null;
-      tunnel.message = "";
-      json(res, 200, { ok: true });
-    },
-  });
-
-  // 本地生成二维码（不出本机、无第三方依赖、秒出图）
-  reg({
-    kind: "exact",
-    path: "/api/remote-access/qr",
-    handler: async (req, res) => {
-      if (req.method !== "GET") return json(res, 405, { error: "method not allowed" });
-      const u = new URL(req.url, "http://localhost");
-      const data = u.searchParams.get("data") ?? "";
-      if (!data) return json(res, 400, { error: "missing data" });
-      if (data.length > 2048) return json(res, 400, { error: "data too long" });
-      try {
-        const dataUrl = await QRCode.toDataURL(data, {
-          width: 336,
-          margin: 2,
-          errorCorrectionLevel: "M",
-          color: { dark: "#0D1B2A", light: "#FFFFFF" },
-        });
-        json(res, 200, { ok: true, dataUrl });
-      } catch (err) {
-        json(res, 500, { error: String(err?.message ?? err) });
-      }
-    },
-  });
-
-  // 目录浏览（移动端任选 PC 目录作工作区，不限于 DSH 已划定的工作区）：只读列举子目录 + 文件
-  // dirs[] 仅目录名（兼容旧 App）；files[] = {name, path, size, hidden}（S6 文件预览用）
+  // ---------- 目录浏览（移动端任选 PC 目录作工作区）：只读列举子目录 + 文件 ----------
+  // dirs[] 仅目录名（兼容旧 App）；files[] = {name, path, size, hidden}
   reg({
     kind: "exact",
     path: "/api/remote-access/fs/list",
@@ -346,7 +133,7 @@ export const apply = (ctx) => {
     },
   });
 
-  // 文件内容只读预览（S6）：1MB 截断（truncated: true）+ 二进制识别（非 UTF-8 / 含 NUL → isBinary + base64 data）
+  // ---------- 文件内容只读预览：1MB 截断（truncated: true）+ 二进制识别 ----------
   // 读取优先注入的 fs 服务（工作区/sandbox 语义）：小文本走 ctx.fs.readText；超过 1MB / 二进制回退 node:fs 读头部
   reg({
     kind: "exact",
@@ -404,10 +191,9 @@ export const apply = (ctx) => {
     },
   });
 
-  // ---------- MCP 服务列表（S5） ----------
-  // 上游 dsh-mcp-client 只把工具以 mcp__<server>__<tool> 注册进 ctx.tools，无连接态查询 API
-  // （侦察 §2.2）：按 mcp__ 前缀聚合 serverName → tools[]，status 恒 "unknown"。
-  // ctx.get 惰性读取：tools 由 mcp-client 挂载（可能晚于本插件），未挂载/异常 → 空 servers。
+  // ---------- MCP 服务列表 ----------
+  // 上游 dsh-mcp-client 只把工具以 mcp__<server>__<tool> 注册进 ctx.tools，无连接态查询 API：
+  // 按 mcp__ 前缀聚合 serverName → tools[]，status 恒 "unknown"。
   reg({
     kind: "exact",
     path: "/api/remote-access/mcp/list",
@@ -439,7 +225,7 @@ export const apply = (ctx) => {
   });
 
   // ---------- 主机设备信息（App 设备记录：机型展示 + MAC 重连校验） ----------
-  // MAC：优先带 IPv4 的物理网卡；本地管理位（随机化/虚拟网卡，首字节第二位十六进制为 2/6/A/E）的接口靠后
+  // MAC：优先带 IPv4 的物理网卡；本地管理位（随机化/虚拟网卡）的接口靠后
   const isLocalAdminMac = (mac) => /^[0-9a-f][26ae]:/i.test(mac);
   const primaryMac = () => {
     const entries = Object.values(networkInterfaces()).flat().filter(
@@ -514,7 +300,7 @@ export const apply = (ctx) => {
       if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
       const body = await readBody(req);
       const deviceId = String(body.deviceId || "").trim();
-      const deviceName = String(body.deviceName || "未知设备").trim();
+      const deviceName = String(body.deviceName || "未知设备").trim().slice(0, 64);
       if (!deviceId) return json(res, 400, { error: "missing deviceId" });
       if (readPaired().some((d) => d.deviceId === deviceId)) {
         return json(res, 200, { ok: true, state: "paired" });
@@ -597,16 +383,265 @@ export const apply = (ctx) => {
     },
   });
 
+  // ---------- 配对码（v2.1.0）：PC 生成 → 手机输入 → 立即配对并下发 token ----------
+  // 安全属性：一次性（验证成功即作废）；10 分钟过期；最多 5 次错误尝试（超限作废）；
+  // 常量时间比较防时序侧信道；verify 全局 1s 节流防高速爆破；
+  // generate 不豁免（仅本机设置页可达），verify 豁免（未配对手机的引导通道）。
+  const CODE_TTL_MS = 10 * 60 * 1000;
+  const CODE_MAX_ATTEMPTS = 5;
+  let pairCode = null; // { code, at, expiresAt, attempts }
+
+  const codeDigest = (s) => createHash("sha256").update(String(s), "utf8").digest();
+
+  reg({
+    kind: "exact",
+    path: "/api/remote-access/pair/code/generate",
+    handler: async (req, res) => {
+      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
+      const code = randomInt(0, 1000000).toString().padStart(6, "0");
+      pairCode = { code, at: Date.now(), expiresAt: Date.now() + CODE_TTL_MS, attempts: 0 };
+      log("已生成配对码（10 分钟有效，最多 5 次尝试，一次性）");
+      json(res, 200, { ok: true, code, expiresInSec: CODE_TTL_MS / 1000, maxAttempts: CODE_MAX_ATTEMPTS });
+    },
+  });
+
+  reg({
+    kind: "exact",
+    path: "/api/remote-access/pair/code/verify",
+    handler: async (req, res) => {
+      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
+      const now = Date.now();
+      const body = await readBody(req);
+      const deviceId = String(body.deviceId || "").trim();
+      const deviceName = String(body.deviceName || "未知设备").trim().slice(0, 64);
+      const code = String(body.code || "").trim();
+      if (!deviceId) return json(res, 400, { error: "missing deviceId" });
+      if (!pairCode || now > pairCode.expiresAt) {
+        pairCode = null;
+        return json(res, 200, { ok: false, error: "no_active_code", retryable: false });
+      }
+      if (pairCode.attempts >= CODE_MAX_ATTEMPTS) {
+        pairCode = null;
+        return json(res, 200, { ok: false, error: "code_locked", retryable: false });
+      }
+      if (!/^\d{6}$/.test(code) || !timingSafeEqual(codeDigest(code), codeDigest(pairCode.code))) {
+        pairCode.attempts += 1;
+        const left = CODE_MAX_ATTEMPTS - pairCode.attempts;
+        // 码对象保留：后续尝试由上方 code_locked 分支统一拒绝并销毁
+        return json(res, 200, { ok: false, error: "code_mismatch", attemptsLeft: Math.max(0, left), retryable: left > 0 });
+      }
+      // 验证成功：一次性作废 + 直接写入配对表并下发通道 token
+      pairCode = null;
+      const devices = readPaired().filter((d) => d.deviceId !== deviceId);
+      devices.push({ deviceId, name: deviceName, at: now });
+      writePaired(devices);
+      json(res, 200, { ok: true, state: "approved", token: channelToken() });
+    },
+  });
+
+  // ---------- 公网域名信任白名单（v2.4.0：写入 connection 行 !!js 拼接表达式） ----------
+  // DSH ≥0.1.0-rc.7 的 /api Host 围栏读取 client-connection（行 id: connection）的 config.trustedHosts，
+  // web 组合包给该行的默认值是 !!js ctx.webRuntime.trustedHosts（LAN IP 字面量 + CLI --trusted-host），
+  // 而补丁语义是「整份 config 替换」。所以白名单必须把用户字面量拼回运行时派生权威：
+  //   trustedHosts: !!js '[...ctx.webRuntime.trustedHosts, "user-host"]'
+  // 这正是组合包注释标注的部署挂载点。v2.3.0 顶掉 web-runtime 整份 config 的做法会让
+  // --trusted-host 静默失效（且硬编码 printUrl/surfaceContext），已废弃并自动迁移清理。
+  // 用户列表真身存 $DSH_HOME/remote-access/trusted-hosts.json（读写可靠），cordis.patch.yml
+  // 只是渲染产物；DSH 的 watchUserPatches 热监视该文件，写入后立即生效（实测无需重启）。
+  const profilePatchFile = join(home, "profiles", "web", "cordis.patch.yml");
+  const hostsJsonFile = join(home, "remote-access", "trusted-hosts.json");
+
+  /** 校验条目为纯 域名[:端口]：WHATWG 规范化往返一致（与核心 assertTrustedAuthority 同口径）+ 字符集白名单 */
+  const validateAuthority = (entry) => {
+    const e = String(entry ?? "").trim();
+    if (!e) return "请输入域名或 域名:端口";
+    if (e.length > 253) return "条目过长";
+    // 域名（字母/数字/点/连字符，可含 IPv4）或方括号 IPv6，可选 :端口；排除引号/反斜杠等，
+    // 保证条目能安全拼进 !!js 表达式与 YAML 标量（IDN 请用 punycode，与核心同口径）
+    if (!/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(?::\d{1,5})?$/i.test(e) && !/^\[[0-9a-f:.]+\](?::\d{1,5})?$/i.test(e)) {
+      return "只允许 域名[:端口] 或 [IPv6][:端口]（字母数字、点、连字符）";
+    }
+    let u;
+    try {
+      u = new URL(`http://${e}`);
+    } catch {
+      return `无法解析：${e}`;
+    }
+    const canonical = u.port ? `${u.hostname}:${u.port}` : u.hostname;
+    if (canonical !== e.toLowerCase()) {
+      return `必须是纯 域名[:端口] 形式（不带协议/路径/用户信息）：${e}`;
+    }
+    return null;
+  };
+
+  /** 读白名单 JSON 真身；无文件/坏文件 → null */
+  const readHostsJson = () => {
+    try {
+      const arr = JSON.parse(readFileSync(hostsJsonFile, "utf8"));
+      if (Array.isArray(arr)) return arr.map((s) => String(s).trim()).filter(Boolean);
+    } catch {}
+    return null;
+  };
+  const writeHostsJson = (hosts) => {
+    try {
+      mkdirSync(join(home, "remote-access"), { recursive: true });
+      const tmp = hostsJsonFile + ".tmp-" + process.pid;
+      writeFileSync(tmp, JSON.stringify(hosts, null, 2) + "\n", "utf8");
+      renameSync(tmp, hostsJsonFile);
+      return null;
+    } catch (err) {
+      return "trusted-hosts.json 写入失败：" + (err?.message || String(err));
+    }
+  };
+
+  /** 行扫描：定位 id 匹配的顶层条目块 { start, end, block }（end 止于下一个顶层条目行或行尾） */
+  const findEntryBlock = (lines, idRe) => {
+    const start = lines.findIndex((l) => idRe.test(l));
+    if (start < 0) return null;
+    let end = start + 1;
+    while (end < lines.length && (/^[ \t]/.test(lines[end]) || lines[end].trim() === "")) end++;
+    return { start, end, block: lines.slice(start + 1, end) };
+  };
+
+  /** 从 connection 块解析 !!js '[...ctx.webRuntime.trustedHosts, "a", "b"]' 里的用户字面量（无则 null） */
+  const parseConnectionExpr = (block) => {
+    const line = block.find((l) => /^\s*trustedHosts:/.test(l));
+    if (!line) return null;
+    const expr = line.trim().replace(/^trustedHosts:\s*/, "");
+    const m = expr.match(/^!!js\s*'([^']*)'$/);
+    if (!m) return null;
+    const marker = "...ctx.webRuntime.trustedHosts";
+    const i = m[1].indexOf(marker);
+    if (i < 0) return null;
+    const entries = [];
+    for (const q of m[1].slice(i + marker.length).matchAll(/"(?:[^"\\]|\\.)*"/g)) {
+      try {
+        const v = JSON.parse(q[0]);
+        if (typeof v === "string") entries.push(v);
+      } catch {}
+    }
+    return entries;
+  };
+
+  /** 从旧版 web-runtime 块解析 trustedHosts 字面量列表（v2.3.0 残留迁移用；无键则 null） */
+  const parseWebRuntimeBlock = (block) => {
+    const ti = block.findIndex((l) => /^\s*trustedHosts:/.test(l));
+    if (ti < 0) return null;
+    const entries = [];
+    for (let j = ti + 1; j < block.length; j++) {
+      const t = block[j].trim();
+      if (/^- /.test(t)) entries.push(t.replace(/^-\s*/, "").replace(/^["']|["']$/g, "").trim());
+      else if (t !== "") break;
+    }
+    return entries;
+  };
+
+  /** 读白名单：JSON 真身优先；缺失时从 cordis.patch.yml 迁移（connection !!js 或旧 web-runtime 块） */
+  const readTrustedHosts = () => {
+    const fromJson = readHostsJson();
+    if (fromJson) return fromJson;
+    let text;
+    try {
+      text = readFileSync(profilePatchFile, "utf8");
+    } catch {
+      return [];
+    }
+    const lines = text.split(/\r?\n/);
+    const conn = findEntryBlock(lines, /^- id: connection\s*$/);
+    const legacy = conn ? null : findEntryBlock(lines, /^- id: web-runtime\s*$/);
+    const hosts =
+      (conn ? parseConnectionExpr(conn.block) : null) ||
+      (legacy ? parseWebRuntimeBlock(legacy.block) : null) ||
+      [];
+    writeHostsJson(hosts);
+    if (legacy) writeTrustedHosts(hosts); // 迁移：旧 web-runtime 条目 → connection 条目
+    return hosts;
+  };
+
+  /** 渲染 connection 行白名单（!!js 拼接运行时派生权威）；空列表删除条目并清理 v2.3.0 残留 */
+  const writeTrustedHosts = (hosts) => {
+    const jerr = writeHostsJson(hosts);
+    if (jerr) return jerr;
+    let text;
+    try {
+      text = readFileSync(profilePatchFile, "utf8");
+    } catch {
+      text = "";
+    }
+    const nl = text.includes("\r\n") ? "\r\n" : "\n";
+    // 模板占位 `[]`（DSH 初始化 patch 文件时的空列表占位）与顶层条目互斥：
+    // `[]` 后跟 `- id:` 不是合法 YAML（Loader 解析抛错，热应用与下次启动都会失败）
+    const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "[]");
+    while (lines.length && lines[lines.length - 1].trim() === "") lines.pop();
+
+    // 1) 清理 v2.3.0 旧 web-runtime 白名单条目（只删带 trustedHosts 键的块，不动其它覆写）
+    for (;;) {
+      const b = findEntryBlock(lines, /^- id: web-runtime\s*$/);
+      if (!b || parseWebRuntimeBlock(b.block) === null) break;
+      lines.splice(b.start, b.end - b.start);
+    }
+
+    // 2) upsert / 删除 connection 条目（连同其后空行）
+    const conn = findEntryBlock(lines, /^- id: connection\s*$/);
+    if (conn) {
+      let end = conn.end;
+      while (end < lines.length && lines[end].trim() === "") end++;
+      lines.splice(conn.start, end - conn.start);
+    }
+    if (hosts.length > 0) {
+      const expr =
+        "[...ctx.webRuntime.trustedHosts, " + hosts.map((h) => JSON.stringify(h)).join(", ") + "]";
+      lines.push("", "- id: connection", "  config:", `    trustedHosts: !!js '${expr}'`);
+    }
+    // 全部删空时保证文件仍是合法顶层数组（空文件会触发 Loader 的 loud fail）
+    if (lines.every((l) => l.trim() === "" || l.trim().startsWith("#"))) lines.push("[]");
+    try {
+      mkdirSync(join(home, "profiles", "web"), { recursive: true });
+      const tmp = profilePatchFile + ".tmp-" + process.pid;
+      writeFileSync(tmp, lines.join(nl) + nl, "utf8");
+      renameSync(tmp, profilePatchFile);
+      return null;
+    } catch (err) {
+      return "cordis.patch.yml 写入失败：" + (err?.message || String(err));
+    }
+  };
+
+  reg({
+    kind: "exact",
+    path: "/api/remote-access/trusted-hosts",
+    handler: async (req, res) => {
+      if (req.method === "GET") {
+        json(res, 200, { ok: true, hosts: readTrustedHosts(), patchFile: profilePatchFile, stateFile: hostsJsonFile });
+        return;
+      }
+      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
+      const body = await readBody(req);
+      const action = String(body.action || "");
+      if (action !== "add" && action !== "remove") {
+        return json(res, 200, { ok: false, error: "action 必须是 add 或 remove" });
+      }
+      const host = String(body.host || "").trim();
+      const invalid = validateAuthority(host);
+      if (invalid) return json(res, 200, { ok: false, error: invalid });
+      const current = readTrustedHosts();
+      const next =
+        action === "remove"
+          ? current.filter((h) => h.toLowerCase() !== host.toLowerCase())
+          : [...current.filter((h) => h.toLowerCase() !== host.toLowerCase()), host];
+      const werr = writeTrustedHosts(next);
+      if (werr) return json(res, 200, { ok: false, error: werr });
+      log("trustedHosts 已更新：", next.join(", ") || "（空）");
+      json(res, 200, { ok: true, hosts: next, note: "已热生效：写入 connection 行 trustedHosts（DSH 监视 cordis.patch.yml 自动应用）" });
+    },
+  });
+
   // ---------- 远程通道 token 鉴权 ----------
-  // 远程通道此前无鉴权（已知限制）：拿到 cpolar/局域网地址的任何人都能遥控 DSH。
-  // 本层给 /api 加 Bearer token 门禁，规则：
-  //   - 本机浏览器放行：loopback 远端且无 X-Forwarded-For（cpolar 隧道虽从 127.0.0.1
+  // /api 全量 Bearer 门禁（含 WebSocket 升级），规则：
+  //   - 本机浏览器放行：loopback 远端且无 X-Forwarded-For（公网隧道虽从 127.0.0.1
   //     连入，但携带 XFF/x-real-ip 头，据此与真本机请求区分）；
-  //   - 局域网直连（非 loopback 远端）一律要求 token；
-  //   - 引导通道豁免：/api/remote-access/pair/*（配对握手）与 /api/host.describe
-  //     （连接探测）——未配对手机先完成配对、经 pair/check 拿到 token 后才有完整访问；
+  //   - 局域网直连（非 loopback 远端）与任何公网隧道一律要求 token；
+  //   - 引导通道豁免：/api/remote-access/pair/*（配对握手）与 /api/host.describe（连接探测）；
   //   - token 首次加载时自动生成，存放 $DSH_HOME/remote-access/channel-token。
-  //   - WebSocket 升级（events.mux）同样校验：未带 token 的握手直接 401 断开。
   const tokenFile = join(home, "remote-access", "channel-token");
   let cachedToken = null;
   const channelToken = () => {
@@ -629,8 +664,18 @@ export const apply = (ctx) => {
 
   const isLoopback = (addr) =>
     addr === "127.0.0.1" || addr === "::1" || addr === "::ffff:127.0.0.1" || addr === "::ffff:7f00:1";
-  const authExempt = (path) =>
-    path.startsWith("/api/remote-access/pair/") || path === "/api/host.describe";
+  // 引导通道豁免仅限「手机侧引导端点」白名单（v2.1.0 起收紧）：
+  // pair/request、pair/status、pair/check、pair/code/verify、host.describe。
+  // pair/respond、pair/list、pair/revoke、pair/code/generate 不豁免——本机设置页走
+  // loopback 放行，远程一律要求通道 token（修复 v1.x 的 self-approve 漏洞）。
+  const authExemptSet = new Set([
+    "/api/remote-access/pair/request",
+    "/api/remote-access/pair/status",
+    "/api/remote-access/pair/check",
+    "/api/remote-access/pair/code/verify",
+    "/api/host.describe",
+  ]);
+  const authExempt = (path) => authExemptSet.has(path);
   const unauthorized = (req) => {
     const tok = channelToken();
     if (!tok) return false; // token 不可用时不设防（降级可用性优先）

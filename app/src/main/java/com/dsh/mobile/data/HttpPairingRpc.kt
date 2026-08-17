@@ -88,4 +88,44 @@ class HttpPairingRpc(
             CheckResult(obj.optBoolean("paired", false), obj.optString("token", "").ifBlank { null })
         }
     }
+
+    /** pair/code/verify 结果：ok=true 已配对并直接下发 token；失败含 error 与剩余尝试次数 */
+    data class CodeVerifyResult(
+        val ok: Boolean,
+        val token: String?,
+        val error: String?,
+        val attemptsLeft: Int?,
+    )
+
+    /**
+     * 配对码校验（插件 v2.1.0）：PC 生成 6 位随机码，手机输入即完成配对并直接拿到通道 token。
+     * 404/410 = 旧插件 → error="plugin_old"（UI 引导改用「等待 PC 确认」）；网络错误抛异常由调用方兜底。
+     */
+    suspend fun codeVerify(code: String, deviceId: String, deviceName: String): CodeVerifyResult =
+        withContext(Dispatchers.IO) {
+            val req = Request.Builder()
+                .url(connection.baseUrl() + "/api/remote-access/pair/code/verify")
+                .post(JSONObject()
+                    .put("code", code)
+                    .put("deviceId", deviceId)
+                    .put("deviceName", deviceName)
+                    .toString().toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { resp ->
+                val text = resp.body?.string().orEmpty()
+                if (resp.code == 404 || resp.code == 410) {
+                    return@withContext CodeVerifyResult(false, null, "plugin_old", null)
+                }
+                if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}")
+                val obj = JSONObject(text)
+                if (obj.optBoolean("ok", false)) {
+                    CodeVerifyResult(true, obj.optString("token", "").ifBlank { null }, null, null)
+                } else {
+                    CodeVerifyResult(
+                        false, null, obj.optString("error", "unknown"),
+                        if (obj.has("attemptsLeft")) obj.optInt("attemptsLeft") else null,
+                    )
+                }
+            }
+        }
 }
