@@ -114,6 +114,19 @@ object UpdateChecker {
             (a.first == b.first && a.second == b.second && a.third > b.third)
     }
 
+    /**
+     * 更新判定所用的"发布版本号"：**优先取 APK 资产名的真实版本**（App 的 versionName，
+     * 例如 DSH-Remote-v1.8.1.apk → 1.8.1），解析不到才回退 tag_name。
+     * 原因：本仓库同时承载插件（另有自己的版本号），若 release 用插件 tag（如 v2.4.1）
+     * 而 APK 仍是 App 版本，按 tag 比较会让 App 误判"有新版本"而无限提示。
+     */
+    fun releaseAppVersion(info: ReleaseInfo): String {
+        pickApk(info.assets)?.let { apk ->
+            parseVersion(apk.name)?.let { v -> return "${v.first}.${v.second}.${v.third}" }
+        }
+        return info.tagName
+    }
+
     /** 检查最新 release（镜像按「上次成功的镜像优先」排序，最后直连；全部失败返回 null） */
     suspend fun checkLatest(): ReleaseInfo? = withContext(Dispatchers.IO) {
         for (prefix in orderedMirrors(UpdateMirrors.API_MIRRORS)) {

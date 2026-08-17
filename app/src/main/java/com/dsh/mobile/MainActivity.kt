@@ -328,7 +328,7 @@ private fun UpdatePromptOverlay(context: android.content.Context) {
         val current = runCatching {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
         }.getOrNull()
-        if (UpdateChecker.isNewer(latest.tagName, current)) {
+        if (UpdateChecker.isNewer(UpdateChecker.releaseAppVersion(latest), current)) {
             info = latest
             phase = "available"
         }

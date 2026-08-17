@@ -1144,7 +1144,7 @@ private fun UpdateSection(
             val r = UpdateChecker.checkLatest()
             if (r == null) {
                 phase = "error"; err = "无法连接更新服务器（GitHub Releases）"
-            } else if (UpdateChecker.isNewer(r.tagName, currentVersion)) {
+            } else if (UpdateChecker.isNewer(UpdateChecker.releaseAppVersion(r), currentVersion)) {
                 info = r; phase = "found"
             } else {
                 phase = "latest"
