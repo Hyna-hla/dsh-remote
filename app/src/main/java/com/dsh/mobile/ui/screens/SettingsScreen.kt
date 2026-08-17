@@ -35,7 +35,9 @@ import androidx.core.content.ContextCompat
 import com.dsh.mobile.data.ApkInstaller
 import com.dsh.mobile.data.AppearanceConfig
 import com.dsh.mobile.data.DshConnection
+import com.dsh.mobile.data.HttpPairingRpc
 import com.dsh.mobile.data.McpServer
+import com.dsh.mobile.data.OkHttpClientFactory
 import com.dsh.mobile.data.ReleaseInfo
 import com.dsh.mobile.data.SettingsStore
 import com.dsh.mobile.data.Sha3
@@ -49,6 +51,7 @@ import com.dsh.mobile.ui.theme.ThemeRegistry
 import com.dsh.mobile.ui.theme.ThemeRepository
 import com.dsh.mobile.ui.theme.ThemeStore
 import java.io.File
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -698,6 +701,9 @@ fun SettingsScreen(
                 }
             }
 
+            Text("远程控制（M4：令牌运维）", style = MaterialTheme.typography.titleMedium)
+            M4TokenSection(connection, settingsStore, scope)
+
             Text("关于", style = MaterialTheme.typography.titleMedium)
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
@@ -953,7 +959,94 @@ private val CODE_FONTS = listOf(
     "系统无衬线" to "sans-serif",
 )
 
-/** 字体选择对话框：选项以各自字体渲染（对齐 dsh-font 的预览体验） */
+/** M4：令牌轮换/吊销 + 审计日志（需已连接主机；调用插件 /token/rotate|revoke|audit） */
+@Composable
+private fun M4TokenSection(
+    connection: DshConnection,
+    settingsStore: SettingsStore,
+    scope: CoroutineScope,
+) {
+    val context = LocalContext.current
+    val profiles by settingsStore.profiles.collectAsState(initial = emptyList())
+    val activeId by settingsStore.activeProfileId.collectAsState(initial = null)
+    val profile = profiles.firstOrNull { it.id == activeId }
+    var busy by remember { mutableStateOf(false) }
+    var result by remember { mutableStateOf<String?>(null) }
+    var showAudit by remember { mutableStateOf(false) }
+    var auditItems by remember { mutableStateOf<List<HttpPairingRpc.AuditEvent>>(emptyList()) }
+
+    fun rpc(): HttpPairingRpc? = profile?.let { HttpPairingRpc(connection, OkHttpClientFactory.build(it).first) }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("令牌轮换 / 吊销（M4）", style = MaterialTheme.typography.titleSmall)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                if (profile == null)
+                    "连接主机后可用：轮换会立即使旧 token 失效；吊销会清空配对，强制所有设备重新配对。"
+                else "目标：${profile.remark.ifBlank { profile.deviceModel.ifBlank { "未命名设备" } }}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            busy = true; result = null
+                            result = try {
+                                val r3 = rpc()?.rotateToken()
+                                if (r3?.ok == true) "已轮换 ✓ 新 token 已下发（其它设备需重新同步）"
+                                else "轮换失败：" + (r3?.error ?: "未连接")
+                            } catch (e: Exception) {
+                                "轮换失败：" + (e.message ?: e.javaClass.simpleName)
+                            } finally { busy = false }
+                        }
+                    },
+                    enabled = !busy && profile != null,
+                ) { Text("轮换令牌") }
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            busy = true; result = null
+                            result = try {
+                                val r3 = rpc()?.revokeToken()
+                                if (r3?.ok == true) "已吊销 ✓ 所有设备需重新配对"
+                                else "吊销失败：" + (r3?.error ?: "未连接")
+                            } catch (e: Exception) {
+                                "吊销失败：" + (e.message ?: e.javaClass.simpleName)
+                            } finally { busy = false }
+                        }
+                    },
+                    enabled = !busy && profile != null,
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                ) { Text("吊销全部") }
+            }
+            result?.let {
+                Spacer(Modifier.height(6.dp))
+                Text(it, style = MaterialTheme.typography.bodySmall)
+            }
+            Spacer(Modifier.height(6.dp))
+            TextButton(onClick = {
+                scope.launch { auditItems = rpc()?.audit() ?: emptyList(); showAudit = !showAudit }
+            }) { Text(if (showAudit) "收起审计日志" else "查看审计日志") }
+            if (showAudit) {
+                val auditText = if (auditItems.isEmpty()) "暂无记录"
+                else auditItems.joinToString("\n") { e ->
+                    val t = java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.getDefault())
+                        .format(java.util.Date(e.ts))
+                    "$t  ${e.action}  ${e.deviceId ?: "-"}  ${e.ip ?: "-"}"
+                }
+                Text(
+                    auditText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun FontPickerDialog(
     title: String,

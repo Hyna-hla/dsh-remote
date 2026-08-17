@@ -158,4 +158,61 @@ class HttpPairingRpc(
             }
         }
     }
+
+    // ---------- M4 Token 运维：rotate / revoke / audit ----------
+    data class TokenOpResult(val ok: Boolean, val token: String?, val error: String?)
+
+    suspend fun rotateToken(): TokenOpResult = withContext(Dispatchers.IO) {
+        val req = Request.Builder()
+            .url(connection.baseUrl() + "/api/remote-access/token/rotate")
+            .post("{}".toRequestBody("application/json".toMediaType()))
+            .build()
+        client.newCall(req).execute().use { resp ->
+            if (resp.code == 404 || resp.code == 410) TokenOpResult(false, null, "plugin_old")
+            else if (!resp.isSuccessful) TokenOpResult(false, null, "HTTP ${resp.code}")
+            else {
+                val o = JSONObject(resp.body?.string().orEmpty())
+                if (o.optBoolean("ok", false)) TokenOpResult(true, o.optString("token", "").ifBlank { null }, null)
+                else TokenOpResult(false, null, o.optString("error", "unknown"))
+            }
+        }
+    }
+
+    suspend fun revokeToken(): TokenOpResult = withContext(Dispatchers.IO) {
+        val req = Request.Builder()
+            .url(connection.baseUrl() + "/api/remote-access/token/revoke")
+            .post("{}".toRequestBody("application/json".toMediaType()))
+            .build()
+        client.newCall(req).execute().use { resp ->
+            if (resp.code == 404 || resp.code == 410) TokenOpResult(false, null, "plugin_old")
+            else if (!resp.isSuccessful) TokenOpResult(false, null, "HTTP ${resp.code}")
+            else {
+                val o = JSONObject(resp.body?.string().orEmpty())
+                if (o.optBoolean("ok", false)) TokenOpResult(true, null, null)
+                else TokenOpResult(false, null, o.optString("error", "unknown"))
+            }
+        }
+    }
+
+    data class AuditEvent(val ts: Long, val action: String, val deviceId: String?, val ip: String?)
+
+    suspend fun audit(): List<AuditEvent> = withContext(Dispatchers.IO) {
+        val req = Request.Builder()
+            .url(connection.baseUrl() + "/api/remote-access/token/audit")
+            .get()
+            .build()
+        client.newCall(req).execute().use { resp ->
+            if (resp.code != 200) return@withContext emptyList()
+            val arr = JSONObject(resp.body?.string().orEmpty()).optJSONArray("events") ?: return@withContext emptyList()
+            (0 until arr.length()).map { i ->
+                val e = arr.getJSONObject(i)
+                AuditEvent(
+                    ts = e.optLong("ts"),
+                    action = e.optString("action", ""),
+                    deviceId = e.optString("deviceId", "").ifBlank { null },
+                    ip = e.optString("ip", "").ifBlank { null },
+                )
+            }
+        }
+    }
 }
