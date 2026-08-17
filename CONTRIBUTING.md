@@ -2,6 +2,9 @@
 
 感谢你的关注！本仓库是一个**个人开发的社区第三方客户端**（DSH Remote App + PC 端 dsh-remote-access 插件），欢迎以 Issue / PR 方式参与。
 
+- **使用问答 / 玩法交流** → [GitHub Discussions](https://github.com/Hyna-hla/dsh-remote/discussions)
+- **Bug 报告 / 安全** → [Issues](https://github.com/Hyna-hla/dsh-remote/issues) 与 [SECURITY.md](SECURITY.md)
+
 ## 目录速览
 
 - `app/` — Android App（Kotlin + Compose）

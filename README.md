@@ -8,6 +8,8 @@
 把 DeepSeek Harness 装进口袋：手机 App 连接你电脑上正在运行的 DSH 服务，
 随时随地给智能体派任务、看进展、批审批。UI 对齐桌面端 DSH 风格，交互参考 Trae 移动端。
 
+> 💬 **社区问答**：使用问题、玩法交流、想法建议请到 [GitHub Discussions](https://github.com/Hyna-hla/dsh-remote/discussions)；Bug/安全仍走 [Issues](https://github.com/Hyna-hla/dsh-remote/issues) 与 [安全通告](SECURITY.md)。
+
 ## 功能
 
 - **远程操控**：连接 PC 上的 DSH（局域网直连 或 自备内网穿透，任何网络可用）；连接页右上角**扫码连接**（扫描任意 URL 二维码自动填入服务器地址，含相机权限申请）
