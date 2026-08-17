@@ -192,6 +192,23 @@ window.__ModuleLoader__.load({
       var [left, setLeft] = useState(0);
       var timer = useRef(null);
 
+      function arm(r) {
+        setPc(r);
+        setLeft(Math.floor(r.expiresInSec || 600));
+        if (timer.current) clearInterval(timer.current);
+        timer.current = setInterval(function () {
+          setLeft(function (prev) {
+            if (prev <= 1) {
+              if (timer.current) clearInterval(timer.current);
+              timer.current = null;
+              setPc(null);
+              return 0;
+            }
+            return prev - 1;
+          });
+        }, 1000);
+      }
+
       function generate() {
         setBusy(true);
         fetchJson("/api/remote-access/pair/code/generate", {
@@ -199,29 +216,16 @@ window.__ModuleLoader__.load({
           headers: { "Content-Type": "application/json" },
           body: "{}",
         })
-          .then(function (r) {
-            if (r && r.ok && r.code) {
-              setPc(r);
-              setLeft(Math.floor(r.expiresInSec || 600));
-              if (timer.current) clearInterval(timer.current);
-              timer.current = setInterval(function () {
-                setLeft(function (prev) {
-                  if (prev <= 1) {
-                    if (timer.current) clearInterval(timer.current);
-                    timer.current = null;
-                    setPc(null);
-                    return 0;
-                  }
-                  return prev - 1;
-                });
-              }, 1000);
-            }
-          })
+          .then(function (r) { if (r && r.ok && r.code) arm(r); })
           .catch(function () {})
           .finally(function () { setBusy(false); });
       }
 
+      // 打开设置页即自动展示当前配对码（服务端 ensureActiveCode 保证始终有码）
       useEffect(function () {
+        fetchJson("/api/remote-access/pair/code/current")
+          .then(function (r) { if (r && r.ok && r.code) arm(r); })
+          .catch(function () {});
         return function () { if (timer.current) clearInterval(timer.current); };
       }, []);
 

@@ -306,6 +306,8 @@ export const apply = (ctx) => {
         return json(res, 200, { ok: true, state: "paired" });
       }
       if (!pendingPair || pendingPair.deviceId !== deviceId) {
+        // 新设备来配对：自动生成/确保有一个有效配对码可供手机输入
+        ensureActiveCode();
         clearPending();
         pendingPair = { deviceId, name: deviceName, at: Date.now(), outcome: null };
         pendingTimer = setTimeout(() => { pendingPair = null; pendingTimer = null; }, 120000);
@@ -393,6 +395,19 @@ export const apply = (ctx) => {
 
   const codeDigest = (s) => createHash("sha256").update(String(s), "utf8").digest();
 
+  // 自动生成：当前无有效码（过期 / 用尽 / 从未生成）时立刻生成一个 6 位码，
+  // 保证手机来配对时 PC 端始终有码可填（无需手动点「生成配对码」）。
+  const ensureActiveCode = () => {
+    const now = Date.now();
+    if (pairCode && now <= pairCode.expiresAt && pairCode.attempts < CODE_MAX_ATTEMPTS) {
+      return pairCode;
+    }
+    const code = randomInt(0, 1000000).toString().padStart(6, "0");
+    pairCode = { code, at: now, expiresAt: now + CODE_TTL_MS, attempts: 0 };
+    return pairCode;
+  };
+
+
   reg({
     kind: "exact",
     path: "/api/remote-access/pair/code/generate",
@@ -407,8 +422,23 @@ export const apply = (ctx) => {
 
   reg({
     kind: "exact",
-    path: "/api/remote-access/pair/code/verify",
+    path: "/api/remote-access/pair/code/current",
     handler: async (req, res) => {
+      if (req.method !== "GET") return json(res, 405, { error: "method not allowed" });
+      // 非豁免路由：远程需 Bearer token 才能读；本机设置页走 loopback 放行。
+      const active = ensureActiveCode();
+      json(res, 200, {
+        ok: true,
+        code: active.code,
+        expiresInSec: Math.max(0, Math.floor((active.expiresAt - Date.now()) / 1000)),
+        maxAttempts: CODE_MAX_ATTEMPTS,
+      });
+    },
+  });
+
+  reg({
+    kind: "exact",
+    path: "/api/remote-access/pair/code/verify",    handler: async (req, res) => {
       if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
       const now = Date.now();
       const body = await readBody(req);

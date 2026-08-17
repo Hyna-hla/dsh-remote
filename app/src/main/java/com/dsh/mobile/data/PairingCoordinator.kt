@@ -143,9 +143,10 @@ class PairingCoordinator(
                 }
             }
             PairingOutcome.SKIPPED -> {
-                settingsStore.upsertProfile(profile.copy(paired = true))
-                _awaitingDecision.value = null
-                _events.tryEmit("PC 端插件未开启配对确认，已跳过（可在插件更新后重启验证）")
+                // 安全：空配对码/插件未确认时绝不跳过验证、绝不签发令牌。
+                // 保持待配对（awaitingDecision），引导用户用 PC 端自动生成的配对码完成配对。
+                _events.tryEmit("已阻止跳过验证：请用 PC 端自动生成的 6 位配对码完成配对")
+                _awaitingDecision.value = profile.id
             }
             PairingOutcome.DENIED -> {
                 _awaitingDecision.value = null
