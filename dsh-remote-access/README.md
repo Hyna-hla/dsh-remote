@@ -52,8 +52,15 @@ dsh plugin --profile web add ./dsh-remote-access-2.4.1.tgz
 | GET | /api/remote-access/pair/check?deviceId= | 回查配对状态；已配对则下发通道 token |
 | POST | /api/remote-access/pair/revoke | 撤销设备（仅本机可达，不豁免） |
 | GET | /api/remote-access/device/info | 主机设备信息 |
+| POST | /api/remote-access/token/rotate | 轮换通道 token（M4：旧 token 即时失效，返回新 token） |
+| POST | /api/remote-access/token/revoke | 吊销 token + 清空配对表（M4：所有设备强制重新配对） |
+| GET | /api/remote-access/token/audit | 审计日志（M4：最近 50 条，rotate/revoke） |
 | GET | /api/remote-access/fs/list?path= | 只读目录列举 |
-| GET | /api/remote-access/fs/read?path= | 只读文件预览 |
+| GET | /api/remote-access/fs/read?path= | 只读文件预览（1MB 截断 + 二进制识别） |
+| GET | /api/remote-access/fs/stat?path= | 文件/目录元信息（M1：size/mtime/isFile/isDir） |
+| POST | /api/remote-access/fs/write | 上传文件（M1：json `{path, content=base64, overwrite?}`；沙箱限 home；返回 path/size） |
+| POST | /api/remote-access/fs/mkdir | 建目录（M1：json `{path, recursive?}`） |
+| POST | /api/remote-access/fs/delete | 删除（M1：软删进回收站 `trash/`, 返回 trashId） |
 | GET | /api/remote-access/mcp/list | MCP 枚举 |
 
 鉴权规则（/api 全量门禁，含 WebSocket 升级）：
@@ -62,6 +69,11 @@ dsh plugin --profile web add ./dsh-remote-access-2.4.1.tgz
 - 局域网直连与公网隧道一律要求 `Authorization: Bearer <token>`；
 - 引导通道豁免（仅手机侧引导端点白名单）：`pair/request`、`pair/status`、`pair/check`、`pair/code/verify`、`/api/host.describe`；
 - v2.1.0 起 `pair/respond`、`pair/list`、`pair/revoke`、`pair/code/generate` **不再豁免**——修复 v1.x 的 self-approve 漏洞（拿到隧道地址的人此前可远程自我批准配对）。
+
+## 双向文件传输与 Token 运维（M1 / M4）
+
+- **双向文件（M1）**：`fs/write`（base64 json）、`fs/mkdir`、`fs/delete`、`fs/stat` 提供手机↔PC 的文件上传/管理；`fs/read` 反向读取预览。**写/删/建目录是破坏性操作，一律沙箱到 `$DSH_HOME` 内**（`resolve`+`relative` 归一化防 `../` 穿越），并额外校验 `overwrite`。均复用通道 Bearer 鉴权，远程未持 token 一律 401。
+- **Token 运维（M4）**：`token/rotate`（轮换，旧 token 即时失效）、`token/revoke`（吊销 + 清空配对表，强制所有设备重新配对）、`token/audit`（最近 50 条审计）。均**非豁免**——仅本机设置页或已配对设备（带当前 Bearer）可达。
 
 ## 状态文件
 

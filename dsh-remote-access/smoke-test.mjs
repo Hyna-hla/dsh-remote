@@ -551,6 +551,178 @@ test("公网域名白名单：DSH 模板占位 [] 会被剥离（不产生非法
   assert.match(after, /^\[\]$/m);
 });
 
+test("M1 双向文件：fs/write → stat → read 回读；沙箱拒穿越；overwrite 409；远程 401", async () => {
+  const target = join(home, "remote-access", "uploads", "shot.txt");
+  const text = "你好，DSH 从手机上传";
+  const content = Buffer.from(text, "utf8").toString("base64");
+
+  // 沙箱外（home 之外）→ 拒绝
+  let r = await req("/api/remote-access/fs/write", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { path: join(tmpdir(), "escape.txt"), content },
+  });
+  assert.equal(r.body.ok, false);
+  assert.equal(r.body.error, "path_not_in_workspace");
+
+  // 路径穿越（../ 想逃出 home）→ 拒绝
+  r = await req("/api/remote-access/fs/write", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { path: join(home, "..", "..", "evil.txt"), content },
+  });
+  assert.equal(r.body.ok, false);
+  assert.equal(r.body.error, "path_not_in_workspace");
+
+  // 远程（XFF）无 token → 401
+  r = await req("/api/remote-access/fs/write", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-forwarded-for": "9.9.9.9" },
+    body: { path: target, content },
+  });
+  assert.equal(r.status, 401);
+
+  // 写入（自动建父目录）→ 200
+  r = await req("/api/remote-access/fs/write", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { path: target, content },
+  });
+  assert.equal(r.body.ok, true);
+  assert.equal(r.body.size, Buffer.byteLength(text));
+  assert.equal(r.body.path, target);
+
+  // overwrite=false 同名 → 409
+  r = await req("/api/remote-access/fs/write", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { path: target, content },
+  });
+  assert.equal(r.status, 409);
+
+  // stat
+  r = await req("/api/remote-access/fs/stat?path=" + encodeURIComponent(target));
+  assert.equal(r.body.ok, true);
+  assert.equal(r.body.isFile, true);
+  assert.equal(r.body.size, Buffer.byteLength(text));
+
+  // 回读一致
+  r = await req("/api/remote-access/fs/read?path=" + encodeURIComponent(target));
+  assert.equal(r.body.isBinary, false);
+  assert.equal(r.body.text, text);
+});
+
+test("M1 双向文件：fs/mkdir（recursive）+ fs/delete 进回收站（trash）", async () => {
+  const dir = join(home, "remote-access", "uploads", "d");
+  let r = await req("/api/remote-access/fs/mkdir", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { path: dir, recursive: true },
+  });
+  assert.equal(r.body.ok, true);
+  assert.equal(r.body.created, true);
+  r = await req("/api/remote-access/fs/mkdir", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { path: dir, recursive: true },
+  });
+  assert.equal(r.body.created, false);
+
+  // 写一个文件再删除 → 进回收站（trashId）
+  const f = join(dir, "a.txt");
+  await req("/api/remote-access/fs/write", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { path: f, content: Buffer.from("x").toString("base64") },
+  });
+  r = await req("/api/remote-access/fs/delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { path: f },
+  });
+  assert.equal(r.body.ok, true);
+  assert.ok(r.body.trashId);
+  r = await req("/api/remote-access/fs/stat?path=" + encodeURIComponent(f));
+  assert.equal(r.body.ok, false);
+  assert.equal(r.body.error, "not_found");
+
+  // 删除 home 根 → 拒绝（保护性）
+  r = await req("/api/remote-access/fs/delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { path: home },
+  });
+  assert.equal(r.body.error, "cannot_delete_root");
+});
+
+test("M4 token 运维：rotate 换新 / 旧失效 / revoke 清配对 / audit 有记录 / 远程 401", async () => {
+  await req("/api/remote-access/pair/request", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { deviceId: "dev-tok-1", deviceName: "令牌机" },
+  });
+  await req("/api/remote-access/pair/respond", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { deviceId: "dev-tok-1", outcome: "approve" },
+  });
+  const c = await req("/api/remote-access/pair/check?deviceId=dev-tok-1");
+  const oldToken = c.body.token;
+  assert.match(oldToken, /^[0-9a-f]{32,}$/);
+
+  // 旧 token 当前有效
+  let r = await req("/api/protected-test", {
+    headers: { "x-forwarded-for": "1.2.3.4", authorization: "Bearer " + oldToken },
+  });
+  assert.equal(r.status, 200);
+
+  // 本机轮换 → 新 token ≠ 旧
+  r = await req("/api/remote-access/token/rotate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: {},
+  });
+  assert.equal(r.body.ok, true);
+  const newToken = r.body.token;
+  assert.ok(newToken && newToken !== oldToken);
+
+  // 旧 token 401，新 token 放行
+  r = await req("/api/protected-test", {
+    headers: { "x-forwarded-for": "1.2.3.4", authorization: "Bearer " + oldToken },
+  });
+  assert.equal(r.status, 401);
+  r = await req("/api/protected-test", {
+    headers: { "x-forwarded-for": "1.2.3.4", authorization: "Bearer " + newToken },
+  });
+  assert.equal(r.status, 200);
+
+  // audit 有 rotate 记录（本机可查）
+  r = await req("/api/remote-access/token/audit");
+  assert.ok(r.body.events.some((e) => e.action === "token/rotate"));
+
+  // 远程未授权调 rotate → 401
+  r = await req("/api/remote-access/token/rotate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-forwarded-for": "8.8.8.8" },
+    body: {},
+  });
+  assert.equal(r.status, 401);
+
+  // 吊销（本机）→ 清空配对表；新 token 也被吊销
+  r = await req("/api/remote-access/token/revoke", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: {},
+  });
+  assert.equal(r.body.ok, true);
+  r = await req("/api/remote-access/pair/list");
+  assert.equal(r.body.devices.length, 0);
+  r = await req("/api/protected-test", {
+    headers: { "x-forwarded-for": "1.2.3.4", authorization: "Bearer " + newToken },
+  });
+  assert.equal(r.status, 401);
+});
+
 test.after(() => {
   srv.close();
   rmSync(home, { recursive: true, force: true });

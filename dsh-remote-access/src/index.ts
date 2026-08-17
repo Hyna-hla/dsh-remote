@@ -9,9 +9,10 @@
 // 移除：微信 iLink 桥（lib/ilink.js + lib/bridge.js）、cpolar 隧道供应（lib/cpolar.js），
 //       对应 wx/*、cpolar/*、/status、/start、/stop、/qr 路由与 qrcode 依赖一并删除。
 import { execFile } from "node:child_process";
-import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   closeSync,
+  existsSync,
   fstatSync,
   mkdirSync,
   openSync,
@@ -23,7 +24,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir, hostname, networkInterfaces } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -190,6 +191,140 @@ export const apply = (ctx) => {
         } else {
           json(res, 200, { ok: true, path: p, size, truncated, isBinary: false, text: decodeUtf8Strict(slice) });
         }
+      } catch (err) {
+        json(res, 200, { ok: false, error: String(err?.message ?? err) });
+      }
+    },
+  });
+
+  // ---------- 双向文件传输（M1，写/删类 · 沙箱到 DSH home） ----------
+  // 只读 fs/list、fs/read 允许任意绝对路径（低风险）；写/删/建目录是破坏性操作，
+  // 一律限定在 $DSH_HOME 内：resolve 归一化 ../，relative 判定必须在 home 之下（含 home 自身）。
+  const readBodyMax = (req, max) =>
+    new Promise((done) => {
+      let data = "";
+      req.on("data", (c) => {
+        data += c;
+        if (data.length > max) {
+          req.destroy();
+          done(null);
+          return;
+        }
+      });
+      req.on("end", () => {
+        try {
+          done(data ? JSON.parse(data) : {});
+        } catch {
+          done({});
+        }
+      });
+    });
+  const resolveSandboxed = (p) => {
+    if (!p || !isAbsolute(p)) return null;
+    const abs = resolve(p);
+    const rel = relative(home, abs);
+    const inside = rel === "" || (!rel.startsWith("..") && rel !== ".." && !isAbsolute(rel));
+    return inside ? abs : null;
+  };
+  const UP_MAX = 64 * 1024 * 1024; // 单个上传 JSON body 上限（base64 约合 ≥48MB 文件）
+
+  reg({
+    kind: "exact",
+    path: "/api/remote-access/fs/write",
+    handler: async (req, res) => {
+      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
+      const body = await readBodyMax(req, UP_MAX);
+      if (!body) return json(res, 413, { ok: false, error: "payload_too_large", max: UP_MAX });
+      const target = resolveSandboxed(String(body.path || "").trim());
+      if (!target) return json(res, 200, { ok: false, error: "path_not_in_workspace" });
+      let buf;
+      try {
+        buf = Buffer.from(String(body.content || ""), "base64");
+      } catch {
+        return json(res, 400, { ok: false, error: "bad_base64" });
+      }
+      if (!body.overwrite && existsSync(target)) {
+        return json(res, 409, { ok: false, error: "file_exists", path: target });
+      }
+      try {
+        mkdirSync(dirname(target), { recursive: true });
+        writeFileSync(target, buf);
+        const st = statSync(target);
+        json(res, 200, { ok: true, path: target, size: st.size, mtime: st.mtimeMs, written: buf.length });
+      } catch (err) {
+        json(res, 200, { ok: false, error: String(err?.message ?? err) });
+      }
+    },
+  });
+
+  reg({
+    kind: "exact",
+    path: "/api/remote-access/fs/mkdir",
+    handler: async (req, res) => {
+      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
+      const body = await readBody(req);
+      const target = resolveSandboxed(String(body.path || "").trim());
+      if (!target) return json(res, 200, { ok: false, error: "path_not_in_workspace" });
+      try {
+        let created = false;
+        if (body.recursive) {
+          created = !existsSync(target);
+          mkdirSync(target, { recursive: true });
+        } else {
+          if (existsSync(target)) return json(res, 200, { ok: true, created: false, path: target });
+          mkdirSync(target);
+          created = true;
+        }
+        json(res, 200, { ok: true, created, path: target });
+      } catch (err) {
+        json(res, 200, { ok: false, error: String(err?.message ?? err) });
+      }
+    },
+  });
+
+  // 删除 → 移入 $DSH_HOME/remote-access/trash/<uuid>-<name>（软删可撤销，v1 返回 trashId 供后续 restore）
+  reg({
+    kind: "exact",
+    path: "/api/remote-access/fs/delete",
+    handler: async (req, res) => {
+      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
+      const body = await readBody(req);
+      const target = resolveSandboxed(String(body.path || "").trim());
+      if (!target) return json(res, 200, { ok: false, error: "path_not_in_workspace" });
+      if (target === resolve(home)) return json(res, 200, { ok: false, error: "cannot_delete_root" });
+      try {
+        if (!existsSync(target)) return json(res, 200, { ok: true, trashId: null, note: "already_gone" });
+        const trashDir = join(home, "remote-access", "trash");
+        mkdirSync(trashDir, { recursive: true });
+        const trashId = randomUUID();
+        renameSync(target, join(trashDir, trashId + "-" + basename(target)));
+        json(res, 200, { ok: true, trashId, path: target });
+      } catch (err) {
+        json(res, 200, { ok: false, error: String(err?.message ?? err) });
+      }
+    },
+  });
+
+  reg({
+    kind: "exact",
+    path: "/api/remote-access/fs/stat",
+    handler: async (req, res) => {
+      if (req.method !== "GET") return json(res, 405, { error: "method not allowed" });
+      const u = new URL(req.url, "http://localhost");
+      const p = u.searchParams.get("path") ?? "";
+      if (!isAbsolute(p)) return json(res, 400, { error: "需要绝对路径" });
+      try {
+        if (!existsSync(p)) return json(res, 200, { ok: false, error: "not_found", path: p });
+        const st = statSync(p);
+        json(res, 200, {
+          ok: true,
+          path: p,
+          isFile: st.isFile(),
+          isDir: st.isDirectory(),
+          size: st.size,
+          mtime: st.mtimeMs,
+          hidden: basename(p).startsWith("."),
+        });
       } catch (err) {
         json(res, 200, { ok: false, error: String(err?.message ?? err) });
       }
@@ -701,6 +836,64 @@ export const apply = (ctx) => {
       return null;
     }
   };
+
+  // ---------- Token 运维（M4）：轮换 / 吊销 / 审计 ----------
+  // 均为非豁免 /api 路由 → 仅本机 loopback（无 XFF）或已配对设备（带当前 Bearer）可达，远程未持 token 一律 401。
+  const audit = []; // {ts, action, deviceId?, ip}
+  const logAudit = (action, req, deviceId) => {
+    audit.push({ ts: Date.now(), action, deviceId: deviceId || null, ip: req?.socket?.remoteAddress || null });
+    if (audit.length > 200) audit.splice(0, audit.length - 200);
+    try {
+      mkdirSync(join(home, "remote-access"), { recursive: true });
+      writeFileSync(join(home, "remote-access", "audit.json"), JSON.stringify(audit.slice(-50), null, 2), "utf8");
+    } catch {}
+  };
+
+  reg({
+    kind: "exact",
+    path: "/api/remote-access/token/rotate",
+    handler: async (req, res) => {
+      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
+      // 轮换 = 生成新 token 并重置进程内缓存（旧 token 即刻失效，现有设备需以新 token 继续）
+      const t = randomBytes(24).toString("hex");
+      cachedToken = null;
+      try {
+        mkdirSync(join(home, "remote-access"), { recursive: true });
+        writeFileSync(tokenFile, t, "utf8");
+      } catch {
+        return json(res, 200, { ok: false, error: "write_failed" });
+      }
+      cachedToken = t;
+      logAudit("token/rotate", req);
+      json(res, 200, { ok: true, token: t, rotatedAt: Date.now() });
+    },
+  });
+
+  reg({
+    kind: "exact",
+    path: "/api/remote-access/token/revoke",
+    handler: async (req, res) => {
+      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
+      // 吊销 = 清空 token 文件 + 缓存，并清空配对表 → 所有设备下次请求 401，强制重新配对
+      cachedToken = null;
+      try {
+        mkdirSync(join(home, "remote-access"), { recursive: true });
+        writeFileSync(tokenFile, "", "utf8");
+      } catch {}
+      writePaired([]);
+      logAudit("token/revoke", req);
+      json(res, 200, { ok: true, revokedAt: Date.now() });
+    },
+  });
+
+  reg({
+    kind: "exact",
+    path: "/api/remote-access/token/audit",
+    handler: async (req, res) => {
+      if (req.method !== "GET") return json(res, 405, { error: "method not allowed" });
+      json(res, 200, { ok: true, events: audit.slice(-50) });
+    },
+  });
 
   const isLoopback = (addr) =>
     addr === "127.0.0.1" || addr === "::1" || addr === "::ffff:127.0.0.1" || addr === "::ffff:7f00:1";
