@@ -37,13 +37,8 @@ android {
     }
 
     signingConfigs {
-        // 显式 debug 签名（AGP 内置 debug，仅覆写为标准 debug.keystore，避免重复 create 冲突）
-        getByName("debug").apply {
-            storeFile = file("${System.getProperty("user.home")}/.android/debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
-        }
+        // debug 签名不覆写：交给 AGP 默认（自动生成 ~/.android/debug.keystore，CI/本机均可）。
+        // 若在此显式指向该 keystore 路径，全新 runner 上文件不存在会导致 :app:validateSigningDebug 失败。
         if (hasReleaseSigning) {
             create("release") {
                 storeFile = file(releaseStoreFile)
@@ -55,9 +50,6 @@ android {
     }
 
     buildTypes {
-        debug {
-            signingConfig = signingConfigs.getByName("debug")
-        }
         release {
             isMinifyEnabled = true
             if (hasReleaseSigning) {
