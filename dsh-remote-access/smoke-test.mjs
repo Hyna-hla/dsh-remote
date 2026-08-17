@@ -772,6 +772,48 @@ test("M3 MCP 资源/提示词：resources/list + read / prompts/list + render（
   ctx.get = () => undefined;
 });
 
+test("M2 离线同步：POST /sync 批量 ACK + 非法 deviceId 400", async () => {
+  let r = await req("/api/remote-access/sync", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { deviceId: "dev-sync-1", events: [{ id: 1, type: "chat" }, { id: 2, type: "approval" }] },
+  });
+  assert.equal(r.body.ok, true);
+  assert.equal(r.body.results.length, 2);
+  assert.ok(r.body.results.every((x) => x.ok === true));
+
+  // deviceId 非白名单（路径穿越）→ 400
+  r = await req("/api/remote-access/sync", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { deviceId: "../evil", events: [] },
+  });
+  assert.equal(r.status, 400);
+});
+
+test("M2 离线同步：sync/pending 拉取 + ACK 清除", async () => {
+  // 手工写入该设备一条 server→device 待确认事件（模拟服务端入队）
+  const f = join(home, "remote-access", "sync", "dev-sync-2.json");
+  mkdirSync(join(home, "remote-access", "sync"), { recursive: true });
+  writeFileSync(f, JSON.stringify({ pending: [{ id: 101, type: "approval", payload: "问题升级" }] }), "utf8");
+
+  let r = await req("/api/remote-access/sync/pending?deviceId=dev-sync-2");
+  assert.equal(r.body.ok, true);
+  assert.equal(r.body.pending.length, 1);
+  assert.equal(r.body.pending[0].id, 101);
+
+  // ACK 清除
+  r = await req("/api/remote-access/sync", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: { deviceId: "dev-sync-2", events: [], acked: [101] },
+  });
+  assert.equal(r.body.ok, true);
+
+  r = await req("/api/remote-access/sync/pending?deviceId=dev-sync-2");
+  assert.equal(r.body.pending.length, 0);
+});
+
 test.after(() => {
   srv.close();
   rmSync(home, { recursive: true, force: true });

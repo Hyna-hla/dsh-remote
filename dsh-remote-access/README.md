@@ -55,6 +55,8 @@ dsh plugin --profile web add ./dsh-remote-access-2.4.1.tgz
 | POST | /api/remote-access/token/rotate | 轮换通道 token（M4：旧 token 即时失效，返回新 token） |
 | POST | /api/remote-access/token/revoke | 吊销 token + 清空配对表（M4：所有设备强制重新配对） |
 | GET | /api/remote-access/token/audit | 审计日志（M4：最近 50 条，rotate/revoke） |
+| POST | /api/remote-access/sync | 离线事件批量 ACK（M2：`{deviceId, events?, acked?}` → results，按设备隔离） |
+| GET | /api/remote-access/sync/pending?deviceId= | 拉取该设备待确认事件（M2，落盘 sync/&lt;deviceId&gt;.json） |
 | GET | /api/remote-access/fs/list?path= | 只读目录列举 |
 | GET | /api/remote-access/fs/read?path= | 只读文件预览（1MB 截断 + 二进制识别） |
 | GET | /api/remote-access/fs/stat?path= | 文件/目录元信息（M1：size/mtime/isFile/isDir） |
@@ -83,6 +85,11 @@ dsh plugin --profile web add ./dsh-remote-access-2.4.1.tgz
 
 - `mcp/resources/list`、`mcp/resources/read`、`mcp/prompts/list`、`mcp/prompts/render`：依约定从工具名（`mcp__<server>__*resource*/*prompt*`）聚合各 MCP 服务器的资源/提示词**能力**及其 schema。
 - ⚠️ **能力基事实**：上游 DSH 插件仅暴露 `ctx.tools.schemas()`（无连接态 MCP RPC），本 v1 返回的是**能力清册**（能力工具名 + schema），非真实资源枚举/渲染；真实拉取/渲染需 App/宿主侧发起 MCP 调用。
+
+## 离线同步（M2，插件侧）
+
+- `POST /api/remote-access/sync`：App 恢复联网后批量上报本地 outbox（`events`）并 ACK（`acked`）服务端待确认事件，按 `deviceId` 隔离；返回逐条 `results`。`deviceId` 白名单校验（防文件名路径穿越）。
+- `GET /api/remote-access/sync/pending?deviceId=`：拉取该设备待确认事件（落盘 `sync/<deviceId>.json`）。v1 语义：服务端产生的审批/问答等 Side→Device 事件先入 pending，App 处理后再 ACK 清除。
 
 ## 状态文件
 

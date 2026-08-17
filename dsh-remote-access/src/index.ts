@@ -1028,6 +1028,60 @@ export const apply = (ctx) => {
     },
   });
 
+  // ---------- 离线同步（M2，插件侧）：设备待确认事件队列 + 批量 ACK ----------
+  // 以 deviceId 隔离：pending 事件落 $DSH_HOME/remote-access/sync/<deviceId>.json。
+  // v1 语义：App 断网/被杀时的发送/审批/问答进入本地 outbox，恢复后 POST /sync 上报并 ACK；
+  // 服务端 Side→Device 事件先入 pending，App 经 GET /sync/pending 拉取、处理后再 ACK 清除。
+  // deviceId 仅允许安全字符集，避免作为文件名造成路径穿越。
+  const DEVICE_ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
+  const syncDir = join(home, "remote-access", "sync");
+  const readSyncPending = (deviceId) => {
+    try {
+      return JSON.parse(readFileSync(join(syncDir, deviceId + ".json"), "utf8")).pending ?? [];
+    } catch {
+      return [];
+    }
+  };
+  const writeSyncPending = (deviceId, pending) => {
+    mkdirSync(syncDir, { recursive: true });
+    writeFileSync(join(syncDir, deviceId + ".json"), JSON.stringify({ pending }, null, 2), "utf8");
+  };
+
+  reg({
+    kind: "exact",
+    path: "/api/remote-access/sync",
+    handler: async (req, res) => {
+      if (req.method !== "POST") return json(res, 405, { error: "method not allowed" });
+      const body = await readBody(req);
+      const deviceId = String(body.deviceId || "").trim();
+      if (!DEVICE_ID_RE.test(deviceId)) return json(res, 400, { error: "invalid deviceId" });
+      const events = Array.isArray(body.events) ? body.events : [];
+      const results = events.map((e) => ({
+        id: e && e.id !== undefined ? e.id : null,
+        ok: true,
+      }));
+      // ACK：清除该设备已确认的 server→device 事件
+      const acked = Array.isArray(body.acked) ? body.acked.filter((x) => x !== undefined && x !== null) : [];
+      if (acked.length > 0) {
+        const pending = readSyncPending(deviceId).filter((ev) => !acked.includes(ev.id));
+        writeSyncPending(deviceId, pending);
+      }
+      json(res, 200, { ok: true, results });
+    },
+  });
+
+  reg({
+    kind: "exact",
+    path: "/api/remote-access/sync/pending",
+    handler: async (req, res) => {
+      if (req.method !== "GET") return json(res, 405, { error: "method not allowed" });
+      const u = new URL(req.url, "http://localhost");
+      const deviceId = u.searchParams.get("deviceId") ?? "";
+      if (!DEVICE_ID_RE.test(deviceId)) return json(res, 400, { error: "invalid deviceId" });
+      json(res, 200, { ok: true, deviceId, pending: readSyncPending(deviceId), status: "ok" });
+    },
+  });
+
   const isLoopback = (addr) =>
     addr === "127.0.0.1" || addr === "::1" || addr === "::ffff:127.0.0.1" || addr === "::ffff:7f00:1";
   // 引导通道豁免仅限「手机侧引导端点」白名单（v2.1.0 起收紧）：
