@@ -14,6 +14,12 @@ val localProps = Properties().apply {
 val releaseStoreFile = localProps.getProperty("release.storeFile")
 val hasReleaseSigning = !releaseStoreFile.isNullOrBlank()
 
+// 版本号统管：由根 gradle.properties 提供（避免散落硬编码，CI 可按 tag 覆盖）
+val dsvVersionName =
+    (project.findProperty("DSH_VERSION_NAME") as String?)?.takeIf { it.isNotBlank() } ?: "1.8.1"
+val dsvVersionCode =
+    ((project.findProperty("DSH_VERSION_CODE") as String?)?.takeIf { it.isNotBlank() } ?: "60").toInt()
+
 android {
     namespace = "com.dsh.mobile"
     compileSdk = 36
@@ -22,8 +28,8 @@ android {
         applicationId = "com.dsh.mobile"
         minSdk = 29
         targetSdk = 36
-        versionCode = 60
-        versionName = "1.8.1"
+        versionCode = dsvVersionCode
+        versionName = dsvVersionName
 
         vectorDrawables {
             useSupportLibrary = true
@@ -31,6 +37,13 @@ android {
     }
 
     signingConfigs {
+        // 显式 debug 签名（标准 debug.keystore，可复现、CI 默认态稳定）
+        create("debug") {
+            storeFile = file("${System.getProperty("user.home")}/.android/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
         if (hasReleaseSigning) {
             create("release") {
                 storeFile = file(releaseStoreFile)
@@ -42,6 +55,9 @@ android {
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = true
             if (hasReleaseSigning) {

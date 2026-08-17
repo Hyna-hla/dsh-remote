@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  plugin:
+    name: Plugin (dsh-remote-access)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dsh-remote-access
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: dsh-remote-access/package-lock.json
+      - name: Install deps
+        run: npm ci
+      - name: Build (src → lib)
+        run: npm run build
+      - name: Test on built output (smoke 12/12)
+        run: npm test
+      # prepack 生命周期会再跑 typecheck+build+test 并产出 tgz
+      - name: Pack
+        run: npm pack
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-remote-access-tgz
+          path: dsh-remote-access/dsh-remote-access-*.tgz
+          if-no-files-found: error
+
+  android:
+    name: Android (App)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v3
+      - name: Assemble debug APK
+        run: ./gradlew assembleDebug --no-daemon --console=plain
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
