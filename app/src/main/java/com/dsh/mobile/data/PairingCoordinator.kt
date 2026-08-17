@@ -86,10 +86,10 @@ class PairingCoordinator(
             return PairCodeResult(true, null)
         }
         return PairCodeResult(false, when (res.error) {
-            "no_active_code" -> "PC 端还没有生成配对码：DSH 设置 → 远程控制 → 生成配对码"
-            "code_locked" -> "配对码已锁定（错误次数过多），请在 PC 端重新生成"
+            "no_active_code" -> "PC 端会自动生成配对码：打开 DSH 设置 → 远程控制 查看当前码"
+            "code_locked" -> "配对码已锁定（错误次数过多），PC 端会自动刷新，刷新后重试"
             "code_mismatch" -> "配对码不正确" + (res.attemptsLeft?.let { "（还剩 $it 次机会）" } ?: "")
-            "plugin_old" -> "PC 插件版本过旧（需 v2.1.0+），可改用「等待 PC 确认」"
+            "plugin_old" -> "PC 插件版本过旧（需 v2.4.0+），可改用「等待 PC 确认」"
             else -> "配对失败" + (res.error?.let { "：$it" } ?: "")
         })
     }

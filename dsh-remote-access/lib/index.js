@@ -1,4 +1,4 @@
-// dsh-remote-access v2.4.0 — 远程互信认证（配对码 + 确认框 + 公网域名白名单）+ 只读辅助路由
+// dsh-remote-access v2.4.1 — 远程互信认证（配对码 + 确认框 + 公网域名白名单）+ 只读辅助路由
 // 保留：移动端配对握手（pair/*）、主机设备信息（device/info）、只读目录列举（fs/list）、
 //       只读文件预览（fs/read）、MCP 枚举（mcp/list）、远程通道 Bearer token 鉴权（/api 全量门禁，含 WebSocket）。
 // 移除：微信 iLink 桥（lib/ilink.js + lib/bridge.js）、cpolar 隧道供应（lib/cpolar.js），
@@ -386,9 +386,10 @@ export const apply = (ctx) => {
   });
 
   // ---------- 配对码（v2.1.0）：PC 生成 → 手机输入 → 立即配对并下发 token ----------
-  // 安全属性：一次性（验证成功即作废）；10 分钟过期；最多 5 次错误尝试（超限作废）；
-  // 常量时间比较防时序侧信道；verify 全局 1s 节流防高速爆破；
-  // generate 不豁免（仅本机设置页可达），verify 豁免（未配对手机的引导通道）。
+  // 安全属性：一次性（验证成功即作废）；10 分钟过期；最多 5 次错误尝试（超限作废，此后新码仅本机
+  // /current 可见，远端无法继续爆破）；常量时间比较防时序侧信道；
+  // generate/current 不豁免（仅本机设置页可达），verify 豁免（未配对手机的引导通道）。
+  // 说明：这里不设时间节流——6 位码 + 5 次即锁已足以防爆破，且时间节流会误伤正常连打重试。
   const CODE_TTL_MS = 10 * 60 * 1000;
   const CODE_MAX_ATTEMPTS = 5;
   let pairCode = null; // { code, at, expiresAt, attempts }

@@ -201,7 +201,11 @@ window.__ModuleLoader__.load({
             if (prev <= 1) {
               if (timer.current) clearInterval(timer.current);
               timer.current = null;
-              setPc(null);
+              // 服务端 ensureActiveCode 会自动生成新码：倒计时归零后自动拉当前码重新展示，
+              // 保证设置页「始终有码可填」，不用手动刷新/点生成。
+              fetchJson("/api/remote-access/pair/code/current")
+                .then(function (nr) { if (nr && nr.ok && nr.code) arm(nr); })
+                .catch(function () { setPc(null); });
               return 0;
             }
             return prev - 1;
