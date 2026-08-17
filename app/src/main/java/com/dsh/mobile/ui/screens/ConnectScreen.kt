@@ -220,6 +220,11 @@ fun ConnectScreen(
                                     maxLines = 1,
                                 )
                                 Spacer(Modifier.weight(1f))
+                                if (connState !is DshConnection.State.Connected &&
+                                    connState !is DshConnection.State.Connecting
+                                ) {
+                                    TextButton(onClick = { connectTo(p) }) { Text("连接") }
+                                }
                                 TextButton(onClick = { onEditHost(p.id) }) { Text("编辑") }
                             }
                             Text(
@@ -268,7 +273,14 @@ fun ConnectScreen(
                         colors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.surfaceVariant,
                         ),
-                        onClick = { if (!isActive) connectTo(p) },
+                        onClick = {
+                            // 活跃主机断开/失败态（如退出重进后自动连接未成）时，点卡片即可重连
+                            if (!isActive || (
+                                    connState !is DshConnection.State.Connected &&
+                                        connState !is DshConnection.State.Connecting
+                                    )
+                            ) connectTo(p)
+                        },
                     ) {
                         Row(
                             Modifier.padding(start = 14.dp, top = 14.dp, bottom = 14.dp, end = 4.dp),

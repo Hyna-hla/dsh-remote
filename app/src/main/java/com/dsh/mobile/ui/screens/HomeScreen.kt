@@ -114,7 +114,7 @@ fun HomeScreen(
 
     // —— 浏览 PC 目录（任选目录作工作区，不限于 DSH 已划定的）——
     var browseOpen by remember { mutableStateOf(false) }
-    var browsePath by remember { mutableStateOf("C:\\") }
+    var browsePath by remember { mutableStateOf("/") } // "/" = 计算机根（盘符列表）
     var browseListing by remember { mutableStateOf<DirListing?>(null) }
     var browseLoading by remember { mutableStateOf(false) }
     var browseError by remember { mutableStateOf<String?>(null) }
@@ -146,7 +146,19 @@ fun HomeScreen(
         browseError = null
         scope.launch {
             try {
-                val listing = connection.listDirectory(path)
+                val listing = if (path == "/") {
+                    // 计算机根：直接走插件 fs/list 盘符列表（host RPC 无跨盘根语义）
+                    val fs = connection.fsList("/")
+                        ?: throw Exception("无法列出盘符（需 PC 端插件 dsh-remote-access ≥ v1.3.1）")
+                    DirListing(
+                        path = "/",
+                        crumbs = listOf(Crumb("计算机", "/")),
+                        entries = fs.dirs.map { DirEntry(it, it, false) },
+                        truncated = false,
+                    )
+                } else {
+                    connection.listDirectory(path)
+                }
                 browsePath = listing.path.ifBlank { path }
                 browseListing = listing
             } catch (e: Exception) {
@@ -162,8 +174,9 @@ fun HomeScreen(
     }
 
     fun browseUp() {
+        if (browsePath == "/") return // 已在计算机根
         var p = browsePath.trimEnd('\\')
-        if (p.length <= 3) return // 盘符根（如 C:\）无上级
+        if (p.length <= 3) { loadBrowseDir("/"); return } // 盘符根（如 C:\）上级 = 计算机根（跨盘入口）
         val idx = p.lastIndexOf('\\')
         if (idx < 0) return
         val parent = p.substring(0, idx + 1)
@@ -344,8 +357,11 @@ fun HomeScreen(
                     onBrowseNavigate = { loadBrowseDir(it) },
                     onBrowseBack = { browseOpen = false },
                     onBrowsePick = {
-                        // 选中当前浏览目录 → 创建为工作区并选中
+                        // 选中当前浏览目录 → 创建为工作区并选中（计算机根不可选）
                         val path = browsePath.trimEnd('\\')
+                        if (path == "/") {
+                            browseError = "请先进入某个盘符下的具体目录"
+                        } else {
                         val title = path.substringAfterLast('\\')
                         wsBusy = true
                         scope.launch {
@@ -359,6 +375,7 @@ fun HomeScreen(
                             } finally {
                                 wsBusy = false
                             }
+                        }
                         }
                     },
                     onPickDefault = {
