@@ -35,19 +35,26 @@ class PairingCoordinator(
     fun start() {
         scope.launch {
             connection.state.collect { st ->
-                if (st !is DshConnection.State.Connected) {
+                val profile = connection.currentProfile() ?: run {
+                    // 无活跃连接目标：清除待配对状态与握手标记
                     handshakingFor = null
                     _awaitingDecision.value = null
                     return@collect
                 }
-                val profile = connection.currentProfile() ?: return@collect
-                if (profile.paired) {
-                    refreshPaired(profile)
-                    return@collect
+                if (st is DshConnection.State.Connected) {
+                    if (profile.paired) {
+                        refreshPaired(profile)
+                    } else if (handshakingFor != profile.id) {
+                        // 未配对：等待 UI 决策（配对码优先）。不再因为连接抖动清掉，
+                        // 保证配对码输入框能稳定停留、真正可输入（修复「闪一下就消失/无法输码」）。
+                        handshakingFor = null
+                        _awaitingDecision.value = profile.id
+                    }
+                } else {
+                    // 连接抖动（Connecting/Error/Disconnected）：只复位握手协程标记，
+                    // 保留 _awaitingDecision——配对框继续可用，配对成功 / 显式断开时再清除。
+                    handshakingFor = null
                 }
-                if (handshakingFor == profile.id) return@collect
-                // 未配对：等待 UI 决策（配对码优先，不再自动弹 PC 确认框）
-                _awaitingDecision.value = profile.id
             }
         }
     }

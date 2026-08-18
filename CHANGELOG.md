@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 2026-08-18 修复：首次配对弹框闪退 + 公网隧道 401（v2.5.1 App / 插件）
+
+- **症状**：手机首次连接后，配对码输入框只闪一下就消失，来不及输入；未配对状态下会话内容一直 401。
+- **根因**：`PairingCoordinator` 把 `awaitingDecision`（驱动配对弹框）绑定在 `connection.state == Connected` 上，任何连接抖动（Connecting/Error/Disconnected）都会把它清空 → 弹框瞬间消失；未配对 = 无 channel token → `/api`（会话、events.mux）全部 401。
+- **修复**：待配对意图不再随连接抖动清除——只要当前活跃主机未配对，配对码输入框就稳定停留可输入；配对成功 / 显式断开时才清除。配套的 cpolar 公网隧道域名白名单自动绑定由机内 watcher 处理。
+- **版本**：App `versionName 2.5.1 / versionCode 61`，插件 `2.5.1`。
+
 ## 2026-08-18 修复：App 更新提示误报（无限推新版）
 
 - **症状**：App 无限提示"发现新版本"，且版本显示 1.8.1。
