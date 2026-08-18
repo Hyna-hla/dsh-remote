@@ -99,6 +99,12 @@ class DshConnection(private val appContext: Context? = null) {
     /** 当前连接使用的 profile（connect 时同步设置、disconnect 清空）；配对等按已连接主机取用 */
     fun currentProfile(): HostProfile? = connectedProfile
 
+    /** 配对状态变化后同步内存中的活跃 profile（paired/token 热生效，导航据此判断是否可进首页） */
+    @Synchronized
+    fun syncCurrentProfile(updated: HostProfile) {
+        if (connectedProfile?.id == updated.id) connectedProfile = updated
+    }
+
     // ────────────────────────── 连接管理 ──────────────────────────
 
     @Synchronized
