@@ -43,3 +43,60 @@ private fun JsonElement.stringOrNull(): String? = when (this) {
     is JsonPrimitive -> if (isString) content else null
     else -> null
 }
+
+// ---------- M3：MCP 资源/提示词能力清册（插件 mcp/resources|prompts list） ----------
+
+/** 插件 mcp/resources/list 单个资源能力：uri 主键 */
+data class McpResource(val uri: String, val name: String, val mimeType: String, val description: String)
+
+/** 插件 mcp/resources/list 单个 MCP 服务 */
+data class McpResourceServer(val serverName: String, val resources: List<McpResource>)
+
+/** 插件 mcp/prompts/list 单条提示词（argumentsSchema 为可选 JSON schema 原始元素） */
+data class McpPrompt(val name: String, val description: String, val argumentsSchema: JsonElement?)
+
+/** 插件 mcp/prompts/list 单个 MCP 服务 */
+data class McpPromptServer(val serverName: String, val prompts: List<McpPrompt>)
+
+/** 解析 {ok, servers:[{serverName, resources:[{uri,name,mimeType,description}]}]} → 资源能力清册 */
+internal fun parseMcpResources(data: JsonElement?): List<McpResourceServer> {
+    if (data == null || data is JsonNull) return emptyList()
+    val obj = data as? JsonObject ?: return emptyList()
+    if (obj["ok"]?.jsonPrimitiveOrNull()?.booleanOrNull == false) return emptyList()
+    val arr = obj["servers"] as? JsonArray ?: return emptyList()
+    return arr.mapNotNull { el ->
+        val o = el as? JsonObject ?: return@mapNotNull null
+        val serverName = o["serverName"]?.stringOrNull() ?: return@mapNotNull null
+        val resources = (o["resources"] as? JsonArray)?.mapNotNull { re ->
+            val ro = re as? JsonObject ?: return@mapNotNull null
+            McpResource(
+                uri = ro["uri"]?.stringOrNull() ?: "",
+                name = ro["name"]?.stringOrNull() ?: "",
+                mimeType = ro["mimeType"]?.stringOrNull() ?: "text/plain",
+                description = ro["description"]?.stringOrNull() ?: "",
+            )
+        } ?: emptyList()
+        McpResourceServer(serverName, resources)
+    }
+}
+
+/** 解析 {ok, servers:[{serverName, prompts:[{name,description,argumentsSchema}]}]} → 提示词能力清册 */
+internal fun parseMcpPrompts(data: JsonElement?): List<McpPromptServer> {
+    if (data == null || data is JsonNull) return emptyList()
+    val obj = data as? JsonObject ?: return emptyList()
+    if (obj["ok"]?.jsonPrimitiveOrNull()?.booleanOrNull == false) return emptyList()
+    val arr = obj["servers"] as? JsonArray ?: return emptyList()
+    return arr.mapNotNull { el ->
+        val o = el as? JsonObject ?: return@mapNotNull null
+        val serverName = o["serverName"]?.stringOrNull() ?: return@mapNotNull null
+        val prompts = (o["prompts"] as? JsonArray)?.mapNotNull { pe ->
+            val po = pe as? JsonObject ?: return@mapNotNull null
+            McpPrompt(
+                name = po["name"]?.stringOrNull() ?: "",
+                description = po["description"]?.stringOrNull() ?: "",
+                argumentsSchema = po["argumentsSchema"],
+            )
+        } ?: emptyList()
+        McpPromptServer(serverName, prompts)
+    }
+}

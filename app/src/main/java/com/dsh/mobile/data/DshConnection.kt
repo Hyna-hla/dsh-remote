@@ -755,6 +755,55 @@ class DshConnection(private val appContext: Context? = null) {
         }
     }
 
+    /** GET 封装：远端只读辅助路由 → 响应体或 ""（失败/非 200） */
+    private suspend fun mcpGetText(path: String): String = withContext(Dispatchers.IO) {
+        val request = Request.Builder().url("$baseUrl$path").get().build()
+        unaryClient.newCall(request).execute().use { resp ->
+            if (!resp.isSuccessful) "" else resp.body?.string().orEmpty()
+        }
+    }
+
+    /** 插件 mcp/resources/list（M3）：MCP 资源能力清册；失败/不可用 → 空列表 */
+    suspend fun mcpResources(): List<McpResourceServer> {
+        return try {
+            val text = mcpGetText("/api/remote-access/mcp/resources/list")
+            if (text.isBlank()) emptyList() else parseMcpResources(json.parseToJsonElement(text))
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    /** 插件 mcp/prompts/list（M3）：MCP 提示词能力清册；失败/不可用 → 空列表 */
+    suspend fun mcpPrompts(): List<McpPromptServer> {
+        return try {
+            val text = mcpGetText("/api/remote-access/mcp/prompts/list")
+            if (text.isBlank()) emptyList() else parseMcpPrompts(json.parseToJsonElement(text))
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    /** 渲染 MCP 提示词（POST /mcp/prompts/render {name, arguments}）→ 可插入消息(best_effort)；失败 → null */
+    suspend fun mcpPromptRender(name: String, arguments: Map<String, String>?): JsonArray? {
+        return try {
+            val body = JSONObject().put("name", name)
+            arguments?.let { body.put("arguments", JSONObject(it)) }
+            val text = withContext(Dispatchers.IO) {
+                val request = Request.Builder()
+                    .url("$baseUrl/api/remote-access/mcp/prompts/render")
+                    .post(body.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+                unaryClient.newCall(request).execute().use { resp ->
+                    if (!resp.isSuccessful) "" else resp.body?.string().orEmpty()
+                }
+            }
+            if (text.isBlank()) null
+            else (json.parseToJsonElement(text) as? JsonObject)?.get("messages") as? JsonArray
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     /**
      * dsh-encrypt 保险库状态（POST /api/credentials.status，与 web 端同一路由）。
      * 返回 null = 未连接 / PC 端未装 dsh-encrypt（404）/ 响应不可解析 → UI 显示「不可用」。

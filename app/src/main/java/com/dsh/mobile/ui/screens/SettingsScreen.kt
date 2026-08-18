@@ -36,6 +36,10 @@ import com.dsh.mobile.data.ApkInstaller
 import com.dsh.mobile.data.AppearanceConfig
 import com.dsh.mobile.data.DshConnection
 import com.dsh.mobile.data.HttpPairingRpc
+import com.dsh.mobile.data.McpPrompt
+import com.dsh.mobile.data.McpPromptServer
+import com.dsh.mobile.data.McpResource
+import com.dsh.mobile.data.McpResourceServer
 import com.dsh.mobile.data.McpServer
 import com.dsh.mobile.data.OkHttpClientFactory
 import com.dsh.mobile.data.ReleaseInfo
@@ -895,6 +899,41 @@ fun SettingsScreen(
                                 )
                             }
                         }
+                    }
+                }
+            }
+
+            Text("MCP 资源 / 提示词（M3）", style = MaterialTheme.typography.titleMedium)
+            Card(modifier = Modifier.fillMaxWidth()) {
+                val connected = connState is DshConnection.State.Connected
+                var resList by remember { mutableStateOf<List<McpResourceServer>?>(null) }
+                var promList by remember { mutableStateOf<List<McpPromptServer>?>(null) }
+                LaunchedEffect(connected) {
+                    if (connected) {
+                        resList = connection.mcpResources()
+                        promList = connection.mcpPrompts()
+                    } else {
+                        resList = emptyList(); promList = emptyList()
+                    }
+                }
+                val resources = resList ?: emptyList()
+                val prompts = promList ?: emptyList()
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (!connected) {
+                        Text("无", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        val resText = resources.joinToString("\n") { rs ->
+                            rs.resources.joinToString("\n") { x ->
+                                "${rs.serverName}: ${x.name}" + if (x.description.isNotBlank()) " — ${x.description}" else ""
+                            }
+                        }.ifBlank { "无资源能力" }
+                        Text(resText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        val promText = prompts.joinToString("\n") { ps ->
+                            ps.prompts.joinToString("\n") { x ->
+                                "${ps.serverName}: ${x.name}" + if (x.description.isNotBlank()) " — ${x.description}" else ""
+                            }
+                        }.ifBlank { "无提示词能力" }
+                        Text(promText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
