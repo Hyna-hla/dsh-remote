@@ -79,12 +79,14 @@ class PairingCoordinator(
             }
             // token 已热生效，device/info 可通过鉴权
             val info = runCatching { rpc.deviceInfo() }.getOrNull()
-            settingsStore.upsertProfile(profile.copy(
+            val updated = profile.copy(
                 paired = true,
                 channelToken = res.token ?: profile.channelToken,
                 deviceModel = info?.model?.takeIf { it.isNotBlank() } ?: profile.deviceModel,
                 deviceMac = info?.mac?.takeIf { it.isNotBlank() } ?: profile.deviceMac,
-            ))
+            )
+            settingsStore.upsertProfile(updated)
+            connection.syncCurrentProfile(updated)
             _awaitingDecision.value = null
             _events.tryEmit(
                 if (info?.model?.isNotBlank() == true) "配对完成，已记录设备：${info.model}"
@@ -132,14 +134,14 @@ class PairingCoordinator(
                 }
                 // 首次连接：抓取主机机型与 MAC 写入设备记录（token 已热生效，device/info 可通过鉴权）
                 val info = runCatching { rpc.deviceInfo() }.getOrNull()
-                settingsStore.upsertProfile(
-                    profile.copy(
-                        paired = true,
-                        channelToken = tok ?: profile.channelToken,
-                        deviceModel = info?.model?.takeIf { it.isNotBlank() } ?: profile.deviceModel,
-                        deviceMac = info?.mac?.takeIf { it.isNotBlank() } ?: profile.deviceMac,
-                    )
+                val updated = profile.copy(
+                    paired = true,
+                    channelToken = tok ?: profile.channelToken,
+                    deviceModel = info?.model?.takeIf { it.isNotBlank() } ?: profile.deviceModel,
+                    deviceMac = info?.mac?.takeIf { it.isNotBlank() } ?: profile.deviceMac,
                 )
+                settingsStore.upsertProfile(updated)
+                connection.syncCurrentProfile(updated)
                 _awaitingDecision.value = null
                 when {
                     !tok.isNullOrBlank() -> _events.tryEmit(
@@ -180,13 +182,17 @@ class PairingCoordinator(
             still == null -> return
             !still.paired -> {
                 // 已被 PC 撤销：重新等待配对决策（配对码优先）
-                settingsStore.upsertProfile(profile.copy(paired = false))
+                val revoked = profile.copy(paired = false)
+                settingsStore.upsertProfile(revoked)
+                connection.syncCurrentProfile(revoked)
                 _awaitingDecision.value = profile.id
             }
             else -> {
                 // 已配对：顺带刷新通道 token（PC 端重生成/本机丢失时静默补齐）
                 still.token?.takeIf { it.isNotBlank() && it != profile.channelToken }?.let { tok ->
-                    settingsStore.upsertProfile(profile.copy(channelToken = tok))
+                    val refreshed = profile.copy(channelToken = tok)
+                    settingsStore.upsertProfile(refreshed)
+                    connection.syncCurrentProfile(refreshed)
                     OkHttpClientFactory.ChannelTokenRegistry.set(profile.id, tok)
                 }
                 // 重连设备校验：MAC 不匹配（IP 被回收到他人主机）→ 断开
